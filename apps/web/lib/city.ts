@@ -104,11 +104,11 @@ export type CameraShot = { eye: [number, number, number]; aim: [number, number, 
 
 /** Inside the doorway, looking at the back wall. Plots stay outside the fence. */
 export const INTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": { eye: [-36, 2.5, 21], aim: [-42, 2.0, 11] },
-  "trading-village": { eye: [50, 2.6, 19], aim: [46, 1.8, 8] },
-  "war-room": { eye: [16, 2.6, 45], aim: [12, 1.8, 34] },
-  "skin-forge": { eye: [-34, 2.4, -19], aim: [-38, 1.5, -29] },
-  "cup-stadium": { eye: [-2, 5.2, -30], aim: [-8, 2.0, -46] },
+  "vault-quarter": { eye: [-40.6, 1.72, 24.4], aim: [-42.2, 1.3, 16.6] },
+  "trading-village": { eye: [47.4, 1.72, 20.4], aim: [45.8, 1.3, 12.6] },
+  "war-room": { eye: [13.4, 1.72, 46.4], aim: [11.8, 1.3, 38.6] },
+  "skin-forge": { eye: [-36.6, 1.72, -17.6], aim: [-38.2, 1.2, -25.4] },
+  "cup-stadium": { eye: [-6.6, 1.8, -27.6], aim: [-8.2, 1.25, -35.4] },
   "launch-pier": { eye: [58, 5, -16], aim: [50, 2, -28] },
   "card-club": { eye: [-46, 5, 8], aim: [-54, 2, -2] },
   "oracle-plaza": { eye: [28, 5, 0], aim: [20, 2, -10] },

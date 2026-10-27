@@ -15,6 +15,7 @@ import {
   ToneMappingEffect,
   ToneMappingMode,
 } from "postprocessing";
+import { Interiors } from "@/components/Interiors";
 import { Nature } from "@/components/Nature";
 import { World } from "@/components/World";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -175,7 +176,9 @@ function Smoke({ position }: { position: [number, number, number] }) {
   );
 }
 
-function Kits({ onPick }: { onPick: (district: District) => void }) {
+const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge"]);
+
+function Kits({ onPick, focusId, frameMode }: { onPick: (district: District) => void; focusId: string | null; frameMode: "in" | "out" }) {
   const gltf = useGLTF("/models/kits.glb", false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
@@ -202,6 +205,13 @@ function Kits({ onPick }: { onPick: (district: District) => void }) {
     });
     return cloned;
   }, [gltf.scene]);
+  useLayoutEffect(() => {
+    scene.traverse((node) => {
+      const id = node.userData.district as string | undefined;
+      if (!id) return;
+      node.visible = !(frameMode === "in" && focusId === id && INTERIOR_IDS.has(id));
+    });
+  }, [scene, focusId, frameMode]);
   return (
     <primitive
       object={scene}
@@ -671,7 +681,8 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <Nature />
-      <Kits onPick={onPick} />
+      <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} />
+      <Interiors focusId={focusId} frameMode={frameMode} />
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
