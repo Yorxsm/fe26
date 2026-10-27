@@ -109,6 +109,11 @@ a:hover { color: var(--ink); }
   font-weight: 500;
 }
 
+.ribbon a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
 nav { display: flex; gap: var(--space-md); flex-wrap: wrap; }
 nav a { color: var(--ink-secondary); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
 

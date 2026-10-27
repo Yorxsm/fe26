@@ -52,7 +52,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a className="brand" href="/">
                 <Logo variant="nav" />
               </a>
-              <p className="ribbon">Testnet only · fe2vi.space · Caps are platform law</p>
+              <p className="ribbon">
+                Testnet only · fe2vi.space · Caps are platform law · <a href="/about">Credits</a>
+              </p>
             </div>
             <SiteNav />
           </header>

@@ -1,4 +1,4 @@
-"""Original arena interiors. Primitives only: no Kenney kits, no paid assets.
+"""Original arena shells. Props are added by dress_interiors.py.
 
 Each room is one mesh per PBR material so the web draws a handful of calls.
 Blender Z is up. Export is glTF Y-up, so three.js gets (x, blender z, -blender y).

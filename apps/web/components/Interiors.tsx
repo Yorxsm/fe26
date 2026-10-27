@@ -82,10 +82,12 @@ function Screen({
   position,
   lines,
   size = [3.4, 1.92],
+  rotation = [0, 0, 0],
 }: {
   position: [number, number, number];
   lines: string[];
   size?: [number, number];
+  rotation?: [number, number, number];
 }) {
   const key = lines.join("|");
   const [width, height] = size;
@@ -124,7 +126,7 @@ function Screen({
     // key is the line text. Repaint when it changes, including after the font load.
   }, [key, map, compact]);
   return (
-    <group position={position}>
+    <group position={position} rotation={rotation}>
       <mesh position={[0, 0, -0.06]} castShadow>
         <boxGeometry args={[width + 0.18, height + 0.18, 0.08]} />
         <meshStandardMaterial color="#2c2e32" metalness={0.78} roughness={0.38} />
@@ -195,8 +197,12 @@ function RoomBoards({ id }: { id: string }) {
   if (id === "skin-forge") {
     return (
       <>
-        <Screen position={[-3.5, 2.35, -5.84]} size={[4.6, 2.3]} lines={["HALL", `NEXT  ${countdown}`, "VAULT  HEIST", "FLOOR  PERPS", "WAR  SANDBOX"]} />
-        <Screen position={[3.6, 2.25, -5.84]} size={[4.2, 2.1]} lines={rankLines} />
+        <Screen position={[-2.7, 3.42, -5.82]} size={[4.8, 1.4]} lines={["HALL", `NEXT  ${countdown}`, "VAULT  HEIST", "FLOOR  PERPS", "WAR  SANDBOX"]} />
+        <Screen position={[2.8, 3.42, -5.82]} size={[4.6, 1.35]} lines={rankLines} />
+        <Screen position={[-4.7, 2.48, -5.78]} size={[1.25, 0.42]} lines={["VAULT"]} />
+        <Screen position={[-1.6, 2.48, -5.78]} size={[1.25, 0.42]} lines={["CUP"]} />
+        <Screen position={[1.6, 2.48, -5.78]} size={[1.25, 0.42]} lines={["FLOOR"]} />
+        <Screen position={[4.7, 2.48, -5.78]} size={[1.25, 0.42]} lines={["WAR"]} />
       </>
     );
   }
@@ -208,9 +214,9 @@ function SeatCrowd() {
   const heads = useRef<THREE.InstancedMesh>(null);
   const spots = useMemo(() => {
     const list: Array<[number, number, number]> = [];
-    for (let row = 0; row < 4; row += 1) {
-      for (let seat = 0; seat < 10; seat += 1) {
-        list.push([-4.6 + seat * 1.02, 0.55 + row * 0.28, 2.55 + row * 0.72]);
+    for (let row = 0; row < 3; row += 1) {
+      for (let seat = 0; seat < 8; seat += 1) {
+        list.push([-2.8 + seat * 0.8, 0.58, 0.4 + row * 0.75]);
       }
     }
     return list;
@@ -255,7 +261,12 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
           <pointLight key={index} position={[x, y, z]} color="#e7b07a" intensity={22} distance={9} decay={2} />
         ))}
         <RoomBoards id={focusId} />
-        {focusId === "cup-stadium" ? <SeatCrowd /> : null}
+        {focusId === "cup-stadium" ? (
+          <>
+            <pointLight position={[0, 2.8, 0.6]} color="#e7b07a" intensity={36} distance={14} decay={2} />
+            <SeatCrowd />
+          </>
+        ) : null}
       </group>
     </Suspense>
   );

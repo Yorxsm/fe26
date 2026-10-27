@@ -2,7 +2,7 @@
 
 Reference plates live in `docs/concept/` (`city-concept.jpg`, `agent-sheet.jpg`, `fe2vi-logo-400.png`, `fe2vi-x-banner-1500x500.png`). They set the station layout, the ingot roles, and the mark. The meshes are not traced from those plates.
 
-The station, rooms, and agents under `apps/web/public/models/` are original meshes. They are produced by `tools/blender/build_station.py` and then meshopt-compressed. They are not traced from a character pack and they are not imported from the CC0 kits below. The mark at `apps/web/public/fe2vi-logo-400.png` is also `app/icon.png` and the Open Graph image.
+The station shells, the agents, and the mark are original. They are not traced from a character pack. Interior rooms keep an original shell (walls, vault door, lasers, columns) and add CC0 props from `tools/blender/dress_interiors.py`. The mark at `apps/web/public/fe2vi-logo-400.png` is also `app/icon.png` and the Open Graph image.
 
 Rebuild from the repo root:
 
@@ -20,11 +20,11 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 | `apps/web/public/models/agent.glb` | 382064 | Six original ingot bodies (Safecracker, Trader, Hacker, Auditor, Builder, Scout) on one rig with idle, walk, and celebrate. Not a downloaded character. |
 | `apps/web/public/models/nature.glb` | 86592 | Kenney round and detailed trees, plus Quaternius bushes, flowers, rocks, grass, and a plant. Instanced. Cone trees in `station.glb` stay hidden. |
 | `apps/web/public/models/kits.glb` | 1679132 | Kenney building shells plus stands, floodlights, flags, string lights, fences, scaffolding, cones, a chimney, a roof dish, and a Poly Haven crane. WebP textures, meshopt. The block shells in `station.glb` are hidden. |
-| `apps/web/public/models/interior-vault.glb` | 81648 | Vault room: desk, chair, shelves, books, lamp, plant, crate, metal door, gold bars, rug, poster. Loaded only while the vault interior shot is active. |
-| `apps/web/public/models/interior-market.glb` | 68888 | Market room: stall tables, goods, shelves, lamp, plants, rug, poster. |
-| `apps/web/public/models/interior-war.glb` | 82312 | War room: desk, chair, screen, laptop, keyboard, shelves, books, lamp, plant, rug, poster. |
-| `apps/web/public/models/interior-forge.glb` | 52784 | Forge room: anvil, hammer, axe, barrel, crates, lamp, poster. |
-| `apps/web/public/models/interior-stadium.glb` | 45360 | Stadium locker room: bench, cabinet, screen, side table, plant, crate, rug. |
+| `apps/web/public/models/interior-vault.glb` | 221660 | Vault: original door and lasers, instanced gold bars on pallets, deposit boxes, security desk, cameras, cart, crates. Loaded only while that interior camera is active. |
+| `apps/web/public/models/interior-market.glb` | 196600 | Trading floor: desks, monitors, chairs, racks, coffee bar, plants. |
+| `apps/web/public/models/interior-war.glb` | 228960 | War room: racks, consoles, holo table, cables, flag pedestals. |
+| `apps/web/public/models/interior-forge.glb` | 88724 | Lobby: reception, sofas, benches, planters, door frames, mannequin alcove. |
+| `apps/web/public/models/interior-stadium.glb` | 66392 | Stadium: instanced benches, barriers, podium, trophy, spotlights, flags. |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 
 Both GLBs use `EXT_meshopt_compression` (plus `KHR_mesh_quantization` and `KHR_materials_emissive_strength`). Draco is not used: this Blender build has no Draco encoder, and a CDN decoder is the wrong trade. The scene loads them with three's `MeshoptDecoder`.
@@ -68,9 +68,17 @@ Sound is synthesized in `apps/web/lib/audio.ts`. There is no sample file. A dist
 
 `kits.glb` is assembled by `tools/blender/import_kits.py`. Buildings and the market awnings are [City Kit (Commercial)](https://kenney.nl/assets/city-kit-commercial) 2.1 by Kenney, [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/): building-j (bank) with detail-overhang, building-n and detail-awning (market), building-skyscraper-d (war room), building-e (forge), low-detail-building-a/b/c (construction plots). Stadium stands, floodlights, and flags are [Racing Kit](https://kenney.nl/assets/racing-kit) by Kenney, CC0: grandStand, grandStandCovered, lightPostLarge, overheadLights, flagGreen, flagRed, pylon, plus radarEquipment used as the war-room roof dish. Market string lights and the forge chimney are [Holiday Kit](https://kenney.nl/assets/holiday-kit) by Kenney, CC0: lights-colored, cabin-roof-chimney. Plot fences are [City Kit (Suburban)](https://kenney.nl/assets/city-kit-suburban) 2.0 by Kenney, CC0: fence-1x4. Scaffolding, planks, and the vault signpost are [Survival Kit](https://kenney.nl/assets/survival-kit) by Kenney, CC0: structure-metal, resource-planks, signpost. The pier crane is [Overhead Crane](https://polyhaven.com/a/overhead_crane) by Poly Haven, CC0, 1k diffuse only. Credit: Kenney (www.kenney.nl) and Poly Haven. The gold VAULT board and the COMING SOON boards are original 3D text. Forge smoke is a short opacity animation. FlagTankco is not used.
 
-Interior rooms are packed by `tools/blender/import_interiors.py` from the [Furniture Kit](https://kenney.nl/assets/furniture-kit) by Kenney, CC0 (floor, walls, rug, desk, chair, bookcase, books, lamps, plants, boxes, tables, screen, laptop, keyboard, bench, cabinet, side table) and the Survival Kit (metal doorway, anvil, hammer, axe, barrel, crate). The poster image and the gold bars are original. Each room is a separate GLB and mounts only when that building's interior camera is active.
+Interior rooms are built by `tools/blender/dress_interiors.py`, then `tools/blender/instance_rooms.py`, then meshopt. The shell, round vault door, lasers, columns, gold bars, mannequins, and trophy are original. Props are CC0 and recolored. Repeats (bars, lockers, chairs, benches, racks, cameras) are `EXT_mesh_gpu_instancing`. One-off props that share a material are joined. Textures are WebP. Draco is not used: this Blender build has no Draco library, and the page must not fetch a decoder. Per-pack notes live in `apps/web/public/models/LICENSES/`. A credits line links to `/about`.
 
-Kenney characters stay unused, so the agents stay original ingots.
+| Pack | Page | Licence | Fetched |
+| --- | --- | --- | --- |
+| Kenney Furniture Kit | https://kenney.nl/assets/furniture-kit | CC0 1.0 | 2026-10-27 |
+| Kenney Survival Kit | https://kenney.nl/assets/survival-kit | CC0 1.0 | 2026-10-27 |
+| Kenney Racing Kit | https://kenney.nl/assets/racing-kit | CC0 1.0 | 2026-10-27 |
+| Quaternius Furniture Pack | https://quaternius.com/packs/furniture.html | CC0 1.0 | 2026-10-27 |
+| Poly Haven camera, rack, cart, cables, wood floor | https://polyhaven.com/license | CC0 1.0 | 2026-10-27 |
+
+Kenney characters stay unused. The agents stay the original figures.
 
 | File | Source | License |
 | --- | --- | --- |
