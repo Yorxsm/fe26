@@ -1,0 +1,36 @@
+/** Brand tokens. CSS variables in app/globals.css mirror these values. */
+
+export const theme = {
+  color: {
+    bg: "#0a0a0b",
+    surface: "#141416",
+    raised: "#1c1c1f",
+    border: "#2a2a2e",
+    orange: "#ff5a1f",
+    orangeHover: "#ff7a3d",
+    orangeDeep: "#c23d0c",
+    orangeGlow: "rgba(255,90,31,.45)",
+    green: "#3dff8a",
+    greenDeep: "#19b85c",
+    greenGlow: "rgba(61,255,138,.35)",
+    text: "#f5f5f4",
+    textSecondary: "#a1a1aa",
+    textMuted: "#6b6b73",
+  },
+  type: {
+    display: "var(--font-display), sans-serif",
+    body: "var(--font-body), sans-serif",
+    mono: "var(--font-mono), monospace",
+    h1: { size: 64, line: 72, weight: 700 },
+    h2: { size: 40, line: 48, weight: 700 },
+    h3: { size: 24, line: 32, weight: 700 },
+    body16: { size: 16, line: 24, weight: 400 },
+    body14: { size: 14, line: 20, weight: 500 },
+    labelTracking: "0.02em",
+  },
+  space: 8,
+  margin: 24,
+  columns: 12,
+  radius: { button: 12, panel: 16, pill: 999 },
+  motion: { duration: 240, offset: 8, stagger: 40, press: 0.97 },
+} as const;

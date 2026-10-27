@@ -3,50 +3,52 @@ version: alpha
 name: fe2VI iron broadcast
 description: Live arena surfaces adapted from a sports gamecast, recast as an iron foundry scoreboard. ESPN is the reference for density only. fe2VI does not use that name, logo, or palette.
 colors:
-  background: "#121418"
-  surface: "#1c2128"
-  surface-raised: "#262d36"
-  ink: "#f2f4f6"
-  ink-secondary: "#d5dde4"
-  ink-muted: "#c5ced6"
-  forge: "#e8a87c"
-  action: "#9a3412"
-  action-ink: "#ffffff"
-  focus: "#f2c14e"
-  stamp-paper: "#f4e1c1"
-  stamp-ink: "#3a2414"
-  danger-surface: "#3a1614"
-  danger-ink: "#ffd0c8"
-  ok-surface: "#123028"
-  ok-ink: "#b6f0d2"
-  line: "#3a424d"
+  background: "#0a0a0b"
+  surface: "#141416"
+  surface-raised: "#1c1c1f"
+  line: "#2a2a2e"
+  orange: "#ff5a1f"
+  orange-hover: "#ff7a3d"
+  orange-deep: "#c23d0c"
+  orange-glow: "rgba(255,90,31,.45)"
+  green: "#3dff8a"
+  green-deep: "#19b85c"
+  green-glow: "rgba(61,255,138,.35)"
+  ink: "#f5f5f4"
+  ink-secondary: "#a1a1aa"
+  ink-muted: "#6b6b73"
+  forge: "#ff5a1f"
+  action: "#ff5a1f"
+  action-ink: "#0a0a0b"
+  focus: "#3dff8a"
 typography:
   display:
-    fontFamily: Fraunces
-    fontWeight: 600
-    fontSize: 2.4rem
-    lineHeight: 1.15
+    fontFamily: Unbounded
+    fontWeight: 700
+    h1: "64/72"
+    h2: "40/48"
+    h3: "24/32"
+    labelTracking: "0.02em"
   body:
-    fontFamily: IBM Plex Mono
+    fontFamily: Manrope
     fontWeight: 400
-    fontSize: 0.95rem
-    lineHeight: 1.5
-  meta:
-    fontFamily: IBM Plex Mono
+    body: "16/24"
+    small: "14/20"
+  numbers:
+    fontFamily: JetBrains Mono
     fontWeight: 500
-    fontSize: 0.78rem
-    lineHeight: 1.4
 spacing:
-  xs: 4px
-  sm: 8px
-  md: 16px
-  lg: 24px
-  xl: 40px
+  unit: 8px
+  margin: 24px
+  columns: 12
 radius:
-  sharp: 2px
-  stamp: 2px
+  button: 12px
+  panel: 16px
+  pill: 999px
 motion:
-  meter: 600ms
+  enter: 240ms
+  offset: 8px
+  stagger: 40ms
   easing: ease-out
 ---
 
@@ -62,25 +64,23 @@ YAML tokens above are normative. The sections below say why a token exists. Comp
 
 `background` is the page. `surface` is a card. `surface-raised` is a seat or a meter track. `ink` is primary text. `ink-secondary` is body copy on the dark plate and stays above WCAG AA. `ink-muted` is for timestamps and hashes, still AA on `surface`.
 
-`action` is the only filled button color. Its label is `action-ink` (white). `forge` is the meter fill and the brand numeral, never body text on `background`. `focus` is the keyboard ring.
-
-Danger and success are dark fields with light text. Pale text on a pale chip is not used.
+`action` and `orange` are the only filled button color. The label is `action-ink` (near-black). `green` is live state, success, and the keyboard ring. No pastel, lilac, peach, or cream.
 
 ## Typography
 
-Fraunces 600 is display only: the wordmark, page titles, and the pot figure. IBM Plex Mono 400 is UI and body. IBM Plex Mono 500 is stamps, meta, and the round clock. Both families are shipped with the app. The build does not request a font from a third party.
+Unbounded is display: H1 64/72, H2 40/48, H3 24/32. Labels are uppercase with +2% tracking. Manrope is body at 16/24 and 14/20. JetBrains Mono is numbers. Weights stay on those steps. The families load through `next/font` in the app.
 
 ## Layout
 
-The page is a single column until 960px, then the lobby becomes a two-column grid and the live game places seats beside the feed. Spacing steps are 4, 8, 16, 24, and 40. Content width stops at 1080px. The status strip sticks under the wordmark and names the network.
+Spacing is an 8px grid. Safe margin is 24px. Alignment is 12 columns. The city HUD uses five anchors: top-left brand and nav, top-right sound and quest log, bottom-left context, bottom-centre primary action, bottom-right live feed and minimap. Content width stops at 1440px. At 390px the city shows a short message instead of the 3D view.
 
 ## Elevation & Depth
 
-Depth is a 1px `line` border plus a 2px offset shadow in `background`. There is no blur and no floating card stack. The pot meter is the only element that rises, and it rises by fill, not by shadow.
+Panels are black glass: surface at 85% with a 12px backdrop blur, a 1px border, and a 2px orange top accent. Radius is 16px.
 
 ## Shapes
 
-Radius is 2px. Stamps keep a clipped corner via a polygon, so they read as pressed labels rather than pills. Buttons use the same 2px radius.
+Buttons are 12px radius and 48px tall. Tags, chips, and agent names are pills.
 
 ## Components
 
@@ -95,7 +95,7 @@ Radius is 2px. Stamps keep a clipped corner via a polygon, so they read as press
 
 ## Motion
 
-The pot meter fills once in 600ms. The play-by-play does not auto-scroll in a way that fights the reader. `prefers-reduced-motion: reduce` removes the fill animation and the fixture replay interval still appends rows, but without a transition.
+Panels slide and fade in 240ms ease-out from an 8px offset. Children stagger by 40ms. Buttons scale to 0.97 on press. Live dots pulse green. Numbers tick up. `prefers-reduced-motion: reduce` removes those motions. The pot meter still fills once when motion is allowed.
 
 ## Responsive
 
@@ -103,9 +103,9 @@ Below 720px the nav wraps, seats stack, and the create steps stay one column. Ta
 
 ## Accessibility
 
-- Contrast for text pairs above is WCAG AA on the surface they sit on. White on `#9a3412` is the action pair. `#3a2414` on `#f4e1c1` is the stamp pair. `#ffd0c8` on `#3a1614` and `#b6f0d2` on `#123028` are the state pairs.
+- Contrast for text pairs above is WCAG AA on the surface they sit on. Near-black `#0a0a0b` on orange `#ff5a1f` is the action pair. Primary text `#f5f5f4` on `#141416` is the panel pair. Green `#3dff8a` is for live figures and the focus ring, large enough to read on black.
 - A skip link is the first focusable control.
-- `:focus-visible` draws a 3px `focus` ring. Focus is never removed.
+- `:focus-visible` draws a green focus ring. Focus is never removed.
 - Forms use real labels. The timeline and stamps expose their state as text.
 - The feed is `aria-live="polite"`.
 - Reduced motion is honored.
@@ -122,7 +122,7 @@ The home view is a tilted isometric view of one station model, inspired by party
 
 YAML tokens above still govern the page chrome. The station is the original mesh from `tools/blender/build_station.py`: thick iron walls, open roofs, a concourse, and an observation deck. Live rooms are the Vault, the Stadium, the Trading Market, the War Room, and the Skin Forge. Locked rooms keep a barred door and a padlock, and choosing one triggers lockdown instead of a route.
 
-Agents are original. The body is an upright beveled ingot with two stubby legs and a hexagonal core. The account id uses the same mix as `default_skin` in `fe2vi-core`: body color, face, role outfit, hat, and accessory. A win face shows in the Vault and an alarm face shows in the War Room. Names sit on `stamp-paper`, billboard toward the camera, and step upward when two agents stand close. Nothing in the mesh is a tall bean, a face slit, or a body-sized pack.
+Agents are original. The body is an upright beveled ingot with two stubby legs and a hexagonal core. The account id uses the same mix as `default_skin` in `fe2vi-core`: body color, face, role outfit, hat, and accessory. A win face shows in the Vault and an alarm face shows in the War Room. Names sit on a black pill with white text and a green dot when the agent is live. They billboard toward the camera and step upward when two agents stand close. Nothing in the mesh is a tall bean, a face slit, or a body-sized pack.
 
 Materials are `MeshToonMaterial` with a four-step gradient. Outlines are an inverted hull in near-black. Emissive screens get a short bloom. Light is a warm hemisphere plus one directional. The camera is perspective with a narrow field of view. The canvas caps device pixel ratio at 1.5 and mounts `PerformanceMonitor` only to lower that cap when the frame rate drops. The canvas stays mounted. If WebGL is missing, the page says so in one line. Keyboard users get one focused room control at a time, not a second map.
 
