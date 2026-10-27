@@ -8,14 +8,15 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use fe2vi_core::{
     absolute_ceiling, authorize_cap_change, authorize_platform_spend, default_platform_caps,
-    event_json, CapActor, PlatformCaps, MIN_AGENT_DEPOSIT_YOCTO, SCOPED_METHODS,
-    SCOPED_METHOD_LIST,
+    event_json, unknown_trait, CapActor, PlatformCaps, SkinTraits, MINT_PRICE_YOCTO,
+    MIN_AGENT_DEPOSIT_YOCTO, SCOPED_METHODS, SCOPED_METHOD_LIST,
 };
 use near_sdk::json_types::U128;
 use near_sdk::serde::Serialize;
 use near_sdk::store::LookupMap;
 use near_sdk::{
-    env, near, require, AccountId, Allowance, Gas, NearToken, PanicOnDefault, Promise, PublicKey,
+    env, ext_contract, near, require, AccountId, Allowance, Gas, NearToken, PanicOnDefault,
+    Promise, PublicKey,
 };
 
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize)]
@@ -44,6 +45,12 @@ pub struct ArenaRegistry {
     factory: AccountId,
     caps: PlatformCaps,
     agents: LookupMap<AccountId, AgentRecord>,
+    /// NEAR the registrant parked here so a mint can be paid without a deposit
+    /// on the agent's heist function-call key.
+    forge_escrow: LookupMap<AccountId, u128>,
+    forge_spent: LookupMap<AccountId, u128>,
+    skin_forge: Option<AccountId>,
+    forge_price: u128,
 }
 
 #[near]
@@ -56,6 +63,10 @@ impl ArenaRegistry {
             factory,
             caps: default_platform_caps(),
             agents: LookupMap::new(b"a"),
+            forge_escrow: LookupMap::new(b"e"),
+            forge_spent: LookupMap::new(b"f"),
+            skin_forge: None,
+            forge_price: MINT_PRICE_YOCTO,
         }
     }
 
@@ -252,6 +263,115 @@ impl ArenaRegistry {
     pub fn get_owner(&self) -> AccountId {
         self.owner.clone()
     }
+
+    pub fn set_skin_forge(&mut self, forge: AccountId) {
+        require!(env::predecessor_account_id() == self.owner, "owner");
+        self.skin_forge = Some(forge);
+    }
+
+    /// Registrant (or owner) parks NEAR the registry will later attach to `mint_skin`.
+    #[payable]
+    pub fn fund_forge(&mut self, agent: AccountId) {
+        let record = self
+            .agents
+            .get(&agent)
+            .unwrap_or_else(|| env::panic_str("no agent"));
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == record.registrant || caller == self.owner,
+            "registrant funds the forge"
+        );
+        let deposit = env::attached_deposit().as_yoctonear();
+        require!(deposit > 0, "deposit");
+        let next = self.forge_escrow.get(&agent).copied().unwrap_or(0) + deposit;
+        self.forge_escrow.insert(agent, next);
+    }
+
+    pub fn forge_escrow_of(&self, agent: AccountId) -> U128 {
+        U128(self.forge_escrow.get(&agent).copied().unwrap_or(0))
+    }
+
+    /// Cap-checked mint. The caller attaches nothing. This contract attaches
+    /// `forge_price` from the agent's escrow. The heist function-call key cannot
+    /// call this: its receiver is the heist, and function-call keys are not how
+    /// the 1 NEAR moves.
+    pub fn forge_mint(&mut self, agent: AccountId, traits: SkinTraits) -> Promise {
+        require!(
+            env::attached_deposit().as_yoctonear() == 0,
+            "forge mint attaches no deposit"
+        );
+        if let Some(reason) = unknown_trait(&traits) {
+            env::panic_str(reason);
+        }
+        let record = self
+            .agents
+            .get(&agent)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("no agent"));
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == agent || caller == record.registrant || caller == self.owner,
+            "agent or registrant"
+        );
+        let forge = self
+            .skin_forge
+            .clone()
+            .unwrap_or_else(|| env::panic_str("skin forge is not set"));
+        let price = self.forge_price;
+        let already = self.forge_spent.get(&agent).copied().unwrap_or(0);
+        authorize_platform_spend(
+            price,
+            already,
+            self.caps.max_per_action_yocto,
+            self.caps.max_per_agent_yocto,
+            record.revoked,
+        )
+        .unwrap_or_else(|err| env::panic_str(&err.to_string()));
+        let escrow = self.forge_escrow.get(&agent).copied().unwrap_or(0);
+        require!(escrow >= price, "forge escrow");
+        self.forge_escrow.insert(agent.clone(), escrow - price);
+        self.forge_spent.insert(agent.clone(), already + price);
+        let args = near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+            "agent": agent.clone(),
+            "traits": traits,
+        }))
+        .unwrap_or_else(|_| env::panic_str("mint args"));
+        env::log_str(&event_json(
+            "forge_mint",
+            near_sdk::serde_json::json!({ "agent": agent, "price": price.to_string() }),
+        ));
+        Promise::new(forge)
+            .function_call(
+                "mint_skin".to_string(),
+                args,
+                NearToken::from_yoctonear(price),
+                Gas::from_tgas(80),
+            )
+            .then(
+                ext_registry_self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(20))
+                    .on_forge_mint(agent, U128(price)),
+            )
+    }
+
+    #[private]
+    pub fn on_forge_mint(&mut self, agent: AccountId, price: U128) {
+        if !matches!(
+            env::promise_result(0),
+            near_sdk::PromiseResult::Successful(_)
+        ) {
+            let spent = self.forge_spent.get(&agent).copied().unwrap_or(0);
+            self.forge_spent
+                .insert(agent.clone(), spent.saturating_sub(price.0));
+            let escrow = self.forge_escrow.get(&agent).copied().unwrap_or(0);
+            self.forge_escrow.insert(agent, escrow + price.0);
+        }
+    }
+}
+
+#[ext_contract(ext_registry_self)]
+pub trait RegistryForgeCallback {
+    fn on_forge_mint(&mut self, agent: AccountId, price: U128);
 }
 
 fn valid_agent_name(name: &str) -> bool {
@@ -432,6 +552,9 @@ mod tests {
             "create_game",
             "import_agent",
             "mark_delisted",
+            "forge_mint",
+            "mint_skin",
+            "fund_forge",
         ];
         for method in forbidden {
             assert!(
@@ -442,11 +565,54 @@ mod tests {
         }
         assert!(registry.key_permits(agent.clone(), "act".into()));
         assert!(registry.key_permits(agent.clone(), "bid".into()));
-        assert!(registry.key_permits(agent, "transfer_item".into()));
+        assert!(registry.key_permits(agent.clone(), "transfer_item".into()));
 
         let registered = get_logs()
             .iter()
             .any(|line| line.contains("agent_registered"));
         assert!(registered);
+        assert!(!registry.key_permits(agent, "forge_mint".into()));
+    }
+
+    #[test]
+    fn mint_over_cap_rejected() {
+        let mut registry = setup();
+        use_pred("alice.fe2vi.testnet", MIN_AGENT_DEPOSIT_YOCTO);
+        let agent = registry.register_agent("alpha".into(), test_key());
+        use_pred("owner.fe2vi.testnet", 0);
+        registry.set_skin_forge("forge.fe2vi.testnet".parse().unwrap());
+        use_pred("alice.fe2vi.testnet", 5 * MINT_PRICE_YOCTO);
+        registry.fund_forge(agent.clone());
+        for _ in 0..5 {
+            use_pred("alice.fe2vi.testnet", 0);
+            drop(registry.forge_mint(agent.clone(), fe2vi_core::default_skin(agent.as_str())));
+        }
+        use_pred("alice.fe2vi.testnet", 0);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            registry.forge_mint(
+                agent,
+                fe2vi_core::default_skin("alpha.registry.fe2vi.testnet"),
+            );
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("over cap"));
+    }
+
+    #[test]
+    fn revoked_agent_cannot_mint() {
+        let mut registry = setup();
+        use_pred("alice.fe2vi.testnet", MIN_AGENT_DEPOSIT_YOCTO);
+        let agent = registry.register_agent("alpha".into(), test_key());
+        use_pred("owner.fe2vi.testnet", 0);
+        registry.set_skin_forge("forge.fe2vi.testnet".parse().unwrap());
+        use_pred("alice.fe2vi.testnet", MINT_PRICE_YOCTO);
+        registry.fund_forge(agent.clone());
+        use_pred("alice.fe2vi.testnet", 0);
+        registry.revoke(agent.clone());
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            registry.forge_mint(agent, fe2vi_core::default_skin("alpha"));
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("revoked"));
     }
 }

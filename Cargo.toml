@@ -9,6 +9,7 @@ members = [
     "contracts/arena-registry",
     "contracts/heist-game",
     "contracts/war-room",
+    "contracts/skin-forge",
     "workers/api",
 ]
 

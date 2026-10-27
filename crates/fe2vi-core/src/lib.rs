@@ -7,6 +7,7 @@ mod game_md;
 mod hash;
 mod price;
 mod score;
+mod skin;
 mod types;
 mod village;
 
@@ -22,6 +23,10 @@ pub use hash::{canonical_rules_json, pin_hash, valid_pin_hash};
 pub use price::{select_price, simulated_price_micros, PriceSource, WRAP_NEAR};
 pub use score::{
     action_price, round_index, score_actions, split_pot, tape_winner, ActionKind, SubmittedAction,
+};
+pub use skin::{
+    default_skin, unknown_trait, SkinTraits, ACCESSORIES, BODY_STYLES, FACE_STYLES, HAT_STYLES,
+    MINT_PRICE_YOCTO, ROLE_OUTFITS, TRAILS,
 };
 pub use types::{
     absolute_ceiling, default_platform_caps, heist_night_example, trading_cup_example, GameRules,

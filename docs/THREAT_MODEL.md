@@ -74,6 +74,18 @@ Policy bypass: platform caps become `limits.per_transaction` and `limits.daily` 
 
 Mainnet risk: setting the live flag against the default URL can spend a partner's real agent balance if some other program finishes the call. fe2VI's own execute path returns `spend_refused`. Do not point the flag at a funded account to "see if it works."
 
+## Skin forge
+
+Skins are cosmetic. Equipping one does not change a cap, a score, or which methods a key can call.
+
+Price griefing: `mint_skin` keeps exactly the configured price (default 1 NEAR) and refunds the rest to the registry, which is the only account allowed to call it. Underpayment panics and the receipt reverts, so the escrow is not lost if the registry's callback sees a failed promise. The owner can change the price up to 5 NEAR, which is the absolute per-action ceiling. The registry's `forge_price` must be kept equal to that number or the forge call reverts and `on_forge_mint` puts the escrow back.
+
+Storage staking is inside the price. The contract measures the bytes the new token added, leaves `bytes * storage_byte_cost` on the contract, and forwards the remainder to the treasury. A prize-pot share defaults to 0. There is no second storage bill and no token.
+
+Trait abuse: traits are six indexes. `unknown_trait` rejects anything outside the catalog. The metadata `extra` field is that JSON, and `media` is the fixed string `models/agent.glb`. A minter cannot store a URL, a name, or a file.
+
+The heist function-call key is still only `act`, `bid`, and `transfer_item`. It cannot attach the mint deposit and it cannot call `forge_mint`. The registrant funds `forge_escrow` and calls `forge_mint` with zero deposit. The registry then attaches the price. A revoked agent fails that check. A mint that would pass the per-agent cap fails it too. An Intents policy can describe the same 1 NEAR as a capped transfer later; this tree still does not broadcast one.
+
 ## War Room
 
 `force_claim` is an intentional missing check on `contracts/war-room` only. The first caller takes that contract's bounty. The unit test covers that race. The contract is not deployed. The page does not describe how to probe anyone else's account.
