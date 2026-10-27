@@ -21,7 +21,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { ROLE_COLORS, roleVisible, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
@@ -39,9 +39,9 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
-const OVERVIEW_PITCH = (50 * Math.PI) / 180;
+const OVERVIEW_PITCH = (18 * Math.PI) / 180;
 const OVERVIEW_YAW = Math.PI / 4;
-const OVERVIEW_DIST = 200;
+const OVERVIEW_DIST = 240;
 const overviewEye = new THREE.Vector3(
   Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
   Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
@@ -361,7 +361,8 @@ function dress(root: THREE.Object3D, recolor?: string) {
     sources.forEach((material) => {
       if (!("envMapIntensity" in material)) return;
       const metal = "metalness" in material ? material.metalness : 0;
-      material.envMapIntensity = metal > 0.45 ? 0.22 : 0.04;
+      material.envMapIntensity = metal > 0.45 ? 0.16 : 0.03;
+      if (!recolor && material.color) material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
     });
     const label = sourceName(mesh);
     const prefix = label.split(".")[0];
@@ -597,7 +598,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.04, luminanceThreshold: 0.98, luminanceSmoothing: 0.2, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.45, luminanceThreshold: 0.82, luminanceSmoothing: 0.18, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -657,6 +658,7 @@ function CameraDriver({
   paused,
   frameMode,
   lineup,
+  street,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
@@ -665,6 +667,7 @@ function CameraDriver({
   paused: boolean;
   frameMode: "in" | "out";
   lineup: boolean;
+  street: boolean;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
@@ -678,7 +681,7 @@ function CameraDriver({
   useFrame((state, delta) => {
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
-    const driving = mode === "cutscene" || lineup || (mode === "play" && (followIndex !== null || Boolean(focusId)));
+    const driving = mode === "cutscene" || lineup || street || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
     rig.autoRotate = false;
@@ -688,7 +691,7 @@ function CameraDriver({
       camera.updateProjectionMatrix();
     };
     if (mode === "orbit") {
-      applyFov(32);
+      applyFov(42);
       rig.enabled = false;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
@@ -700,7 +703,7 @@ function CameraDriver({
     }
     if (!driving && homing.current) {
       rig.enabled = false;
-      applyFov(32);
+      applyFov(42);
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2.4);
@@ -722,6 +725,11 @@ function CameraDriver({
       eye.set(LINEUP_SHOT.eye[0], LINEUP_SHOT.eye[1], LINEUP_SHOT.eye[2]);
       aim.set(LINEUP_SHOT.aim[0], LINEUP_SHOT.aim[1], LINEUP_SHOT.aim[2]);
       applyFov(LINEUP_SHOT.fov ?? 36);
+      drive = true;
+    } else if (street) {
+      eye.set(STREET_SHOT.eye[0], STREET_SHOT.eye[1], STREET_SHOT.eye[2]);
+      aim.set(STREET_SHOT.aim[0], STREET_SHOT.aim[1], STREET_SHOT.aim[2]);
+      applyFov(STREET_SHOT.fov ?? 52);
       drive = true;
     } else if (followIndex !== null) {
       applyFov(32);
@@ -769,6 +777,7 @@ export default function CityMap({
   followIndex,
   frameMode,
   lineup,
+  street,
   onPick,
   onFollow,
   onUnavailable,
@@ -781,6 +790,7 @@ export default function CityMap({
   followIndex: number | null;
   frameMode: "in" | "out";
   lineup: boolean;
+  street: boolean;
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
@@ -794,7 +804,7 @@ export default function CityMap({
       className="city-canvas"
       dpr={dpr}
       shadows
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 32, near: 0.1, far: 900 }}
+      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.1, far: 900 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -812,7 +822,7 @@ export default function CityMap({
         });
       }}
     >
-      <color attach="background" args={["#ffcf9e"]} />
+      <color attach="background" args={["#1b1f3b"]} />
       <World />
       <Nature />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
@@ -820,7 +830,7 @@ export default function CityMap({
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
-          <meshStandardMaterial color="#e2b340" metalness={0.82} roughness={0.28} emissive="#6a4a10" emissiveIntensity={0.18} />
+          <meshStandardMaterial color="#e2b340" metalness={0.6} roughness={0.32} emissive="#ffc14a" emissiveIntensity={1.4} />
         </mesh>
         <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
           VAULT
@@ -831,7 +841,7 @@ export default function CityMap({
         <group key={district.id} position={[district.x, 5.2, district.z + 9]}>
           <mesh>
             <boxGeometry args={[8.5, 2.4, 0.25]} />
-            <meshStandardMaterial color="#f4e7c4" roughness={0.7} />
+            <meshStandardMaterial color="#f4e7c4" roughness={0.6} emissive="#e8c48a" emissiveIntensity={0.45} />
           </mesh>
           <Text
             position={[0, 0, 0.16]}
@@ -845,6 +855,27 @@ export default function CityMap({
           </Text>
         </group>
       ))}
+      {DISTRICTS.filter((district) => district.status === "live").flatMap((district) =>
+        [
+          [district.x - 2.6, 4.8, district.z + 7.8],
+          [district.x + 2.4, 6.6, district.z + 7.8],
+          [district.x, 8.8, district.z + 7.5],
+        ].map((position) => (
+          <mesh key={`${district.id}-${position[1]}`} position={position as [number, number, number]}>
+            <planeGeometry args={[1.5, 1.15]} />
+            <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={1.8} roughness={0.35} />
+          </mesh>
+        )),
+      )}
+      <mesh position={[12, 16.2, 40]}>
+        <sphereGeometry args={[0.32, 10, 8]} />
+        <meshStandardMaterial color="#ff3030" emissive="#ff2020" emissiveIntensity={3.2} />
+      </mesh>
+      <pointLight position={[12, 15.4, 40]} color="#ff4040" intensity={5} distance={16} decay={2} />
+      <mesh position={[-36.2, 3.4, -16.5]}>
+        <boxGeometry args={[1.6, 1.2, 0.18]} />
+        <meshStandardMaterial color="#ff6a1a" emissive="#ff5a12" emissiveIntensity={2.4} />
+      </mesh>
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 2.4, 18]} intensity={6} color="#ffb060" distance={14} decay={2} />
       <pointLight position={[46, 2.4, 14]} intensity={5} color="#ffd2a8" distance={14} decay={2} />
@@ -855,11 +886,11 @@ export default function CityMap({
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused || lineup} audit={audit} focusId={focusId} lineup={lineup} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault
-        enabled={!focusId && followIndex === null && mode !== "cutscene" && !lineup}
+        enabled={!focusId && followIndex === null && mode !== "cutscene" && !lineup && !street}
         enablePan={false}
         autoRotate={false}
         minPolarAngle={0.35}

@@ -114,6 +114,9 @@ export const LINEUP_SPOTS: Array<[number, number]> = [
 
 export const LINEUP_SHOT: CameraShot = { eye: [0, 2.55, 19], aim: [0, 1.7, 0], fov: 36 };
 
+/** Eye height on the ring road, looking along the lamps. */
+export const STREET_SHOT: CameraShot = { eye: [-24, 1.65, 16], aim: [8, 1.4, -8], fov: 52 };
+
 /** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
 function acrossRoom(x: number, z: number): CameraShot {
   return { eye: [x + 2.7, 1.62, z + 2.15], aim: [x - 1.55, 0.82, z - 1.45], fov: 64 };

@@ -107,7 +107,8 @@ const PLACED = spots();
 function windMaterials(source: THREE.Material | THREE.Material[], amount: number, uTime: { value: number }) {
   const list = (Array.isArray(source) ? source : [source]).map((material) => material.clone()) as THREE.MeshStandardMaterial[];
   list.forEach((material) => {
-    material.envMapIntensity = 0.05;
+    material.envMapIntensity = 0.04;
+    if (amount < 0.1 && material.color) material.color.multiply(new THREE.Color("#4d6a58"));
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uTime;
       shader.uniforms.uWind = { value: amount };
