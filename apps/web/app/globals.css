@@ -1324,7 +1324,9 @@ a.btn svg,
 .hud-nav a svg,
 .pronounce svg,
 .chip svg,
-.skip svg {
+.skip svg,
+.royalty-line svg,
+.earned-trait svg {
   width: 1em;
   height: 1em;
   flex: none;
@@ -1382,6 +1384,33 @@ button.pronounce:focus-visible {
   font-family: var(--mono);
   font-size: var(--type-small);
   color: var(--ink);
+}
+.forge-turntable { display: grid; gap: 16px; align-content: start; }
+.trophy-shelf { display: grid; gap: 8px; margin: 12px 0 16px; }
+.trophy-shelf h3 { margin: 0; font-family: var(--display); font-size: var(--type-h3); }
+.trophy-shelf .chip { background: #1c1c20; border: 1px solid var(--line); }
+.stat-row, .earned-traits { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.earned-trait {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #1c1c20;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: var(--type-small);
+}
+.earned-trait.locked { color: var(--ink-muted); }
+.earned-trait .num { font-family: var(--mono); font-size: var(--type-small); }
+.royalty-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #8b8a86;
+  font-family: var(--display);
+  font-size: var(--type-small);
 }
 
 .stress-readout {

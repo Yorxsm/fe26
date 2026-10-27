@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AgentLookup } from "@/components/AgentLookup";
 import { SignPanel } from "@/components/SignPanel";
+import { TrophyShelf } from "@/components/TrophyShelf";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
 import { defaultSkin } from "@/lib/skin";
@@ -41,7 +42,7 @@ export default function AgentPage() {
       {phase === "missing" && <EmptyState title="No such agent" detail={`${id} is not in the relay or the fixtures.`} />}
       {source === "fixture" && agent && <p className="banner">Fixture agent. The registry view on testnet is the source of truth.</p>}
       {agent && (
-        <article className="card">
+        <article className="card agent-card">
           <div className="row">
             <h2 className="addr">{agent.account_id}</h2>
             <span className={agent.revoked ? "status-revoked" : "status-active"}>{agent.revoked ? "Revoked" : "Active"}</span>
@@ -60,7 +61,8 @@ export default function AgentPage() {
             {defaultSkin(agent.account_id).back_item}, emblem {defaultSkin(agent.account_id).emblem}, trail {defaultSkin(agent.account_id).trail}, role{" "}
             {defaultSkin(agent.account_id).role}.
           </p>
-          <p className="meta">No minted skin is read here. A mint would be cosmetic only and would show beside this default.</p>
+          <TrophyShelf />
+          <p className="meta">Sample record for this fixture. A minted skin on testnet is the source of truth, and it stays cosmetic.</p>
         </article>
       )}
       <SignPanel

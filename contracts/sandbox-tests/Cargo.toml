@@ -23,3 +23,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = tr
 name = "security"
 path = "tests/security.rs"
 required-features = ["sandbox"]
+
+[[test]]
+name = "skins"
+path = "tests/skins.rs"
+required-features = ["sandbox"]

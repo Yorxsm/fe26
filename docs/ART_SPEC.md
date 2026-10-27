@@ -143,3 +143,5 @@ Still short of the spec:
 - Rooms are three walls and a floor. The stadium interior is a locker at the edge of the field, not the bowl. One side of each room is sparser than the other.
 - Agents are block ingots with role props, not sculpted characters. The walk cycle can slide the feet. The scout pack is a hip kit on the ingot.
 - `station.glb` still holds the old procedural village. Those meshes stay hidden except the plaza pads. Models and textures together are about 12 MB. There are no LODs. Frame rate was not measured on a laptop GPU. These shots are software WebGL.
+
+Earned rare traits and the 5% creator royalty live on the skin token. The table and the bind rules are in `docs/SKINS.md`. They are paint. They do not change scoring or caps.

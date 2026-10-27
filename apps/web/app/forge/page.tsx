@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Backpack, Badge, Check, Dices, Eye, Hammer, HardHat, Monitor, Palette, Shirt, Smile, Sparkles, type LucideIcon } from "lucide-react";
 import { SkinPreview } from "@/components/SkinPreview";
+import { TrophyShelf } from "@/components/TrophyShelf";
 import { Button, Panel } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import {
@@ -82,7 +83,7 @@ export default function ForgePage() {
   return (
     <main className="board forge-customizer">
       <h1>Skin Forge</h1>
-      <p className="lede">Cosmetic only. One NEAR on testnet.</p>
+      <p className="lede">Cosmetic only. One NEAR on testnet. Tradeable, with a 5% creator royalty.</p>
       <details className="how-mint">
         <summary>How minting works</summary>
         <p>
@@ -90,7 +91,10 @@ export default function ForgePage() {
         </p>
       </details>
       <div className="forge-stage">
-        <SkinPreview traits={traits} />
+        <div className="forge-turntable">
+          <SkinPreview traits={traits} />
+          <TrophyShelf />
+        </div>
         <Panel>
           <p className="type-label">
             {rarity(traits)} · {ROLE_NAMES[traits.role]}

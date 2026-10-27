@@ -146,6 +146,44 @@ export function lineupSkin(role: number): SkinTraits {
   };
 }
 
+export type SkinStats = {
+  wins: number;
+  heistsCracked: number;
+  timesCaught: number;
+  seasonsPlayed: number;
+  seasonTitles: number;
+};
+
+/** Sample record used by the forge and the profile card. Not a chain read. */
+export const DEMO_SKIN_STATS: SkinStats = {
+  wins: 7,
+  heistsCracked: 3,
+  timesCaught: 2,
+  seasonsPlayed: 1,
+  seasonTitles: 0,
+};
+
+export const EARNED_TRAIT_SPECS: Array<{
+  id: string;
+  slot: string;
+  name: string;
+  goal: number;
+  unit: string;
+  progressOf: (stats: SkinStats) => number;
+}> = [
+  { id: "gold-leaf", slot: "paint", name: "Gold leaf", goal: 10, unit: "wins", progressOf: (stats) => stats.wins },
+  { id: "cracked-vault", slot: "emblem", name: "Cracked vault", goal: 5, unit: "heists", progressOf: (stats) => stats.heistsCracked },
+  { id: "molten-trail", slot: "trail", name: "Molten trail", goal: 25, unit: "wins", progressOf: (stats) => stats.wins },
+  {
+    id: "season-crown",
+    slot: "headwear",
+    name: "Season crown",
+    goal: 1,
+    unit: "season titles",
+    progressOf: (stats) => stats.seasonTitles,
+  },
+];
+
 export function rarity(traits: SkinTraits): "Common" | "Rare" | "Mythic" {
   const score =
     (traits.paint % PAINTS === 8 || traits.paint % PAINTS === 9 ? 2 : 0) +

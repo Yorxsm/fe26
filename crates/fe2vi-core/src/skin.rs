@@ -36,6 +36,72 @@ pub struct SkinTraits {
     pub role: u8,
 }
 
+/// Earned cosmetics. They are not catalog indexes, so `unknown_trait` rejects
+/// any attempt to mint them. `equip_trait` is the only way onto a token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EarnedTrait {
+    pub id: &'static str,
+    pub slot: &'static str,
+    pub name: &'static str,
+    /// Wins required. Zero means this trait does not look at wins.
+    pub wins: u32,
+    /// Heists cracked required. Zero means this trait does not look at heists.
+    pub heists: u32,
+    /// Season #1 finish. Independent of the counters above.
+    pub season_title: bool,
+}
+
+pub const EARNED_TRAITS: &[EarnedTrait] = &[
+    EarnedTrait {
+        id: "gold-leaf",
+        slot: "paint",
+        name: "Gold leaf",
+        wins: 10,
+        heists: 0,
+        season_title: false,
+    },
+    EarnedTrait {
+        id: "cracked-vault",
+        slot: "emblem",
+        name: "Cracked vault",
+        wins: 0,
+        heists: 5,
+        season_title: false,
+    },
+    EarnedTrait {
+        id: "molten-trail",
+        slot: "trail",
+        name: "Molten trail",
+        wins: 25,
+        heists: 0,
+        season_title: false,
+    },
+    EarnedTrait {
+        id: "season-crown",
+        slot: "headwear",
+        name: "Season crown",
+        wins: 0,
+        heists: 0,
+        season_title: true,
+    },
+];
+
+pub fn earned_trait(id: &str) -> Option<&'static EarnedTrait> {
+    EARNED_TRAITS.iter().find(|entry| entry.id == id)
+}
+
+/// `(progress, goal, unlocked)`. Progress is clamped to the goal.
+pub fn earned_progress(spec: &EarnedTrait, wins: u32, heists: u32, season_titles: u32) -> (u32, u32, bool) {
+    if spec.season_title {
+        let progress = u32::from(season_titles > 0);
+        return (progress, 1, season_titles > 0);
+    }
+    if spec.heists > 0 {
+        return (heists.min(spec.heists), spec.heists, heists >= spec.heists);
+    }
+    (wins.min(spec.wins), spec.wins, spec.wins > 0 && wins >= spec.wins)
+}
+
 /// `None` when every index is in the catalog.
 pub fn unknown_trait(traits: &SkinTraits) -> Option<&'static str> {
     if traits.paint >= PAINTS
@@ -111,6 +177,24 @@ mod tests {
         traits.role = 0;
         traits.paint = PAINTS;
         assert_eq!(unknown_trait(&traits), Some("unknown trait"));
+    }
+
+    #[test]
+    fn earned_traits_are_outside_the_mint_catalog() {
+        assert!(earned_trait("gold-leaf").is_some());
+        assert!(earned_trait("nope").is_none());
+        let (progress, goal, unlocked) = earned_progress(earned_trait("gold-leaf").unwrap(), 7, 0, 0);
+        assert_eq!((progress, goal, unlocked), (7, 10, false));
+        let (progress, goal, unlocked) = earned_progress(earned_trait("gold-leaf").unwrap(), 10, 0, 0);
+        assert_eq!((progress, goal, unlocked), (10, 10, true));
+        let (progress, goal, unlocked) = earned_progress(earned_trait("cracked-vault").unwrap(), 99, 4, 0);
+        assert_eq!((progress, goal, unlocked), (4, 5, false));
+        let (progress, goal, unlocked) = earned_progress(earned_trait("season-crown").unwrap(), 100, 100, 0);
+        assert_eq!((progress, goal, unlocked), (0, 1, false));
+        let (progress, goal, unlocked) = earned_progress(earned_trait("season-crown").unwrap(), 0, 0, 1);
+        assert_eq!((progress, goal, unlocked), (1, 1, true));
+        let (progress, goal, unlocked) = earned_progress(earned_trait("molten-trail").unwrap(), 25, 0, 0);
+        assert_eq!((progress, goal, unlocked), (25, 25, true));
     }
 
     #[test]

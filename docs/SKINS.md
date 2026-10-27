@@ -1,0 +1,52 @@
+# Skins
+
+A skin is paint. It does not change caps, scoring, or who may act. The mint price is 1 NEAR on testnet, storage included. The registry is the only account that may call `mint_skin`. This repo does not deploy the contract and does not hold keys.
+
+## Tradeable
+
+Skins are NEP-171 tokens with NEP-177 metadata and NEP-178 approvals, so a marketplace can list them.
+
+`nft_transfer` and `nft_transfer_call` move the token. `nft_approve`, `nft_revoke`, `nft_revoke_all`, and `nft_is_approved` are the approval set. Each of those calls logs a NEP-297 `EVENT_JSON` line. A transfer log uses standard `nep171`, event `nft_transfer`, and includes `memo` and `authorized_id` when they apply. The same call logs `skin_unbound` when the token was being worn.
+
+## Royalties
+
+NEP-199 `nft_payout` and `nft_transfer_payout` pay the original minter. That account is the `creator`: the agent the registry minted the skin for. The rate is stored on the token at mint. The default is 5% (500 basis points). The contract owner may change the rate for later mints with `set_royalty_bps`. The cap is 10% (1000). A token keeps the rate it was minted with.
+
+The payout map has the creator and the current owner (the seller). No other recipients are configured. Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. A 5% cut of 3 yoctoNEAR is 0. If the creator is still the owner, the map is one entry for the full balance. `max_len_payout` smaller than the map panics.
+
+## Bind
+
+Mint binds the new token to that agent and replaces any skin the agent was already wearing. An agent wears one skin.
+
+Transfer clears the link. The new owner calls `bind_skin(token_id, agent_id)` with 1 yoctoNEAR. They must own the token. The previous wearer is unbound, and if `agent_id` was wearing a different token, that token is unbound too. `equip_skin(token_id)` binds the token to the caller.
+
+## Trophies
+
+`record_result(token_id, game, outcome, season)` is the only writer. The predecessor must be on the recorder allowlist (`set_recorder`, owner only). The owner is not on that list unless added. The token owner cannot call it.
+
+`game` is 1 to 32 characters, ASCII letters, digits, hyphen, or underscore. `outcome` is one of:
+
+| Outcome | Counter |
+| --- | --- |
+| `win` | wins |
+| `heist_cracked` | heists cracked |
+| `caught` | times caught |
+| `rank:1` | season title, once per season number |
+| `rank:N` | logged, and counts as a season, but no title unless N is 1 |
+
+The first result for a season number increments seasons played. Later results in that season do not. Each call appends a trophy `{game, outcome, season}`. The log keeps the latest 64 entries. Counters are not trimmed. A sale keeps the record, the log, and any equipped earned traits.
+
+## Earned traits
+
+These are not catalog indexes. `mint_skin` rejects anything outside the mintable lists, and `equip_trait` is the only way to wear one. The owner equips an unlocked trait with 1 yoctoNEAR. One earned trait per slot. `clear_trait` takes it off. Locked traits cannot be equipped.
+
+| Id | Slot | Unlocks at |
+| --- | --- | --- |
+| `gold-leaf` | paint | 10 wins |
+| `cracked-vault` | emblem | 5 heists cracked |
+| `molten-trail` | trail | 25 wins |
+| `season-crown` | headwear | one season finished at rank 1 |
+
+`skin_stats(token_id)` returns the counters, the season-title count, and the trophy log. `unlocked_traits(token_id)` returns every earned trait with `progress`, `goal`, `unlocked`, and `equipped`. Progress is clamped to the goal. A skin with 7 wins shows gold leaf as 7/10 and the molten trail as 7/25.
+
+The forge page and the agent profile card show the same shelf: stat icons, locked traits with that progress, and the line "Tradeable · 5% creator royalty". The page builds a testnet call. It does not submit one.
