@@ -83,7 +83,7 @@ export default function ForgePage() {
   return (
     <main className="board forge-customizer">
       <h1>Skin Forge</h1>
-      <p className="lede">Cosmetic only. One NEAR on testnet. Tradeable, with a 5% creator royalty.</p>
+      <p className="lede">Cosmetic only. One NEAR on testnet. Tradeable, with 2% to the creator and 3% to the platform.</p>
       <details className="how-mint">
         <summary>How minting works</summary>
         <p>

@@ -10,11 +10,13 @@ Skins are NEP-171 tokens with NEP-177 metadata and NEP-178 approvals, so a marke
 
 ## Royalties
 
-NEP-199 `nft_payout` and `nft_transfer_payout` pay the original minter. That account is the `creator`: the agent the registry minted the skin for. The rate is stored on the token at mint. The default is 5% (500 basis points). The contract owner may change the rate for later mints with `set_royalty_bps`. The cap is 10% (1000). A token keeps the rate it was minted with.
+NEP-199 `nft_payout` and `nft_transfer_payout` pay two shares, snapshotted on the token at mint. The creator is the agent the registry minted the skin for and receives 2% (200 basis points). The platform receives 3% (300). The total is 5%. The contract owner sets the platform account with `set_platform`. `new` starts that account at the treasury argument. Tests and the web config use `treasury.fe2vi.testnet`. That string is an account id. This repo does not hold a key for it.
 
-The payout map has the creator and the current owner (the seller). No other recipients are in the default map. The owner can replace an extra split list with `set_royalty_splits` for later mints. That list starts empty. The creator rate plus every extra share must stay at or under 10%, and a token keeps the list it was minted with.
+`set_creator_bps` and `set_platform_bps` change the rates for later mints. The cap on creator plus platform plus any extra split is 10% (1000). `set_royalty_splits` replaces an extra list that starts empty. A token keeps the accounts and rates it was minted with.
 
-Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. A 5% cut of 3 yoctoNEAR is 0. If the creator is still the owner, the creator share stays with the seller. `max_len_payout` smaller than the map panics.
+Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. 2% of 40 yoctoNEAR is 0 and 3% of 40 is 1. Both shares of 3 are 0. If the creator is still the owner, the creator share stays with the seller and the platform is still paid. `max_len_payout` smaller than the map panics. A resale with three distinct accounts needs room for three entries.
+
+The collection record is `nft_metadata`: spec `nft-1.0.0`, name `fe2VI Skins`, symbol `IRONSKIN`. Each token's metadata is the NEP-177 field set. There is no marketplace in this repo, and no launchpad hook. A public media URL and its content hash wait until that choice is settled.
 
 ## Bind
 
@@ -51,4 +53,4 @@ These are not catalog indexes. `mint_skin` rejects anything outside the mintable
 
 `skin_stats(token_id)` returns the counters, the season-title count, and the trophy log. `unlocked_traits(token_id)` returns every earned trait with `progress`, `goal`, `unlocked`, and `equipped`. Progress is clamped to the goal. A skin with 7 wins shows gold leaf as 7/10 and the molten trail as 7/25.
 
-The forge page and the agent profile card show the same shelf: stat icons, locked traits with that progress, and the line "Tradeable · 5% creator royalty". The page builds a testnet call. It does not submit one.
+The forge page and the agent profile card show the same shelf: stat icons, locked traits with that progress, and the line "Tradeable · 2% creator · 3% platform". The page builds a testnet call. It does not submit one.

@@ -144,4 +144,4 @@ Still short of the spec:
 - Agents are block ingots with role props, not sculpted characters. The walk cycle can slide the feet. The scout pack is a hip kit on the ingot.
 - `station.glb` still holds the old procedural village. Those meshes stay hidden except the plaza pads. Models and textures together are about 12 MB. There are no LODs. Frame rate was not measured on a laptop GPU. These shots are software WebGL.
 
-Earned rare traits and the 5% creator royalty live on the skin token. The table and the bind rules are in `docs/SKINS.md`. They are paint. They do not change scoring or caps.
+Earned rare traits live on the skin token. A resale pays 2% to the minter and 3% to the platform. The table and the bind rules are in `docs/SKINS.md`. They are paint. They do not change scoring or caps.

@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Calendar, KeyRound, Lock, Percent, ShieldAlert, Trophy } from "lucide-react";
+import { ArrowLeftRight, Calendar, KeyRound, Landmark, Lock, Percent, ShieldAlert, Trophy } from "lucide-react";
 import { DEMO_SKIN_STATS, EARNED_TRAIT_SPECS, type SkinStats } from "@/lib/skin";
 
 export function RoyaltyLine() {
@@ -8,7 +8,10 @@ export function RoyaltyLine() {
       Tradeable
       <span aria-hidden="true">·</span>
       <Percent aria-hidden="true" strokeWidth={1.75} />
-      5% creator royalty
+      2% creator
+      <span aria-hidden="true">·</span>
+      <Landmark aria-hidden="true" strokeWidth={1.75} />
+      3% platform
     </p>
   );
 }

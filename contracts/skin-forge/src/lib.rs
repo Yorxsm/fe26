@@ -14,16 +14,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fe2vi_core::{
-    default_skin as catalog_default, earned_progress, earned_trait, unknown_trait, EARNED_TRAITS,
-    SkinTraits, MINT_PRICE_YOCTO, ONE_NEAR,
+    default_skin as catalog_default, earned_progress, earned_trait, unknown_trait, SkinTraits,
+    EARNED_TRAITS, MINT_PRICE_YOCTO, ONE_NEAR,
 };
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde::Serialize;
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise};
+use near_sdk::{
+    env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise,
+};
 
-const DEFAULT_ROYALTY_BPS: u16 = 500;
+const DEFAULT_CREATOR_BPS: u16 = 200;
+const DEFAULT_PLATFORM_BPS: u16 = 300;
 const MAX_ROYALTY_BPS: u16 = 1_000;
 const TROPHY_CAP: usize = 64;
 
@@ -66,10 +69,14 @@ pub struct SkinToken {
     pub traits: SkinTraits,
     pub next_approval_id: u64,
     pub approvals: Vec<(AccountId, u64)>,
-    /// Account the skin was minted for. Royalties pay this account, not the seller.
+    /// Account the skin was minted for. The 2% creator share pays this account.
     pub creator: AccountId,
-    /// Snapshotted at mint. The owner can change the contract default later.
-    pub royalty_bps: u16,
+    /// Snapshotted at mint, in basis points. Default 200.
+    pub creator_bps: u16,
+    /// Platform account snapshotted at mint. Default is the treasury passed to `new`.
+    pub platform: AccountId,
+    /// Snapshotted at mint, in basis points. Default 300.
+    pub platform_bps: u16,
     /// Extra royalty accounts snapshotted at mint. Empty unless the owner sets a future split.
     pub royalty_splits: Vec<(AccountId, u16)>,
     pub bound_agent: Option<AccountId>,
@@ -87,17 +94,24 @@ pub struct NftContractMetadata {
     pub icon: Option<String>,
     pub base_uri: Option<String>,
     pub reference: Option<String>,
-    pub reference_hash: Option<String>,
+    pub reference_hash: Option<Base64VecU8>,
 }
 
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct TokenMetadata {
-    pub title: String,
-    pub description: String,
-    pub media: String,
-    pub copies: u64,
-    pub extra: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub media: Option<String>,
+    pub media_hash: Option<Base64VecU8>,
+    pub copies: Option<u64>,
+    pub issued_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub starts_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub extra: Option<String>,
+    pub reference: Option<String>,
+    pub reference_hash: Option<Base64VecU8>,
 }
 
 #[derive(Serialize)]
@@ -147,8 +161,12 @@ pub struct SkinForge {
     /// Share of the post-storage proceeds, in basis points. Default 0.
     prize_bps: u16,
     mint_price: u128,
-    /// Creator royalty for tokens minted from now on, in basis points. Cap is 10%.
-    royalty_bps: u16,
+    /// Creator share for tokens minted from now on, in basis points. Default 2%.
+    creator_bps: u16,
+    /// Platform share for tokens minted from now on, in basis points. Default 3%.
+    platform_bps: u16,
+    /// Account that receives the platform share. Owner-set. Not a key.
+    platform: AccountId,
     /// Extra accounts for future mints. Empty. Counted inside the same 10% cap.
     royalty_splits: Vec<(AccountId, u16)>,
     next_id: u64,
@@ -164,6 +182,7 @@ pub struct SkinForge {
 impl SkinForge {
     #[init]
     pub fn new(owner: AccountId, treasury: AccountId, registry: AccountId) -> Self {
+        let platform = treasury.clone();
         Self {
             owner,
             treasury,
@@ -171,7 +190,9 @@ impl SkinForge {
             prize_pot: None,
             prize_bps: 0,
             mint_price: MINT_PRICE_YOCTO,
-            royalty_bps: DEFAULT_ROYALTY_BPS,
+            creator_bps: DEFAULT_CREATOR_BPS,
+            platform_bps: DEFAULT_PLATFORM_BPS,
+            platform,
             royalty_splits: Vec::new(),
             next_id: 1,
             tokens: LookupMap::new(b"t"),
@@ -228,32 +249,66 @@ impl SkinForge {
         self.prize_bps = prize_bps;
     }
 
-    /// Future mints snapshot this rate. Existing tokens keep the rate they were minted with.
-    /// No other royalty recipients are configured.
-    pub fn set_royalty_bps(&mut self, royalty_bps: u16) {
+    /// Creator share for later mints. A token keeps the rate it was minted with.
+    pub fn set_creator_bps(&mut self, creator_bps: u16) {
         self.only_owner();
         require!(
-            split_total(royalty_bps, &self.royalty_splits) <= u32::from(MAX_ROYALTY_BPS),
+            split_total(creator_bps, self.platform_bps, &self.royalty_splits)
+                <= u32::from(MAX_ROYALTY_BPS),
             "royalty cap"
         );
-        self.royalty_bps = royalty_bps;
+        self.creator_bps = creator_bps;
     }
 
-    pub fn royalty_bps(&self) -> u16 {
-        self.royalty_bps
+    pub fn creator_bps(&self) -> u16 {
+        self.creator_bps
     }
 
-    /// Replace the extra royalty accounts used by later mints. The creator stays a separate entry.
-    /// The list is empty until the owner sets one. The creator rate plus these shares stay at or under 10%.
+    /// Platform share for later mints. Counted with the creator share inside the 10% cap.
+    pub fn set_platform_bps(&mut self, platform_bps: u16) {
+        self.only_owner();
+        require!(
+            split_total(self.creator_bps, platform_bps, &self.royalty_splits)
+                <= u32::from(MAX_ROYALTY_BPS),
+            "royalty cap"
+        );
+        self.platform_bps = platform_bps;
+    }
+
+    pub fn platform_bps(&self) -> u16 {
+        self.platform_bps
+    }
+
+    /// Account that receives the platform share on later mints. No key is stored.
+    pub fn set_platform(&mut self, platform: AccountId) {
+        self.only_owner();
+        require!(
+            !self
+                .royalty_splits
+                .iter()
+                .any(|(account, _)| account == &platform),
+            "royalty split"
+        );
+        self.platform = platform;
+    }
+
+    pub fn platform_account(&self) -> AccountId {
+        self.platform.clone()
+    }
+
+    /// Replace the extra royalty accounts used by later mints.
+    /// The creator and the platform stay separate entries. This list starts empty.
+    /// Creator plus platform plus these shares stay at or under 10%.
     pub fn set_royalty_splits(&mut self, splits: Vec<(AccountId, u16)>) {
         self.only_owner();
         let mut seen = BTreeSet::new();
         for (account, bps) in &splits {
             require!(*bps > 0 && *bps <= MAX_ROYALTY_BPS, "royalty split");
+            require!(account != &self.platform, "royalty split");
             require!(seen.insert(account.clone()), "royalty split");
         }
         require!(
-            split_total(self.royalty_bps, &splits) <= u32::from(MAX_ROYALTY_BPS),
+            split_total(self.creator_bps, self.platform_bps, &splits) <= u32::from(MAX_ROYALTY_BPS),
             "royalty cap"
         );
         self.royalty_splits = splits;
@@ -299,7 +354,9 @@ impl SkinForge {
                 next_approval_id: 1,
                 approvals: Vec::new(),
                 creator: agent.clone(),
-                royalty_bps: self.royalty_bps,
+                creator_bps: self.creator_bps,
+                platform: self.platform.clone(),
+                platform_bps: self.platform_bps,
                 royalty_splits: self.royalty_splits.clone(),
                 bound_agent: None,
                 stats: SkinRecord::empty(),
@@ -371,7 +428,9 @@ impl SkinForge {
     }
 
     pub fn token_agent(&self, token_id: String) -> Option<AccountId> {
-        self.tokens.get(&token_id).and_then(|token| token.bound_agent.clone())
+        self.tokens
+            .get(&token_id)
+            .and_then(|token| token.bound_agent.clone())
     }
 
     /// Allowlisted game or registry only. The owner cannot write trophies.
@@ -411,10 +470,13 @@ impl SkinForge {
             .unwrap_or_else(|| env::panic_str("no token"));
         require!(token.owner_id == caller, "not owner");
         let titles = token.stats.titled_seasons.len() as u32;
-        let (_, _, unlocked) = earned_progress(spec, token.stats.wins, token.stats.heists_cracked, titles);
+        let (_, _, unlocked) =
+            earned_progress(spec, token.stats.wins, token.stats.heists_cracked, titles);
         require!(unlocked, "trait locked");
         token.equipped_traits.retain(|id| {
-            earned_trait(id).map(|other| other.slot != spec.slot).unwrap_or(false)
+            earned_trait(id)
+                .map(|other| other.slot != spec.slot)
+                .unwrap_or(false)
         });
         token.equipped_traits.push(trait_id);
         self.tokens.insert(token_id, token);
@@ -564,7 +626,13 @@ impl SkinForge {
     ) {
         require!(env::attached_deposit().as_yoctonear() == 1, "1 yocto");
         let sender = env::predecessor_account_id();
-        self.transfer_internal(&sender, &receiver_id, &token_id, approval_id, memo.as_deref());
+        self.transfer_internal(
+            &sender,
+            &receiver_id,
+            &token_id,
+            approval_id,
+            memo.as_deref(),
+        );
     }
 
     /// NEP-171. The receiver's `nft_on_transfer` may return true to send the token back.
@@ -579,9 +647,17 @@ impl SkinForge {
     ) -> Promise {
         require!(env::attached_deposit().as_yoctonear() == 1, "1 yocto");
         let sender = env::predecessor_account_id();
-        self.transfer_internal(&sender, &receiver_id, &token_id, approval_id, memo.as_deref());
+        self.transfer_internal(
+            &sender,
+            &receiver_id,
+            &token_id,
+            approval_id,
+            memo.as_deref(),
+        );
         let resolve_gas = Gas::from_tgas(15);
-        let forward = env::prepaid_gas().saturating_sub(resolve_gas).saturating_sub(Gas::from_tgas(25));
+        let forward = env::prepaid_gas()
+            .saturating_sub(resolve_gas)
+            .saturating_sub(Gas::from_tgas(25));
         ext_receiver::ext(receiver_id.clone())
             .with_static_gas(forward)
             .nft_on_transfer(sender.clone(), sender.clone(), token_id.clone(), msg)
@@ -709,7 +785,9 @@ impl SkinForge {
         }
         let mut token = self.token_or_panic(token_id);
         if let Some(previous) = token.bound_agent.clone() {
-            if previous != *agent && self.equipped.get(&previous).map(String::as_str) == Some(token_id) {
+            if previous != *agent
+                && self.equipped.get(&previous).map(String::as_str) == Some(token_id)
+            {
                 self.equipped.remove(&previous);
             }
         }
@@ -751,7 +829,11 @@ impl SkinForge {
         });
         let allowed = &token.owner_id == sender || approved;
         require!(allowed, "not approved");
-        let authorized = if &token.owner_id == sender { None } else { Some(sender.clone()) };
+        let authorized = if &token.owner_id == sender {
+            None
+        } else {
+            Some(sender.clone())
+        };
         let previous = token.owner_id.clone();
         self.unbind_token(&mut token, token_id);
         let mut from_list = self.by_owner.get(&previous).cloned().unwrap_or_default();
@@ -781,41 +863,58 @@ impl SkinForge {
 fn metadata_for(token: &SkinToken) -> TokenMetadata {
     let extra = near_sdk::serde_json::to_string(&token.traits).unwrap_or_else(|_| "{}".into());
     TokenMetadata {
-        title: "fe2VI skin".into(),
-        description: "Cosmetic only. No gameplay effect.".into(),
-        media: "models/agent.glb".into(),
-        copies: 1,
-        extra,
+        title: Some("fe2VI skin".into()),
+        description: Some("Cosmetic only. No gameplay effect.".into()),
+        media: Some("models/agent.glb".into()),
+        media_hash: None,
+        copies: Some(1),
+        issued_at: None,
+        expires_at: None,
+        starts_at: None,
+        updated_at: None,
+        extra: Some(extra),
+        reference: None,
+        reference_hash: None,
     }
 }
 
-fn split_total(creator_bps: u16, splits: &[(AccountId, u16)]) -> u32 {
-    u32::from(creator_bps) + splits.iter().map(|(_, bps)| u32::from(*bps)).sum::<u32>()
+fn split_total(creator_bps: u16, platform_bps: u16, splits: &[(AccountId, u16)]) -> u32 {
+    u32::from(creator_bps)
+        + u32::from(platform_bps)
+        + splits.iter().map(|(_, bps)| u32::from(*bps)).sum::<u32>()
+}
+
+fn add_cut(
+    payout: &mut BTreeMap<AccountId, u128>,
+    account: &AccountId,
+    cut: u128,
+    paid: &mut u128,
+) {
+    if cut == 0 {
+        return;
+    }
+    *payout.entry(account.clone()).or_insert(0) += cut;
+    *paid += cut;
 }
 
 fn payout_map(token: SkinToken, balance: u128, max_len_payout: u32) -> BTreeMap<AccountId, U128> {
     require!(max_len_payout > 0, "payout exceeds max_len");
     let mut payout: BTreeMap<AccountId, u128> = BTreeMap::new();
     let mut paid = 0u128;
-    let creator_cut = if token.creator == token.owner_id {
-        0
-    } else {
-        balance.saturating_mul(u128::from(token.royalty_bps)) / 10_000
-    };
-    if creator_cut > 0 {
-        payout.insert(token.creator.clone(), creator_cut);
-        paid += creator_cut;
+    if token.creator != token.owner_id {
+        let cut = balance.saturating_mul(u128::from(token.creator_bps)) / 10_000;
+        add_cut(&mut payout, &token.creator, cut, &mut paid);
+    }
+    if token.platform != token.owner_id {
+        let cut = balance.saturating_mul(u128::from(token.platform_bps)) / 10_000;
+        add_cut(&mut payout, &token.platform, cut, &mut paid);
     }
     for (account, bps) in &token.royalty_splits {
         if account == &token.owner_id {
             continue;
         }
         let cut = balance.saturating_mul(u128::from(*bps)) / 10_000;
-        if cut == 0 {
-            continue;
-        }
-        *payout.entry(account.clone()).or_insert(0) += cut;
-        paid += cut;
+        add_cut(&mut payout, account, cut, &mut paid);
     }
     require!(paid <= balance, "royalty");
     let seller = balance - paid;
@@ -1026,7 +1125,10 @@ mod tests {
     #[test]
     fn transfer_unbinds_and_emits_nep297() {
         let (mut forge, id, agent) = minted();
-        assert_eq!(forge.equipped_skin(agent.clone()).as_deref(), Some(id.as_str()));
+        assert_eq!(
+            forge.equipped_skin(agent.clone()).as_deref(),
+            Some(id.as_str())
+        );
         let bob: AccountId = "bob.fe2vi.testnet".parse().unwrap();
         context(agent.as_str(), 1);
         forge.nft_transfer(bob.clone(), id.clone(), None, Some("desk".into()));
@@ -1041,7 +1143,10 @@ mod tests {
         context(bob.as_str(), 1);
         let wearer: AccountId = "bob.agent.fe2vi.testnet".parse().unwrap();
         forge.bind_skin(id.clone(), wearer.clone());
-        assert_eq!(forge.equipped_skin(wearer.clone()).as_deref(), Some(id.as_str()));
+        assert_eq!(
+            forge.equipped_skin(wearer.clone()).as_deref(),
+            Some(id.as_str())
+        );
         assert_eq!(forge.token_agent(id).as_ref(), Some(&wearer));
     }
 
@@ -1066,53 +1171,96 @@ mod tests {
     }
 
     #[test]
-    fn payout_rounds_down_and_respects_the_cap() {
+    fn payout_pays_creator_and_platform_and_rounds_down() {
         let (mut forge, id, agent) = minted();
-        let same = forge.nft_payout(id.clone(), U128(100), 2);
-        assert_eq!(same.payout.len(), 1);
-        assert_eq!(same.payout.get(&agent).unwrap().0, 100);
+        let treasury: AccountId = "treasury.fe2vi.testnet".parse().unwrap();
+        assert_eq!(forge.platform_account(), treasury);
+        assert_eq!(forge.creator_bps(), 200);
+        assert_eq!(forge.platform_bps(), 300);
+
+        let held = forge.nft_payout(id.clone(), U128(100), 3);
+        assert_eq!(held.payout.get(&treasury).unwrap().0, 3);
+        assert_eq!(held.payout.get(&agent).unwrap().0, 97);
+        assert_eq!(held.payout.len(), 2);
 
         let bob: AccountId = "bob.fe2vi.testnet".parse().unwrap();
         context(agent.as_str(), 1);
         forge.nft_transfer(bob.clone(), id.clone(), None, None);
 
-        let five = forge.nft_payout(id.clone(), U128(100), 2);
-        assert_eq!(five.payout.get(&agent).unwrap().0, 5);
-        assert_eq!(five.payout.get(&bob).unwrap().0, 95);
-        assert_eq!(five.payout.values().map(|value| value.0).sum::<u128>(), 100);
+        let full = forge.nft_payout(id.clone(), U128(100), 3);
+        assert_eq!(full.payout.get(&agent).unwrap().0, 2);
+        assert_eq!(full.payout.get(&treasury).unwrap().0, 3);
+        assert_eq!(full.payout.get(&bob).unwrap().0, 95);
+        assert_eq!(full.payout.values().map(|value| value.0).sum::<u128>(), 100);
 
-        let dust = forge.nft_payout(id.clone(), U128(3), 2);
-        assert_eq!(dust.payout.get(&agent), None);
+        let uneven = forge.nft_payout(id.clone(), U128(40), 3);
+        assert_eq!(uneven.payout.get(&agent), None);
+        assert_eq!(uneven.payout.get(&treasury).unwrap().0, 1);
+        assert_eq!(uneven.payout.get(&bob).unwrap().0, 39);
+
+        let ninety_nine = forge.nft_payout(id.clone(), U128(99), 3);
+        assert_eq!(ninety_nine.payout.get(&agent).unwrap().0, 1);
+        assert_eq!(ninety_nine.payout.get(&treasury).unwrap().0, 2);
+        assert_eq!(ninety_nine.payout.get(&bob).unwrap().0, 96);
+        assert_eq!(
+            ninety_nine
+                .payout
+                .values()
+                .map(|value| value.0)
+                .sum::<u128>(),
+            99
+        );
+
+        let dust = forge.nft_payout(id.clone(), U128(3), 3);
+        assert_eq!(dust.payout.len(), 1);
         assert_eq!(dust.payout.get(&bob).unwrap().0, 3);
 
         let err = catch_unwind(AssertUnwindSafe(|| {
-            forge.nft_payout(id.clone(), U128(100), 1);
+            forge.nft_payout(id.clone(), U128(100), 2);
         }))
         .unwrap_err();
         assert!(panic_text(err).contains("payout exceeds max_len"));
 
+        let desk: AccountId = "desk.fe2vi.testnet".parse().unwrap();
         context("alice.fe2vi.testnet", 0);
-        let err = catch_unwind(AssertUnwindSafe(|| forge.set_royalty_bps(1_001))).unwrap_err();
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_platform(desk.clone()))).unwrap_err();
         assert!(panic_text(err).contains("owner"));
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_creator_bps(1_001))).unwrap_err();
+        assert!(panic_text(err).contains("owner"));
+
         context("owner.fe2vi.testnet", 0);
-        let err = catch_unwind(AssertUnwindSafe(|| forge.set_royalty_bps(1_001))).unwrap_err();
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_creator_bps(800))).unwrap_err();
         assert!(panic_text(err).contains("royalty cap"));
-        forge.set_royalty_bps(1_000);
-        assert_eq!(forge.nft_payout(id, U128(99), 2).payout.get(&agent).unwrap().0, 4);
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_platform_bps(900))).unwrap_err();
+        assert!(panic_text(err).contains("royalty cap"));
+        forge.set_platform(desk.clone());
+        assert_eq!(
+            forge
+                .nft_payout(id.clone(), U128(100), 3)
+                .payout
+                .get(&treasury)
+                .unwrap()
+                .0,
+            3
+        );
+        assert_eq!(forge.nft_payout(id, U128(100), 3).payout.get(&desk), None);
 
         context("registry.fe2vi.testnet", MINT_PRICE_YOCTO);
         let second = forge.mint_skin(agent.clone(), sample());
         context(agent.as_str(), 1);
         let carol: AccountId = "carol.fe2vi.testnet".parse().unwrap();
         forge.nft_transfer(carol.clone(), second.clone(), None, None);
-        let ten = forge.nft_payout(second, U128(99), 2);
-        assert_eq!(ten.payout.get(&agent).unwrap().0, 9);
-        assert_eq!(ten.payout.get(&carol).unwrap().0, 90);
+        let next = forge.nft_payout(second, U128(100), 3);
+        assert_eq!(next.payout.get(&agent).unwrap().0, 2);
+        assert_eq!(next.payout.get(&desk).unwrap().0, 3);
+        assert_eq!(next.payout.get(&carol).unwrap().0, 95);
+        assert_eq!(next.payout.get(&treasury), None);
     }
 
     #[test]
     fn royalty_splits_snapshot_and_stay_inside_the_cap() {
         let (mut forge, first, agent) = minted();
+        let treasury: AccountId = "treasury.fe2vi.testnet".parse().unwrap();
         assert!(forge.royalty_splits().is_empty());
         let partner: AccountId = "partner.fe2vi.testnet".parse().unwrap();
         context("alice.fe2vi.testnet", 0);
@@ -1129,26 +1277,63 @@ mod tests {
         .unwrap_err();
         assert!(panic_text(err).contains("royalty cap"));
         forge.set_royalty_splits(vec![(partner.clone(), 200)]);
-        let err = catch_unwind(AssertUnwindSafe(|| forge.set_royalty_bps(900))).unwrap_err();
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_creator_bps(600))).unwrap_err();
         assert!(panic_text(err).contains("royalty cap"));
 
         let bob: AccountId = "bob.fe2vi.testnet".parse().unwrap();
         context(agent.as_str(), 1);
         forge.nft_transfer(bob.clone(), first.clone(), None, None);
-        let old = forge.nft_payout(first, U128(10_000), 3);
+        let old = forge.nft_payout(first, U128(10_000), 4);
         assert_eq!(old.payout.get(&partner), None);
-        assert_eq!(old.payout.get(&agent).unwrap().0, 500);
+        assert_eq!(old.payout.get(&agent).unwrap().0, 200);
+        assert_eq!(old.payout.get(&treasury).unwrap().0, 300);
         assert_eq!(old.payout.get(&bob).unwrap().0, 9_500);
 
         context("registry.fe2vi.testnet", MINT_PRICE_YOCTO);
         let second = forge.mint_skin(agent.clone(), sample());
         context(agent.as_str(), 1);
         forge.nft_transfer(bob.clone(), second.clone(), None, None);
-        let split = forge.nft_payout(second, U128(10_000), 3);
-        assert_eq!(split.payout.get(&agent).unwrap().0, 500);
+        let split = forge.nft_payout(second, U128(10_000), 4);
+        assert_eq!(split.payout.get(&agent).unwrap().0, 200);
+        assert_eq!(split.payout.get(&treasury).unwrap().0, 300);
         assert_eq!(split.payout.get(&partner).unwrap().0, 200);
         assert_eq!(split.payout.get(&bob).unwrap().0, 9_300);
-        assert_eq!(split.payout.values().map(|value| value.0).sum::<u128>(), 10_000);
+        assert_eq!(
+            split.payout.values().map(|value| value.0).sum::<u128>(),
+            10_000
+        );
+    }
+
+    #[test]
+    fn collection_metadata_matches_nep177() {
+        let (forge, id, _) = minted();
+        let meta = forge.nft_metadata();
+        assert_eq!(meta.spec, "nft-1.0.0");
+        assert_eq!(meta.name, "fe2VI Skins");
+        assert_eq!(meta.symbol, "IRONSKIN");
+        assert!(meta.icon.is_none());
+        assert!(meta.reference.is_none());
+        assert!(meta.reference_hash.is_none());
+        let json = near_sdk::serde_json::to_value(forge.nft_token(id).unwrap().metadata).unwrap();
+        for key in [
+            "title",
+            "description",
+            "media",
+            "media_hash",
+            "copies",
+            "issued_at",
+            "expires_at",
+            "starts_at",
+            "updated_at",
+            "extra",
+            "reference",
+            "reference_hash",
+        ] {
+            assert!(json.get(key).is_some(), "{key}");
+        }
+        assert_eq!(json["title"], "fe2VI skin");
+        assert!(json["media_hash"].is_null());
+        assert!(json["reference"].is_null());
     }
 
     #[test]
@@ -1190,10 +1375,18 @@ mod tests {
         }
         forge.record_result(id.clone(), "heist-night".into(), "rank:1".into(), 4);
         let open = forge.unlocked_traits(id.clone());
-        assert!(open.iter().any(|entry| entry.id == "gold-leaf" && entry.unlocked));
-        assert!(open.iter().any(|entry| entry.id == "cracked-vault" && entry.unlocked));
-        assert!(open.iter().any(|entry| entry.id == "season-crown" && entry.unlocked));
-        assert!(open.iter().any(|entry| entry.id == "molten-trail" && !entry.unlocked && entry.progress == 10));
+        assert!(open
+            .iter()
+            .any(|entry| entry.id == "gold-leaf" && entry.unlocked));
+        assert!(open
+            .iter()
+            .any(|entry| entry.id == "cracked-vault" && entry.unlocked));
+        assert!(open
+            .iter()
+            .any(|entry| entry.id == "season-crown" && entry.unlocked));
+        assert!(open
+            .iter()
+            .any(|entry| entry.id == "molten-trail" && !entry.unlocked && entry.progress == 10));
         let stats = forge.skin_stats(id.clone());
         assert_eq!(stats.wins, 10);
         assert_eq!(stats.heists_cracked, 5);
@@ -1215,8 +1408,12 @@ mod tests {
         forge.equip_trait(id.clone(), "gold-leaf".into());
         forge.equip_trait(id.clone(), "season-crown".into());
         let worn = forge.unlocked_traits(id.clone());
-        assert!(worn.iter().any(|entry| entry.id == "gold-leaf" && entry.equipped));
-        assert!(worn.iter().any(|entry| entry.id == "season-crown" && entry.equipped));
+        assert!(worn
+            .iter()
+            .any(|entry| entry.id == "gold-leaf" && entry.equipped));
+        assert!(worn
+            .iter()
+            .any(|entry| entry.id == "season-crown" && entry.equipped));
 
         let bob: AccountId = "bob.fe2vi.testnet".parse().unwrap();
         forge.nft_transfer(bob.clone(), id.clone(), None, None);
@@ -1225,7 +1422,10 @@ mod tests {
         let next: AccountId = "bob.agent.fe2vi.testnet".parse().unwrap();
         forge.bind_skin(id.clone(), next.clone());
         assert_eq!(forge.token_agent(id.clone()).as_ref(), Some(&next));
-        assert!(forge.unlocked_traits(id).iter().any(|entry| entry.id == "gold-leaf" && entry.equipped));
+        assert!(forge
+            .unlocked_traits(id)
+            .iter()
+            .any(|entry| entry.id == "gold-leaf" && entry.equipped));
     }
 
     #[test]
@@ -1233,7 +1433,10 @@ mod tests {
         let (mut forge, first, agent) = minted();
         context("registry.fe2vi.testnet", MINT_PRICE_YOCTO);
         let second = forge.mint_skin(agent.clone(), sample());
-        assert_eq!(forge.equipped_skin(agent.clone()).as_deref(), Some(second.as_str()));
+        assert_eq!(
+            forge.equipped_skin(agent.clone()).as_deref(),
+            Some(second.as_str())
+        );
         assert!(forge.token_agent(first.clone()).is_none());
         context(agent.as_str(), 1);
         forge.bind_skin(first.clone(), agent.clone());

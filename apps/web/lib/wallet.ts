@@ -7,6 +7,7 @@ export const PLACEHOLDER_CONTRACTS = {
   factory: process.env.NEXT_PUBLIC_FE2VI_FACTORY_ID ?? "factory.fe2vi.testnet",
   registry: process.env.NEXT_PUBLIC_FE2VI_REGISTRY_ID ?? "registry.fe2vi.testnet",
   heist: process.env.NEXT_PUBLIC_FE2VI_HEIST_ID ?? "heist.fe2vi.testnet",
+  treasury: process.env.NEXT_PUBLIC_FE2VI_TREASURY_ID ?? "treasury.fe2vi.testnet",
 };
 
 export function assertTestnet(): "testnet" {

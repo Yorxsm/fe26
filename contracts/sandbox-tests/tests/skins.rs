@@ -21,6 +21,7 @@ struct Forge {
     forge: Contract,
     registry: Account,
     owner: Account,
+    treasury: Account,
 }
 
 async fn boot() -> anyhow::Result<Forge> {
@@ -44,6 +45,7 @@ async fn boot() -> anyhow::Result<Forge> {
         forge,
         registry,
         owner,
+        treasury,
     })
 }
 
@@ -128,7 +130,7 @@ async fn mint_transfer_approve_payout_and_bind() -> anyhow::Result<()> {
             "approval_id": 1,
             "memo": null,
             "balance": "100",
-            "max_len_payout": 2
+            "max_len_payout": 3
         }))
         .deposit(NearToken::from_yoctonear(1))
         .gas(near_workspaces::types::Gas::from_tgas(80))
@@ -136,7 +138,8 @@ async fn mint_transfer_approve_payout_and_bind() -> anyhow::Result<()> {
         .await?
         .into_result()?
         .json()?;
-    assert_eq!(payout["payout"][agent.id().as_str()], "5");
+    assert_eq!(payout["payout"][agent.id().as_str()], "2");
+    assert_eq!(payout["payout"][forge.treasury.id().as_str()], "3");
     assert_eq!(payout["payout"][bob.id().as_str()], "95");
 
     let wearer = forge.worker.dev_create_account().await?;
