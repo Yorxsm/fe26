@@ -3,17 +3,31 @@ type LogoProps = {
   className?: string;
 };
 
-/** Cut-out of public/fe2vi-logo-400.png. Hero is 320px on desktop and 220px below. */
+/**
+ * Hero is the full mark at native resolution, capped in CSS at 280px.
+ * Nav is the fe2V letters only, so 36px of height is the letter height.
+ */
 export function Logo({ variant = "nav", className = "" }: LogoProps) {
   const hero = variant === "hero";
+  if (hero) {
+    return (
+      <img
+        className={`logo-hero ${className}`.trim()}
+        alt="fe2VI"
+        src="/brand/fe2vi-logo@1x.webp"
+        width={361}
+        height={197}
+      />
+    );
+  }
   return (
     <img
-      className={`${hero ? "logo-hero" : "logo-nav"} ${className}`.trim()}
+      className={`logo-nav ${className}`.trim()}
       alt="fe2VI"
-      src="/brand/fe2vi-logo@1x.webp"
-      srcSet="/brand/fe2vi-logo@1x.webp 1x, /brand/fe2vi-logo@2x.webp 2x"
-      width={hero ? 320 : 51}
-      height={hero ? 177 : 28}
+      src="/brand/fe2vi-nav@1x.webp"
+      srcSet="/brand/fe2vi-nav@1x.webp 1x, /brand/fe2vi-nav@2x.webp 2x"
+      width={63}
+      height={36}
     />
   );
 }

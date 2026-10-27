@@ -40,9 +40,12 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
-/** Far enough that the title sits on sky, with the village below the buttons. */
+/** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
 const overviewEye = new THREE.Vector3(-32, 16, 58);
 const overviewAim = new THREE.Vector3(0, 6, -4);
+/** Above the roofs, pitched up. The upper half of the frame is sky. */
+const titleEye = new THREE.Vector3(-46, 24, 72);
+const titleAim = new THREE.Vector3(-18, 34, 24);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
@@ -859,6 +862,7 @@ function CameraDriver({
   lineup,
   street,
   poster,
+  lobby,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
@@ -869,6 +873,7 @@ function CameraDriver({
   lineup: boolean;
   street: boolean;
   poster: string | null;
+  lobby: boolean;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
@@ -892,11 +897,11 @@ function CameraDriver({
       camera.updateProjectionMatrix();
     };
     if (mode === "orbit") {
-      applyFov(48);
+      applyFov(lobby ? 46 : 48);
       rig.enabled = false;
-      aim.copy(overviewAim);
-      eye.copy(overviewEye);
-      const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2);
+      aim.copy(lobby ? titleAim : overviewAim);
+      eye.copy(lobby ? titleEye : overviewEye);
+      const blend = reduce.current || lobby ? 1 : 1 - Math.exp(-delta * 2);
       rig.target.lerp(aim, blend);
       camera.position.lerp(eye, blend);
       camera.lookAt(rig.target);
@@ -1025,6 +1030,7 @@ export default function CityMap({
   lineup,
   street,
   poster,
+  lobby = false,
   onPick,
   onFollow,
   onUnavailable,
@@ -1039,6 +1045,7 @@ export default function CityMap({
   lineup: boolean;
   street: boolean;
   poster: string | null;
+  lobby?: boolean;
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
@@ -1143,7 +1150,7 @@ export default function CityMap({
         <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault

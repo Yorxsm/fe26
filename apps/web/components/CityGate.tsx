@@ -384,6 +384,7 @@ export function CityGate() {
                 lineup={lineup}
                 street={street}
                 poster={poster}
+                lobby={phase === "title"}
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}

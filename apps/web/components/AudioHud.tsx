@@ -57,6 +57,7 @@ export function AudioHud({ live = false }: { live?: boolean }) {
           max={1}
           step={0.05}
           value={volume}
+          style={{ ["--pct" as string]: `${Math.round(volume * 100)}%` }}
           aria-valuetext={`${Math.round(volume * 100)} percent`}
           onChange={(event) => {
             const next = Number(event.target.value);

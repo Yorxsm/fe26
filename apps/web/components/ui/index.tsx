@@ -94,6 +94,7 @@ export function Slider({
         min={0}
         max={100}
         value={value}
+        style={{ ["--pct" as string]: `${value}%` }}
         onChange={(event) => onChange(Number(event.target.value))}
       />
       <span className="num">{value}</span>
