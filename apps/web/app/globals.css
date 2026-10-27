@@ -978,6 +978,9 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
     padding: 24px;
     text-align: center;
   }
+  /* The lobby is framed for a phone. The gate returns once play starts. */
+  .game-root:has(.title-screen) .city-stage { display: block; }
+  .game-root:has(.title-screen) .mobile-gate { display: none; }
 }
 @media (min-width: 1280px) {
   .hud-tl, .hud-bl { left: 24px; }

@@ -43,9 +43,15 @@ const ROOM_PREFIX: Record<string, string> = {
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
 const overviewEye = new THREE.Vector3(-32, 16, 58);
 const overviewAim = new THREE.Vector3(0, 6, -4);
-/** Above the roofs, pitched up. The upper half of the frame is sky. */
-const titleEye = new THREE.Vector3(-46, 24, 72);
-const titleAim = new THREE.Vector3(-18, 34, 24);
+/**
+ * Lobby. Almost level, from above the roofs, so the horizon lands near
+ * mid-frame and the lit plaza fills the lower half. Mobile looks a little
+ * higher because the title block is a larger share of a tall screen.
+ */
+const titleEye = new THREE.Vector3(-22, 12.5, 36);
+const titleAim = new THREE.Vector3(18, 11.1, -6);
+const titleEyeMobile = new THREE.Vector3(-22, 12.5, 36);
+const titleAimMobile = new THREE.Vector3(18, 14.9, -6);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
@@ -61,6 +67,8 @@ type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; ena
 
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
+const driftOffset = new THREE.Vector3();
+const driftUp = new THREE.Vector3(0, 1, 0);
 
 /** glTFLoader strips "." from Object3D names. The authored name stays on userData. */
 function sourceName(node: THREE.Object3D): string {
@@ -899,8 +907,23 @@ function CameraDriver({
     if (mode === "orbit") {
       applyFov(lobby ? 46 : 48);
       rig.enabled = false;
-      aim.copy(lobby ? titleAim : overviewAim);
-      eye.copy(lobby ? titleEye : overviewEye);
+      const mobileLobby = lobby && camera.aspect < 0.7;
+      const baseEye = mobileLobby ? titleEyeMobile : titleEye;
+      const baseAim = mobileLobby ? titleAimMobile : titleAim;
+      if (lobby) {
+        const t = state.clock.elapsedTime;
+        const yaw = reduce.current ? 0 : Math.sin(t * 0.16) * 0.08;
+        const bob = reduce.current ? 0 : Math.sin(t * 0.11) * 0.35;
+        driftOffset.copy(baseEye).sub(baseAim);
+        driftOffset.y = 0;
+        driftOffset.applyAxisAngle(driftUp, yaw);
+        eye.copy(baseAim).add(driftOffset);
+        eye.y = baseEye.y + bob;
+        aim.copy(baseAim);
+      } else {
+        aim.copy(overviewAim);
+        eye.copy(overviewEye);
+      }
       const blend = reduce.current || lobby ? 1 : 1 - Math.exp(-delta * 2);
       rig.target.lerp(aim, blend);
       camera.position.lerp(eye, blend);
