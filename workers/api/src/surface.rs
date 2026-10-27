@@ -3,7 +3,7 @@
 
 use fe2vi_core::{
     demo_tape, districts, follow as follow_edge, leaderboard as rank, unfollow as unfollow_edge,
-    Window, DEMO_EPOCH, WRAP_NEAR,
+    Venue, Window, DEMO_EPOCH, WRAP_NEAR,
 };
 use fe2vi_intents::{
     issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
@@ -60,6 +60,120 @@ pub fn leaderboard(window_raw: Option<&str>, now: u64) -> Outcome {
             "asset": WRAP_NEAR,
             "rows": rows,
         }),
+        false,
+        None,
+    )
+}
+
+pub fn schedule(now: u64) -> Outcome {
+    let slot = fe2vi_core::next_heist(now);
+    json(
+        200,
+        &serde_json::json!({
+            "season": fe2vi_core::SEASON_ID,
+            "season_start": fe2vi_core::SEASON_START,
+            "season_end": fe2vi_core::SEASON_END,
+            "now": now,
+            "live": fe2vi_core::heist_live(now),
+            "countdown_secs": fe2vi_core::countdown_secs(now),
+            "next": slot,
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn heist_board(window_raw: Option<&str>, now: u64) -> Outcome {
+    let Some(window) = fe2vi_core::HeistWindow::parse(window_raw.unwrap_or("today")) else {
+        return http(
+            400,
+            "application/json",
+            r#"{"error":"window must be today, week, or season"}"#.into(),
+            false,
+            None,
+        );
+    };
+    json(
+        200,
+        &serde_json::json!({
+            "window": window_raw.unwrap_or("today"),
+            "now": now,
+            "rows": fe2vi_core::heist_leaderboard(now, window),
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn venues(now: u64) -> Outcome {
+    let quotes = fe2vi_core::default_venue().quotes(now);
+    let notes: Vec<serde_json::Value> = fe2vi_core::venue_notes()
+        .iter()
+        .map(|note| {
+            serde_json::json!({
+                "id": note.id,
+                "offers": note.offers,
+                "testnet": note.testnet,
+                "wired": note.wired,
+            })
+        })
+        .collect();
+    json(
+        200,
+        &serde_json::json!({
+            "network": "mock",
+            "quotes": quotes,
+            "notes": notes,
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn challenges() -> Outcome {
+    let rows: Vec<serde_json::Value> = fe2vi_core::challenges()
+        .iter()
+        .map(|challenge| {
+            serde_json::json!({
+                "id": challenge.id,
+                "category": challenge.category,
+                "title": challenge.title,
+                "flag_hash": challenge.flag_hash,
+                "points": challenge.points,
+                "start_unix": challenge.start_unix,
+                "end_unix": challenge.end_unix,
+            })
+        })
+        .collect();
+    json(
+        200,
+        &serde_json::json!({
+            "targets": "fe2VI sandboxes only",
+            "challenges": rows,
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn events(now: u64) -> Outcome {
+    json(
+        200,
+        &serde_json::json!({
+            "now": now,
+            "events": fe2vi_core::hosted_events(),
+            "live": fe2vi_core::live_events(now).iter().map(|event| event.id).collect::<Vec<_>>(),
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn war_md() -> Outcome {
+    http(
+        200,
+        "text/markdown; charset=utf-8",
+        fe2vi_core::war_room_md(),
         false,
         None,
     )

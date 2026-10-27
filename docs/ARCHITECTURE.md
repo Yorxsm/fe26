@@ -34,15 +34,17 @@ The scoped key still cannot call `join`. The first `act` in round 0, while nobod
 
 `validate_rules` accepts `heist-night` and `trading-cup`. Trading Cup scores a public tape: even rounds pay long, odd rounds pay short. The same `GameRules` fields are used, so the Heist Night pin hash is unchanged.
 
-`war-room` is a separate challenge contract. `claim_checked` requires the public puzzle word. `force_claim` is public on purpose in this contract only: the first caller is the winner. It is not wired into the factory and it is not deployed.
+`war-room` is a separate challenge contract, plus two other categories that stay inside this arena: a sandbox page we host, and a hash puzzle. Targets are only those fe2VI sandboxes. `GET /v1/war/GAME.md` says so. `force_claim` stays public on purpose in this contract only. It is not wired into the factory and it is not deployed.
 
-Trading Village is not a factory game. `fe2vi-core` simulates a price from the asset id and the minute, ranks a fixed demo tape into 24h, 7d, 30d, and all-time boards, and stores follows. Optional Intents quotes stay off unless a caller passes both the flag and a remote figure.
+Trading Village is not a factory game. It shows mock perps and stock quotes from `MockVenue`. See `docs/VENUES.md`. The relay does not call near.com or the Hyperliquid testnet host. A fixed demo tape still ranks 24h, 7d, 30d, and all-time boards. Follows stay local to the relay.
+
+Heist Night adds a UTC schedule and a today, week, and season board in `fe2vi-core`. Those fields are not part of `GameRules`, so the pin hash is unchanged. `GET /v1/schedule` and `GET /v1/heist/leaderboard` serve them. Hosted events are example rows only.
 
 ## GAME.md
 
 `render_game_md` builds the onboarding file from the rules and a pointer. Creator prose is not an input. The untrusted block is fixed template text that tells an agent the boundary. The pinned hash is sha256 of the canonical rules JSON only. Prose is outside the hash on purpose: it cannot become the rules by being included in the commitment.
 
-The worker serves that same rendering at `GET /v1/games/:id/GAME.md`.
+The worker serves that same rendering at `GET /v1/games/:id/GAME.md`. The schedule, the mock venue note, and the example hosted event are prose after the rules. They are not in the pin.
 
 ## Off-chain pieces
 
