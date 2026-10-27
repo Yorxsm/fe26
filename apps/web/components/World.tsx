@@ -22,13 +22,16 @@ const skyFragment = `
   void main() {
     vec3 dir = normalize(vPos);
     float h = clamp(dir.y, 0.0, 1.0);
-    vec3 indigo = vec3(0.106, 0.122, 0.231);
-    vec3 violet = vec3(0.290, 0.231, 0.420);
-    vec3 glow = vec3(0.914, 0.518, 0.353);
-    vec3 color = mix(glow, violet, smoothstep(0.0, 0.08, h));
-    color = mix(color, indigo, smoothstep(0.05, 0.55, h));
-    float star = step(0.997, hash(floor(dir * 180.0)));
-    color += vec3(0.85, 0.88, 1.0) * star * smoothstep(0.15, 0.4, h);
+    vec3 deep = vec3(0.027, 0.039, 0.102);
+    vec3 indigo = vec3(0.059, 0.071, 0.157);
+    vec3 violet = vec3(0.133, 0.102, 0.180);
+    vec3 glow = vec3(0.38, 0.16, 0.10);
+    vec3 color = mix(glow, violet, smoothstep(0.0, 0.04, h));
+    color = mix(color, indigo, smoothstep(0.025, 0.20, h));
+    color = mix(color, deep, smoothstep(0.16, 0.55, h));
+    if (dir.y < 0.0) color = mix(vec3(0.04, 0.045, 0.055), glow, smoothstep(-0.12, 0.0, dir.y));
+    float star = step(0.9975, hash(floor(dir * 220.0)));
+    color += vec3(0.75, 0.82, 0.95) * star * smoothstep(0.28, 0.5, h);
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -47,7 +50,7 @@ function Sky() {
   );
   return (
     <mesh frustumCulled={false} material={material}>
-      <sphereGeometry args={[320, 32, 24]} />
+      <sphereGeometry args={[1400, 32, 24]} />
     </mesh>
   );
 }
@@ -70,7 +73,7 @@ function EnvironmentLight() {
       env = pmrem.fromEquirectangular(texture).texture;
       sky = texture;
       scene.environment = env;
-      scene.environmentIntensity = 0.18;
+      scene.environmentIntensity = 0.08;
       pmrem.dispose();
     });
     return () => {
@@ -155,11 +158,20 @@ function StreetLamps() {
   );
 }
 
+function HorizonField() {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.55, 0]} receiveShadow>
+      <circleGeometry args={[900, 64]} />
+      <meshStandardMaterial color="#101614" roughness={1} metalness={0} envMapIntensity={0.02} />
+    </mesh>
+  );
+}
+
 function GroundMist() {
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.35, 0]}>
-      <circleGeometry args={[78, 24]} />
-      <meshBasicMaterial color="#3a4468" transparent opacity={0.18} depthWrite={false} />
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.4, 0]}>
+      <circleGeometry args={[220, 40]} />
+      <meshBasicMaterial color="#1a1830" transparent opacity={0.34} depthWrite={false} />
     </mesh>
   );
 }
@@ -203,16 +215,17 @@ export function World() {
     <>
       <Sky />
       <EnvironmentLight />
+      <HorizonField />
       <GrassBlades />
       <StreetLamps />
       <GroundMist />
       <Fireflies />
-      <hemisphereLight args={["#8ea0d4", "#2a3348", 0.38]} />
-      <ambientLight intensity={0.16} color="#3a4468" />
+      <hemisphereLight args={["#6678a4", "#161c2c", 0.18]} />
+      <ambientLight intensity={0.06} color="#243048" />
       <directionalLight
         position={[78, 9, 18]}
-        intensity={0.4}
-        color="#ffb07a"
+        intensity={0.24}
+        color="#e09868"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.001}
@@ -224,8 +237,8 @@ export function World() {
         shadow-camera-top={120}
         shadow-camera-bottom={-120}
       />
-      <directionalLight position={[-40, 16, -36]} intensity={0.32} color="#8eaaee" />
-      <fog attach="fog" args={["#2a2448", 220, 640]} />
+      <directionalLight position={[-40, 16, -36]} intensity={0.12} color="#7a90c4" />
+      <fog attach="fog" args={["#100e18", 120, 460]} />
     </>
   );
 }

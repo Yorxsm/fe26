@@ -39,15 +39,15 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
-const OVERVIEW_PITCH = (18 * Math.PI) / 180;
+const OVERVIEW_PITCH = (12 * Math.PI) / 180;
 const OVERVIEW_YAW = Math.PI / 4;
-const OVERVIEW_DIST = 240;
+const OVERVIEW_DIST = 250;
 const overviewEye = new THREE.Vector3(
   Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
   Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
   Math.cos(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
 );
-const overviewAim = new THREE.Vector3(0, 1.2, 0);
+const overviewAim = new THREE.Vector3(0, 22, 0);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
@@ -601,7 +601,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.45, luminanceThreshold: 0.82, luminanceSmoothing: 0.18, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.28, luminanceThreshold: 0.86, luminanceSmoothing: 0.15, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -807,7 +807,7 @@ export default function CityMap({
       className="city-canvas"
       dpr={dpr}
       shadows
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.1, far: 900 }}
+      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -825,7 +825,7 @@ export default function CityMap({
         });
       }}
     >
-      <color attach="background" args={["#1b1f3b"]} />
+      <color attach="background" args={["#070a1a"]} />
       <World />
       <Nature />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
@@ -896,11 +896,11 @@ export default function CityMap({
         enabled={!focusId && followIndex === null && mode !== "cutscene" && !lineup && !street}
         enablePan={false}
         autoRotate={false}
+        target={[overviewAim.x, overviewAim.y, overviewAim.z]}
         minPolarAngle={0.35}
-        maxPolarAngle={1.15}
+        maxPolarAngle={1.5}
         minDistance={8}
         maxDistance={360}
-        target={[0, 1.2, 0]}
       />
     </Canvas>
   );

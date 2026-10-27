@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
@@ -101,8 +101,16 @@ function webglAvailable() {
   }
 }
 
+const HUD_LINKS = [
+  ["/village", "Village"],
+  ["/create", "Create"],
+  ["/forge", "Forge"],
+  ["/agents/demo.registry.testnet", "Agents"],
+] as const;
+
 export function CityGate() {
   const router = useRouter();
+  const path = usePathname();
   const [phase, setPhase] = useState<Phase>("boot");
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
@@ -262,10 +270,11 @@ export function CityGate() {
                   fe2<span>VI</span>
                 </p>
                 <nav className="hud-nav" aria-label="Primary">
-                  <a href="/village">Village</a>
-                  <a href="/create">Create</a>
-                  <a href="/forge">Forge</a>
-                  <a href="/agents/demo.registry.testnet">Agents</a>
+                  {HUD_LINKS.map(([href, label]) => (
+                    <a key={href} href={href} aria-current={href.startsWith("/agents") ? (path.startsWith("/agents") ? "page" : undefined) : path === href ? "page" : undefined}>
+                      {label}
+                    </a>
+                  ))}
                 </nav>
               </div>
               <div className="hud-tr ui-in">

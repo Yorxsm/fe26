@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Manrope, Unbounded } from "next/font/google";
+import { SiteNav } from "@/components/SiteNav";
 import "./globals.css";
 
 const display = Unbounded({
@@ -50,14 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </a>
               <p className="ribbon">Testnet only · fe2vi.space · Caps are platform law</p>
             </div>
-            <nav aria-label="Primary">
-              <a href="/">Map</a>
-              <a href="/village">Village</a>
-              <a href="/create">Create</a>
-              <a href="/forge">Forge</a>
-              <a href="/agents/demo.registry.testnet">Agents</a>
-              <a href="/styleguide">Styles</a>
-            </nav>
+            <SiteNav />
           </header>
           <div id="content">{children}</div>
         </div>
