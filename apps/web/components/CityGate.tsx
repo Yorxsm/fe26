@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
+import { CountdownChip, EventBanner } from "@/components/SpectatorBoards";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import { Logo } from "@/components/Logo";
 import {
-  Anvil,
   ArrowLeft,
   ArrowRight,
   Bot,
@@ -18,7 +18,6 @@ import {
   DoorOpen,
   Eye,
   Gamepad2,
-  Hammer,
   Home,
   ListOrdered,
   Lock,
@@ -87,7 +86,7 @@ function webglAvailable() {
 
 const HUD_LINKS = [
   ["/village", "Village", Home],
-  ["/forge", "Forge", Anvil],
+  ["/lobby", "Lobby", DoorOpen],
   ["/agents/demo.registry.testnet", "Agents", Users],
 ] as const;
 
@@ -165,7 +164,7 @@ export function CityGate() {
 
   useEffect(() => {
     if (phase !== "cutscene") return;
-    const cues = ["quest", "heist", "trade", "breach", "forge", "rank"] as const;
+    const cues = ["quest", "heist", "trade", "breach", "rank", "forge"] as const;
     audio.swell(beat);
     const cue = cues[beat];
     if (cue) audio.sting(cue);
@@ -208,7 +207,7 @@ export function CityGate() {
       return;
     }
     if (!district.href) {
-      setNote("Skin Forge is cosmetic. The mint is an agent spend, one NEAR, and it does not change the game.");
+      setNote("The lobby is the hall. Minting stays in the agent file.");
       return;
     }
     setNote(`${district.name} is in frame.`);
@@ -270,6 +269,8 @@ export function CityGate() {
                 </nav>
               </div>
               <div className="hud-tr ui-in">
+                <CountdownChip />
+                <EventBanner room="map" />
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
                   <QuestLog
@@ -309,12 +310,7 @@ export function CityGate() {
               )}
               {phase === "city" && (
                 <div className="hud-bc">
-                  {focusId === "skin-forge" ? (
-                    <a className="btn btn-primary" href="/forge">
-                      <Hammer aria-hidden="true" strokeWidth={1.75} />
-                      Open the customizer
-                    </a>
-                  ) : DISTRICTS.find((district) => district.id === focusId)?.href ? (
+                  {DISTRICTS.find((district) => district.id === focusId)?.href ? (
                     <a className="btn btn-primary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
                       Enter the room
@@ -446,12 +442,12 @@ export function CityGate() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    onClick={() => (beat + 1 >= CUTSCENE.length ? setPhase("vantage") : setBeat((value) => value + 1))}
+                    onClick={() => (beat + 1 >= CUTSCENE.length ? enterCity("skin-forge") : setBeat((value) => value + 1))}
                   >
                     {beat + 1 >= CUTSCENE.length ? (
                       <>
-                        <Compass aria-hidden="true" strokeWidth={1.75} />
-                        Choose a vantage
+                        <DoorOpen aria-hidden="true" strokeWidth={1.75} />
+                        Enter the lobby
                       </>
                     ) : (
                       <>

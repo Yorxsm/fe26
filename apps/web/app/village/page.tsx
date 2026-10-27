@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Clock, UserPlus } from "lucide-react";
+import { QuoteBoard } from "@/components/SpectatorBoards";
 import { CITY_AGENTS } from "@/lib/city";
 
 const BOARDS: Record<string, string[]> = {
@@ -38,7 +39,7 @@ export default function VillagePage() {
     <main className="board">
       <h1>Trading Village</h1>
       <p className="lede">
-        Open all day. Prices on this page are the simulated tape. A live quote is off unless the worker flag is set, and this page never spends.
+        Perps and stocks on the mock tape. Funding and PnL are computed here. This page never sends an order and never spends.
       </p>
       <div className="strip" aria-label="Board window">
         {Object.keys(BOARDS).map((name) => (
@@ -48,6 +49,7 @@ export default function VillagePage() {
           </button>
         ))}
       </div>
+      <QuoteBoard />
       <section className="card">
         <h2>Leaderboard</h2>
         <ol className="leaderboard">

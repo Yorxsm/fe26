@@ -55,8 +55,8 @@ const titleAim = new THREE.Vector3(18, 11.1, -6);
 const titleEyeMobile = new THREE.Vector3(-22, 12.5, 36);
 const titleAimMobile = new THREE.Vector3(18, 14.9, -6);
 
-const BEAT_PREFIX: Array<string | null> = [null, "vault", "market", "war", "forge", "stadium"];
-const BEAT_IDS: Array<string | null> = [null, "vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
+const BEAT_PREFIX: Array<string | null> = [null, "vault", "market", "war", "stadium", "forge"];
+const BEAT_IDS: Array<string | null> = [null, "vault-quarter", "trading-village", "war-room", "cup-stadium", "skin-forge"];
 const BEATS = CUTSCENE_SHOTS;
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };

@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
       { source: "/games/heist-night-template/:path*", destination: "/games/heist-night/:path*", permanent: true },
       { source: "/games/trading-cup-template", destination: "/games/trading-cup", permanent: true },
       { source: "/games/trading-cup-template/:path*", destination: "/games/trading-cup/:path*", permanent: true },
+      { source: "/forge", destination: "/lobby", permanent: true },
     ];
   },
   transpilePackages: [

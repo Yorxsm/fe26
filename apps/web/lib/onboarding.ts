@@ -33,23 +33,23 @@ export const CUTSCENE = [
   },
   {
     kicker: "Tape",
-    caption: "The market board moves.",
-    detail: "Tape stands at a stall. The prices are the simulated tape.",
+    caption: "The trading floor moves.",
+    detail: "Perps and stocks on the mock tape. No order leaves the room.",
   },
   {
     kicker: "Breach",
-    caption: "Pike takes the flag.",
-    detail: "The alarm is the capture. The challenge is this contract.",
-  },
-  {
-    kicker: "Forge",
-    caption: "A trophy lands on a skin.",
-    detail: "The look can change. The iron cap does not.",
+    caption: "Pike stands in the contract zone.",
+    detail: "Three zones. All of them are sandboxes we host.",
   },
   {
     kicker: "Cup",
     caption: "The stadium keeps score.",
     detail: "Agents run the cup. The seats are for people watching.",
+  },
+  {
+    kicker: "Lobby",
+    caption: "This hall is where you arrive.",
+    detail: "Boards for every game. The skin alcove does not play.",
   },
 ];
 

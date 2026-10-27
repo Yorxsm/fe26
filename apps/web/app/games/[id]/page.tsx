@@ -3,13 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { QuestPing } from "@/components/QuestPing";
-import { SignPanel } from "@/components/SignPanel";
+import { CountdownChip, EventBanner, HeistBoard, QuoteBoard, ScheduleList } from "@/components/SpectatorBoards";
 import { Spectator } from "@/components/Spectator";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
 import { TrustMarks } from "@/components/TrustMarks";
 import { loadGame } from "@/lib/api";
 import { yoctoToNear, type GameCard } from "@/lib/protocol";
-import { PLACEHOLDER_CONTRACTS } from "@/lib/wallet";
 
 const seats = [
   { account: "demo.registry.testnet", action: "scout", points: "1", spent: "0.125 NEAR", revoked: false },
@@ -112,18 +111,11 @@ export default function GamePage() {
         </div>
         <Spectator gameId={game.id} source={source} />
       </div>
-      <SignPanel
-        title={trading ? "Sign long or short" : "Sign act"}
-        call={{
-          receiverId: PLACEHOLDER_CONTRACTS.heist,
-          methodName: "act",
-          args: trading
-            ? { game_id: game.id, action: "long", target: null, stake_yocto: game.rules.per_action_cap_yocto }
-            : { game_id: game.id, action: "scout", target: null, stake_yocto: String(BigInt(game.rules.per_action_cap_yocto) / 4n) },
-          deposit: "1",
-        }}
-        idle="A connected testnet wallet can submit act. The scoped key is still the agent path."
-      />
+      <CountdownChip />
+      <EventBanner room={trading ? "cup-stadium" : "vault-quarter"} />
+      <ScheduleList />
+      {trading ? <QuoteBoard /> : <HeistBoard />}
+      <p className="muted">You are watching. Agents act from GAME.md. This page does not send a transaction.</p>
     </main>
   );
 }

@@ -175,6 +175,7 @@ def build_vault():
     room.mat("glow", (1.0, 0.55, 0.16), 0.0, 0.4, (1.0, 0.45, 0.12), 2.2)
     room.mat("laser", (1.0, 0.16, 0.18), 0.0, 0.3, (1.0, 0.12, 0.14), 3.4)
     room.mat("glass", (0.55, 0.72, 0.78), 0.15, 0.12, (0.4, 0.7, 0.8), 0.35)
+    room.mat("screen", (0.08, 0.09, 0.08), 0.2, 0.4, (0.25, 0.45, 0.22), 0.5)
     shell(room, "wall", "floor", "trim", "metal")
     room.cyl("metal", (0, 1.85, -5.82), 1.72, 0.42, axis="z", segments=20)
     room.cyl("gold", (0, 1.85, -5.55), 1.35, 0.08, axis="z", segments=20)
@@ -215,6 +216,7 @@ def build_vault():
     for x, z in ((-4.8, 2.2), (3.2, 3.6), (-3.6, 4.2)):
         room.box("wood", (x, 0.28, z), (0.55, 0.4, 0.45))
     room.box("cloth", (0.2, 0.08, 0.4), (3.4, 0.04, 2.2))
+    room.box("screen", (-2.2, 2.45, -5.72), (2.6, 1.15, 0.06))
     room.box("metal", (-5.4, 2.4, -5.9), (0.7, 0.9, 0.08))
     room.cyl("trim", (2.8, 2.5, -5.9), 0.28, 0.06, axis="z", segments=12)
     lamps(room, "glow", (-3.5, 0, 3.5), -2.2)
@@ -247,6 +249,7 @@ def build_market():
         if index % 2 == 0:
             room.cyl("goods", (x, 1.05, z + 0.28), 0.12, 0.2, axis="y", segments=8)
     room.box("screen", (0, 2.35, -5.9), (4.4, 1.5, 0.08))
+    room.box("screen", (3.6, 1.7, -5.85), (1.8, 1.1, 0.06))
     room.box("trim", (0, 2.35, -5.78), (4.7, 1.75, 0.06))
     room.box("screen", (5.55, 2.15, -1.2), (0.08, 2.2, 2.4))
     room.box("trim", (5.4, 2.15, -1.2), (0.06, 2.45, 2.65))
@@ -311,6 +314,8 @@ def build_war():
     room.cyl("glow", (0, 3.5, -1.2), 0.22, 0.08, axis="y", segments=10)
     room.box("cloth", (2.4, 0.05, 0.2), (1.8, 0.03, 1.2))
     room.box("screen", (6.7, 1.8, 0.4), (0.06, 0.9, 1.3))
+    for x, mat in ((-4.4, "screen"), (0, "alert"), (4.4, "glow")):
+        room.box(mat, (x, 0.07, -3.6), (2.4, 0.03, 1.8))
     room.finish("room.war")
     export("interior-war.glb")
 
@@ -328,6 +333,7 @@ def build_forge():
     room.mat("skin", (0.72, 0.55, 0.38), 0.05, 0.55)
     room.mat("gold", (0.84, 0.6, 0.18), 0.9, 0.26)
     room.mat("soot", (0.12, 0.1, 0.1), 0.15, 0.85)
+    room.mat("screen", (0.1, 0.08, 0.06), 0.15, 0.45, (0.45, 0.28, 0.12), 0.4)
     shell(room, "wall", "floor", "trim", "wood")
     room.box("wood", (-3.2, 0.45, -2.4), (1.3, 0.7, 0.7))
     room.box("metal", (-3.2, 0.95, -2.4), (0.7, 0.28, 0.38))
@@ -360,6 +366,9 @@ def build_forge():
     room.box("wood", (2.2, 0.28, 3.8), (0.6, 0.4, 0.5))
     room.box("soot", (0.2, 0.16, 3.4), (0.45, 0.2, 0.4))
     room.box("cloth", (-3.2, 0.06, 0.2), (2.0, 0.03, 1.3))
+    for x, z in ((-6.4, -2.4), (-6.4, 1.6), (6.4, -0.6)):
+        room.box("trim", (x, 1.7, z), (0.16, 2.4, 1.4))
+        room.box("screen", (x * 0.985, 1.7, z), (0.05, 1.7, 0.85))
     lamps(room, "glow", (-4.0, -1.2, 2.4), -3.0, y=3.4)
     room.finish("room.forge")
     export("interior-forge.glb")

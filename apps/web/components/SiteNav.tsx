@@ -1,12 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Anvil, Home, Map, Palette, Users, type LucideIcon } from "lucide-react";
+import { DoorOpen, Home, Map, Palette, Users, type LucideIcon } from "lucide-react";
 
 const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/", "Map", Map],
   ["/village", "Village", Home],
-  ["/forge", "Forge", Anvil],
+  ["/lobby", "Lobby", DoorOpen],
   ["/agents/demo.registry.testnet", "Agents", Users],
   ["/styleguide", "Styles", Palette],
 ];

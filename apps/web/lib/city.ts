@@ -35,16 +35,16 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
   {
     id: "trading-village",
     name: "Trading Village",
-    summary: "Open tape, rolling boards, and follow.",
+    summary: "Mock perps and stocks. Funding, PnL, and a leaderboard wall.",
     status: "live",
     href: "/village",
-    station: "Trading Market 24/7",
+    station: "Trading Floor",
     color: "#2f8a56",
   },
   {
     id: "war-room",
     name: "War Room",
-    summary: "A breach challenge on this contract only.",
+    summary: "Contract, web, and crypto sandboxes we host. Nothing outside this arena.",
     status: "live",
     href: "/war-room",
     station: "Hacker War Room",
@@ -52,11 +52,11 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
   },
   {
     id: "skin-forge",
-    name: "Skin Forge",
-    summary: "Cosmetic skins. One NEAR. No effect on the game.",
+    name: "Lobby",
+    summary: "The entry hall. Boards for every game. Skins sit in a side alcove.",
     status: "live",
-    href: "",
-    station: "Skin Forge",
+    href: "/lobby",
+    station: "Lobby",
     color: "#a85a32",
   },
   {
@@ -180,8 +180,8 @@ export const CUTSCENE_SHOTS: CameraShot[] = [
   INTERIOR_SHOTS["vault-quarter"],
   INTERIOR_SHOTS["trading-village"],
   INTERIOR_SHOTS["war-room"],
-  INTERIOR_SHOTS["skin-forge"],
   INTERIOR_SHOTS["cup-stadium"],
+  INTERIOR_SHOTS["skin-forge"],
 ];
 
 export type CastPose = { index: number; x: number; z: number; rot: number; speed: number };
@@ -205,11 +205,11 @@ export const CUTSCENE_CAST: CastPose[][] = [
     { index: 3, x: 12.0, z: 38.4, rot: Math.PI, speed: 0.4 },
     { index: 5, x: 13.5, z: 41.0, rot: Math.PI, speed: 0 },
   ],
+  [{ index: 2, x: -8, z: -41.6, rot: 0, speed: 0 }],
   [
     { index: 6, x: -36.4, z: -22.6, rot: 0, speed: 0 },
     { index: 7, x: -39.4, z: -21.2, rot: 0.6, speed: 0 },
   ],
-  [{ index: 2, x: -8, z: -41.6, rot: 0, speed: 0 }],
 ];
 
 export const DISTRICTS: District[] = LAYOUT.map((district) => {

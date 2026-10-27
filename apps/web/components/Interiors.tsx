@@ -122,6 +122,12 @@ function RoomCopy({ id }: { id: string }) {
         <Text position={[5.35, 0.7, -1.2]} font={DISPLAY_FONT} fontSize={0.18} color="#ff5a4a" anchorX="center">
           EXIT
         </Text>
+        <Text position={[-2.2, 2.75, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          NEXT 18:00Z
+        </Text>
+        <Text position={[-2.2, 2.35, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          MASON 12
+        </Text>
       </>
     );
   }
@@ -138,21 +144,55 @@ function RoomCopy({ id }: { id: string }) {
         <Text position={[-2.6, 1.75, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
           3 SCOUT
         </Text>
+        <Text position={[3.6, 2.05, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#d4d2cc" anchorX="center">
+          PERP NEAR
+        </Text>
+        <Text position={[3.6, 1.7, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#d4d2cc" anchorX="center">
+          STK IRON
+        </Text>
+        <Text position={[3.6, 1.35, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#2fb86a" anchorX="center">
+          PNL
+        </Text>
       </>
     );
   }
   if (id === "war-room") {
     return (
-      <Text position={[0, 1.35, -1.2]} font={DISPLAY_FONT} fontSize={0.2} color="#7ee0ea" anchorX="center">
-        FLAG
-      </Text>
+      <>
+        <Text position={[-4.2, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          CONTRACT
+        </Text>
+        <Text position={[0, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          WEB
+        </Text>
+        <Text position={[4.2, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          CRYPTO
+        </Text>
+      </>
     );
   }
   if (id === "skin-forge") {
     return (
-      <Text position={[3.4, 2.35, -5.58]} font={DISPLAY_FONT} fontSize={0.16} color="#e2b340" anchorX="center">
-        TROPHIES
-      </Text>
+      <>
+        <Text position={[0, 2.7, -5.55]} font={DISPLAY_FONT} fontSize={0.18} color="#d4d2cc" anchorX="center">
+          SCHEDULE
+        </Text>
+        <Text position={[0, 2.25, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          MASON
+        </Text>
+        <Text position={[-6.15, 2.1, -2.4]} rotation={[0, Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          VAULT
+        </Text>
+        <Text position={[-6.15, 2.1, 1.6]} rotation={[0, Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          FLOOR
+        </Text>
+        <Text position={[6.15, 2.1, -0.6]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
+          WAR
+        </Text>
+        <Text position={[3.4, 2.35, -5.58]} font={DISPLAY_FONT} fontSize={0.14} color="#e2b340" anchorX="center">
+          SKINS
+        </Text>
+      </>
     );
   }
   return (

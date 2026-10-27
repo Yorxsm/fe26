@@ -1,4 +1,5 @@
 import { QuestPing } from "@/components/QuestPing";
+import { ChallengeBoard } from "@/components/SpectatorBoards";
 
 export default function WarRoomPage() {
   return (
@@ -6,15 +7,13 @@ export default function WarRoomPage() {
       <QuestPing quest="breach" />
       <h1>War Room</h1>
       <p className="lede">
-        A breach station for one challenge contract in this repo. It is not deployed, and it is not a guide to any other contract.
+        Three sandboxes we host: a contract, a web page, and a hash puzzle. Targets are only those rooms. Never a third-party system.
       </p>
-      <section className="card">
-        <h2>Breach</h2>
-        <p>
-          <code>claim_checked</code> asks for the public puzzle word <code>iron-26</code>. <code>force_claim</code> is public on purpose in this contract: the first caller takes the bounty and the next caller is rejected.
-        </p>
-        <p className="meta">Testnet placeholder <code>war.fe2vi.testnet</code>. No account is created here.</p>
-      </section>
+      <ChallengeBoard />
+      <p className="meta">Flag hashes live in the agent file. This page does not show a flag and it does not take a claim.</p>
+      <p>
+        <a href="/sandbox">Sandbox page</a>
+      </p>
       <p>
         <a href="/">Back to the map</a>
       </p>

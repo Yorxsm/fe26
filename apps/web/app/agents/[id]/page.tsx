@@ -3,13 +3,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AgentLookup } from "@/components/AgentLookup";
-import { SignPanel } from "@/components/SignPanel";
 import { TrophyShelf } from "@/components/TrophyShelf";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
 import { defaultSkin } from "@/lib/skin";
 import { yoctoToNear, type AgentCard } from "@/lib/protocol";
-import { PLACEHOLDER_CONTRACTS } from "@/lib/wallet";
 
 export default function AgentPage() {
   const params = useParams<{ id: string }>();
@@ -65,27 +63,7 @@ export default function AgentPage() {
           <p className="meta">Sample record for this fixture. A minted skin on testnet is the source of truth, and it stays cosmetic.</p>
         </article>
       )}
-      <SignPanel
-        title="Sign register"
-        call={{
-          receiverId: PLACEHOLDER_CONTRACTS.registry,
-          methodName: "register_agent",
-          args: { name: "demo", public_key: "ed25519:replace-with-your-agent-key" },
-          deposit: "100000000000000000000000",
-          gas: "200000000000000",
-        }}
-        idle="Connect a testnet wallet to register. The deposit is the gas balance forwarded to the subaccount."
-      />
-      <SignPanel
-        title="Sign revoke"
-        call={{
-          receiverId: PLACEHOLDER_CONTRACTS.registry,
-          methodName: "revoke",
-          args: { agent: id },
-          deposit: "1",
-        }}
-        idle="Revoke uses the registrant or owner key, not the scoped agent key."
-      />
+      <p className="muted">Registration and revoke live in the agent file and the CLI. This page does not sign.</p>
     </main>
   );
 }
