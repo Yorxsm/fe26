@@ -127,15 +127,19 @@ original IP only, 3D only, testnet only, no deploys. Commit the spec as docs/ART
 
 ## Build check (v3 village)
 
-The outdoor village is in the scene: grass, a ring road, separate buildings, and a camera that opens the roof and sits inside on click. Compare plates are `compare-overview.png`, `compare-agents.png`, `compare-vault.png`, and `compare-market.png`.
+The village is Kenney shells on the pads, under the Poly Haven dawn HDRI, with a corner camera inside each live room. Plates: `overview.png`, `exteriors.png`, `interiors.png`, `lineup.png`, `intro.png`, `compare-overview.png`, `compare-roles.png`.
+
+What is in the scene:
+
+- Dawn HDRI is the sky and the light. The cloud planes that streaked the upper left of the overview are gone. There are no god-ray planes.
+- Trees are the smoother Kenney round and detailed variants, smooth-shaded, instanced, with a wind sway. They stay off the roads and the building fronts, and trees between the camera and its target are culled. They are still a few hundred vertices each, not scanned trees.
+- Buildings use the Kenney commercial atlas with the lilac wall texels replaced: vault sandstone, market timber, war room dark glass, forge red brick, stadium and the plots a warm stone. Awnings, a portico, a gold VAULT board, string lights, stands, floodlights, flags, a dish, a chimney, smoke, fences, cones, scaffold, and a gantry crane are in place. COMING SOON is 3D text on the plots.
+- Interiors are lazy-loaded Kenney furniture rooms. The camera sits at eye height in the open corner. The wall on the camera side is hidden, and agents are parked off that spot.
+- Six original ingot bodies share one rig (idle, walk, celebrate): grey beanie with a keyhole, purple headset and gold trim, navy hoodie, cream coat with a magnifier and badge, orange hard hat, olive goggles and a hip pack. `?frame=lineup` stands them in a row. The city shows those bodies, cycling the six roles.
 
 Still short of the spec:
 
-- The grade is a sunny green overview, not a photographed golden hour. God rays are faint. Fog is only on the far hills. Grass blades are a small cone patch near the origin, not a field of instanced blades. Trees do not sway.
-- Trees are about a hundred low-poly pines, oaks, and birches, tall enough to read, with bushes along the roads. They are not scanned trees and they are not instanced.
-- Roads are dark asphalt with kerbs, a yellow center line, white dashes, and paving sidewalks. The wear and the lamp spacing are still simple boxes.
-- Building walls use CC0 albedo only (no normal or roughness maps, not KTX2). Silhouettes differ: bank dome and columns, market and forge gables, war-room glass and dish, stadium bowl, forge chimney. They are still block-built. Rugs, posters, and shelves are missing. The market chart and the war-room map are easy to miss. Vault lasers are thin.
-- Plazas are grey paving rectangles under the buildings. They replaced the pink discs. They are not landscaped lawns.
-- Coming-soon plots have fences, scaffolds, cones, and a crane. The board is a color panel. The words COMING SOON are on the HUD sign, not painted on the billboard.
-- Agents are the same ingot, scaled up so the ten of them read from the overview, with arms and a blink. They are not six separate sculpted bodies, and there is no studio lineup framed like the role sheet. The walk path follows the road and steps into each live doorway. Foot contact was not re-checked.
-- `station.glb` is about 3.9 MB after meshopt, under the 25 MB budget. There are no LODs. Frame rate was not measured on a laptop GPU. Shots are software WebGL.
+- The kits are not designed buildings. The war room is a shortened tower plus a dish. The vault columns are a portico. The forge chimney is a cabin chimney. The crane is a gantry, not a tower crane.
+- Rooms are three walls and a floor. The stadium interior is a locker at the edge of the field, not the bowl. One side of each room is sparser than the other.
+- Agents are block ingots with role props, not sculpted characters. The walk cycle can slide the feet. The scout pack is a hip kit on the ingot.
+- `station.glb` still holds the old procedural village. Those meshes stay hidden except the plaza pads. Models and textures together are about 12 MB. There are no LODs. Frame rate was not measured on a laptop GPU. These shots are software WebGL.
