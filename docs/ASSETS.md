@@ -16,7 +16,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 
 | File | Bytes | What it is |
 | --- | ---: | --- |
-| `apps/web/public/models/station.glb` | 198104 | Octagonal cutaway station on a steel deck: vault, stadium, market, war room, forge, and three locked rooms, with grate corridors, amber lights, and vents |
+| `apps/web/public/models/station.glb` | 250996 | Octagonal station. The vault has a round door, gold piles, coins, cameras, and red tripwires |
 | `apps/web/public/models/agent.glb` | 53576 | Beveled ingot with stubby legs, a hexagonal core, and the catalog parts below |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 

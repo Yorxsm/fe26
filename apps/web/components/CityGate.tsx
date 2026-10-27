@@ -182,7 +182,7 @@ export function CityGate() {
       setNote("Skin Forge is cosmetic. The mint is an agent spend, one NEAR, and it does not change the game.");
       return;
     }
-    router.push(district.href);
+    setNote(`${district.name} is in frame.`);
   }
 
   function follow(index: number) {
@@ -252,7 +252,11 @@ export function CityGate() {
                 )}
                 {phase === "city" && (
                   <p className="hud-note" role="status">
-                    {note} {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
+                    {note}{" "}
+                    {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
+                    {focusId && DISTRICTS.find((district) => district.id === focusId)?.href && (
+                      <a href={DISTRICTS.find((district) => district.id === focusId)?.href}>Enter the room</a>
+                    )}
                   </p>
                 )}
               </div>

@@ -16,7 +16,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 3
+ART_STEP = 4
 
 # three.js (x, z), radius in meters. Blender y is -z.
 ROOMS = [
@@ -193,7 +193,91 @@ def build_room(kit, mats, district, prefix, cx, cy, radius):
             mats["trim"],
             vertices=6,
         )
+    if prefix == "vault" and ART_STEP >= 4:
+        dress_vault(kit, mats, cx, cy, radius, edges)
     kit.marker(f"marker.{district}", (cx, cy, 0.3), district)
+
+
+def place_disc(name, loc, radius, depth, mat, rot, verts=24):
+    bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=radius, depth=depth, location=loc, rotation=rot)
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.data.materials.append(mat)
+    core.shade_flat(ob)
+    return ob
+
+
+def dress_vault(kit, mats, cx, cy, radius, edges):
+    back = max(edges, key=lambda edge: -(edge[7] * CAM[0] + edge[8] * CAM[1]))
+    _, _, _, _, _, mx, my, ox, oy = back
+    dx, dy = mx - ox * 0.85, my - oy * 0.85
+    facing = (math.pi / 2, 0, math.atan2(oy, ox))
+    door = place_disc("vault.door", (dx, dy, 1.35), 1.55, 0.22, mats["vaultsteel"], facing, 40)
+    kit.keep(door)
+    place_disc("vault.ring", (dx - ox * 0.12, dy - oy * 0.12, 1.35), 1.15, 0.08, mats["trim"], facing, 32)
+    kit.objects.append(bpy.context.active_object)
+    for bolt in range(12):
+        angle = bolt * math.tau / 12
+        # offset in the door plane: door right and up
+        rx, ry = -oy, ox
+        bx = dx + math.cos(angle) * 1.28 * rx
+        by = dy + math.cos(angle) * 1.28 * ry
+        bz = 1.35 + math.sin(angle) * 1.28
+        bolt_ob = place_disc(f"vault.bolt.{bolt}", (bx, by, bz), 0.07, 0.08, mats["trim"], facing, 8)
+        kit.keep(bolt_ob)
+    hub = place_disc("vault.wheel", (dx - ox * 0.2, dy - oy * 0.2, 1.35), 0.18, 0.1, mats["gold"], facing, 12)
+    kit.keep(hub)
+    for spoke in range(3):
+        angle = spoke * math.tau / 3
+        sx = dx - ox * 0.22 + math.cos(angle) * 0.42 * (-oy)
+        sy = dy - oy * 0.22 + math.cos(angle) * 0.42 * ox
+        sz = 1.35 + math.sin(angle) * 0.42
+        bar = box(
+            kit,
+            f"vault.spoke.{spoke}",
+            (sx, sy, sz),
+            (0.62, 0.06, 0.08),
+            mats["gold"],
+            math.atan2(oy, ox) + angle,
+            0.0,
+        )
+        bar.parent = hub
+        bar.matrix_parent_inverse = hub.matrix_world.inverted()
+    # Two ingot piles and a coin scatter, toward the room center.
+    for pile, (px, py) in enumerate(((cx - 1.3, cy - 0.4), (cx + 1.1, cy + 0.8))):
+        index = 0
+        for layer, width in enumerate((4, 3, 2)):
+            for ix in range(width):
+                for iy in range(width):
+                    if index >= 20:
+                        break
+                    box(
+                        kit,
+                        f"vault.bar.{pile}.{index}",
+                        (px + (ix - width / 2) * 0.38, py + (iy - width / 2) * 0.22, 0.22 + layer * 0.2),
+                        (0.34, 0.18, 0.16),
+                        mats["gold"] if index % 3 else mats["goldhi"],
+                        0.15 * pile,
+                        0.01,
+                    )
+                    index += 1
+    for coin in range(28):
+        angle = coin * 0.7
+        rad = 0.4 + (coin % 5) * 0.18
+        kit.cylinder(
+            f"vault.coin.{coin}",
+            (cx + 0.2 + math.cos(angle) * rad, cy + 1.5 + math.sin(angle) * rad * 0.6, 0.16 + (coin % 4) * 0.035),
+            0.1,
+            0.03,
+            mats["gold"],
+            vertices=10,
+        )
+    box(kit, "vault.crate", (cx + 2.2, cy - 1.4, 0.38), (0.7, 0.55, 0.55), mats["crate"], 0.2, 0.02)
+    for cam, (oxs, oys) in enumerate(((1.6, -1.2), (-1.8, 1.1))):
+        box(kit, f"vault.camera.{cam}", (cx + oxs, cy + oys, 2.15), (0.22, 0.16, 0.14), mats["trim"], 0.4, 0.0)
+        kit.cylinder(f"vault.led.{cam}", (cx + oxs, cy + oys - 0.12, 2.05), 0.035, 0.04, mats["alarm"], vertices=8)
+    for beam, height in enumerate((0.55, 0.95, 1.35)):
+        box(kit, f"vault.laser.{beam}", (cx, cy, height), (radius * 1.3, 0.025, 0.025), mats["alarm"], 0.4, 0.0)
 
 
 def corridor(kit, mats, prefix, cx, cy, radius):
@@ -238,6 +322,11 @@ def build_station():
         "amber": core.material("amber", "#ffb347", "#ffb347", 4.0, 0.05, 0.35),
         "vent": core.material("vent", "#ff6a1a", "#ff6a1a", 2.4, 0.1, 0.4),
         "hazard": core.material("hazard", "#d8692a", "#ff8a3d", 0.7, 0.2, 0.45),
+        "vaultsteel": core.material("vaultsteel", "#4a515a", metallic=0.88, roughness=0.32),
+        "gold": core.material("gold", "#f2b227", "#fff1a8", 0.35, 0.92, 0.22),
+        "goldhi": core.material("goldhi", "#fff1a8", "#fff6c8", 0.45, 0.8, 0.18),
+        "crate": core.material("crate", "#d8692a", metallic=0.15, roughness=0.62),
+        "alarm": core.material("alarm", "#ff3355", "#ff3355", 3.2, 0.05, 0.25),
     }
     for prefix, color in INLAY.items():
         mats[f"inlay.{prefix}"] = core.material(f"inlay.{prefix}", color, color, 0.18, 0.4, 0.5)

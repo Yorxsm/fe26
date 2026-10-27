@@ -113,6 +113,10 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
 function Station({ onPick }: { onPick: (district: District) => void }) {
   const gltf = useGLTF("/models/station.glb", false, true);
   const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
+  useFrame((_, delta) => {
+    const wheel = scene.getObjectByName("vault.wheel");
+    if (wheel) wheel.rotateZ(delta * 0.35);
+  });
   return (
     <group>
       <primitive
@@ -437,6 +441,7 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
+      <pointLight position={[-12, 3.4, 8]} intensity={18} color="#ffb060" distance={16} decay={2} />
       <Station onPick={onPick} />
       {CITY_AGENTS.map((agent, index) => (
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
