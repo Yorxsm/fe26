@@ -89,7 +89,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
 ];
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
-const ROOM_XZ: Record<string, [number, number]> = {
+export const ROOM_XZ: Record<string, [number, number]> = {
   "vault-quarter": [-42, 18],
   "cup-stadium": [-8, -42],
   "trading-village": [46, 14],
@@ -147,7 +147,8 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "trading-village": insideRoom(46, 14),
   "war-room": insideRoom(12, 40),
   "skin-forge": insideRoom(-38, -24),
-  "cup-stadium": insideRoom(-8, -42),
+  // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
+  "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
   "launch-pier": { eye: [62, 8, -12], aim: [50, 3, -28] },
   "card-club": { eye: [-42, 8, 12], aim: [-54, 3, -2] },
   "oracle-plaza": { eye: [32, 8, 4], aim: [20, 3, -10] },
@@ -214,31 +215,31 @@ export const CUTSCENE_CAST: CastPose[][] = [
 
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
-  // Local offsets from each room origin, kept 3 m from the entry camera and out of the boards.
+  // World meters. Flank the boards; the frame audit rejects anyone on a screen or under 3 m.
   "vault-quarter": [
-    { index: 0, x: -43.3, z: 13.85, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 1, x: -40.5, z: 14.5, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 9, x: -41.8, z: 15.5, rot: 0.2, speed: 0, clip: "celebrate" },
+    { index: 0, x: -43.3, z: 13.1, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 9, x: -41.85, z: 13.65, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 1, x: -40.6, z: 13.0, rot: Math.PI, speed: 1.1, clip: "walk" },
   ],
   "trading-village": [
-    { index: 2, x: 42.2, z: 12.45, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 5, x: 46.1, z: 12.4, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 8, x: 49.2, z: 12.5, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 2, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 5, x: 44.8, z: 11.6, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 8, x: 47.6, z: 11.4, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "war-room": [
-    { index: 3, x: 9.6, z: 40.6, rot: 0.8, speed: 1.0, clip: "walk" },
-    { index: 5, x: 13.6, z: 38.8, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: 14.2, z: 41.3, rot: -0.7, speed: 0, clip: "celebrate" },
+    { index: 3, x: 9.5, z: 37.55, rot: 0, speed: 1.0, clip: "walk" },
+    { index: 5, x: 11.15, z: 38.15, rot: 0.15, speed: 0, clip: "idle" },
+    { index: 7, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -37.6, z: -23.7, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -37.8, z: -27.2, rot: 0.1, speed: 1.1, clip: "walk" },
-    { index: 6, x: -40.6, z: -24.4, rot: 0.4, speed: 0, clip: "celebrate" },
+    { index: 4, x: -39.7, z: -25.7, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 7, x: -36.1, z: -25.9, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 6, x: -37.9, z: -27.15, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
-    { index: 2, x: -9.1, z: -44.0, rot: 0.15, speed: 0, clip: "idle" },
-    { index: 6, x: -6.7, z: -43.2, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 8, x: -7.9, z: -44.8, rot: 0.3, speed: 0, clip: "celebrate" },
+    { index: 2, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
+    { index: 6, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
+    { index: 8, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
   ],
 };
 

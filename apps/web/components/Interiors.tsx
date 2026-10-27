@@ -4,6 +4,7 @@ import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
 import { CHALLENGES, formatCountdown, heistCountdown, heistRows, mockQuotes } from "@/lib/schedule";
 
 const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
@@ -16,17 +17,17 @@ const ROOMS: Record<string, { url: string; position: [number, number, number] }>
 
 const ROOM_LIGHTS: Record<string, Array<{ at: [number, number, number]; color: string; intensity: number; distance: number }>> = {
   "vault-quarter": [
-    { at: [-3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 14, distance: 6.5 },
-    { at: [3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 14, distance: 6.5 },
-    { at: [0, 2.8, 1.2], color: "#c5cad2", intensity: 9, distance: 5.5 },
+    { at: [-3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
+    { at: [3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
+    { at: [0, 2.8, 1.2], color: "#c5cad2", intensity: 7.4, distance: 5.5 },
   ],
   "trading-village": [
-    { at: [-3.2, 5.4, -1.2], color: "#d5dde6", intensity: 20, distance: 12 },
-    { at: [3.2, 5.4, -1.2], color: "#d5dde6", intensity: 20, distance: 12 },
-    { at: [0, 5.1, 2.2], color: "#c9d3de", intensity: 14, distance: 10 },
+    { at: [-3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
+    { at: [3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
+    { at: [0, 5.1, 2.2], color: "#c9d3de", intensity: 11.5, distance: 10 },
   ],
   "war-room": [
-    { at: [0, 1.5, -0.4], color: "#e7b07a", intensity: 7, distance: 4.5 },
+    { at: [0, 1.35, -0.4], color: "#1f6b45", intensity: 2.2, distance: 3.4 },
     { at: [0, 2.6, -3.6], color: "#d4d2cc", intensity: 5, distance: 6 },
   ],
   "skin-forge": [
@@ -55,14 +56,9 @@ function RoomMesh({ url }: { url: string }) {
       materials.forEach((material) => {
         const standard = material as THREE.MeshStandardMaterial;
         const name = mesh.name.toLowerCase();
+        if (name.includes("beam")) mesh.visible = false;
         if (name.includes("laser")) standard.emissiveIntensity = 2.1;
-        else if (name.includes("beam")) {
-          standard.transparent = true;
-          standard.opacity = 0.16;
-          standard.depthWrite = false;
-          standard.emissive = new THREE.Color("#e7b07a");
-          standard.emissiveIntensity = 0.7;
-        } else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
+        else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
         else standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.05);
       });
     });
@@ -83,6 +79,83 @@ function toneColor(tone: BoardRow["tone"]) {
   if (tone === "green") return "#2fb86a";
   if (tone === "orange") return "#c94a1a";
   return "#d4d2cc";
+}
+
+const SIGN_COPY: Record<BoardSign, { kicker: string; name: string }> = {
+  vault: { kicker: "VAULT", name: "HEIST" },
+  cup: { kicker: "TRADING", name: "CUP" },
+  floor: { kicker: "FLOOR", name: "PERPS" },
+  war: { kicker: "WAR", name: "SANDBOX" },
+};
+
+function drawSignIcon(ctx: CanvasRenderingContext2D, sign: BoardSign, cx: number, cy: number) {
+  ctx.strokeStyle = "#d4d2cc";
+  ctx.fillStyle = "#d4d2cc";
+  ctx.lineWidth = 16;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  if (sign === "vault") {
+    ctx.strokeRect(cx - 70, cy - 96, 140, 192);
+    ctx.beginPath();
+    ctx.arc(cx + 36, cy, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    return;
+  }
+  if (sign === "cup") {
+    ctx.beginPath();
+    ctx.moveTo(cx - 78, cy - 78);
+    ctx.lineTo(cx - 48, cy + 36);
+    ctx.lineTo(cx + 48, cy + 36);
+    ctx.lineTo(cx + 78, cy - 78);
+    ctx.moveTo(cx - 36, cy + 36);
+    ctx.lineTo(cx - 22, cy + 86);
+    ctx.lineTo(cx + 22, cy + 86);
+    ctx.lineTo(cx + 36, cy + 36);
+    ctx.stroke();
+    return;
+  }
+  if (sign === "floor") {
+    [78, 140, 104].forEach((bar, index) => {
+      ctx.fillRect(cx - 86 + index * 62, cy + 86 - bar, 42, bar);
+    });
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 96);
+  ctx.lineTo(cx + 78, cy);
+  ctx.lineTo(cx, cy + 96);
+  ctx.lineTo(cx - 78, cy);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+function paintSign(canvas: HTMLCanvasElement, sign: BoardSign, status: string, tone: BoardRow["tone"]) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const display = quotedFamily("--font-display", "sans-serif");
+  const mono = quotedFamily("--font-mono", "monospace");
+  const copy = SIGN_COPY[sign];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#141416";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#1e1e21";
+  ctx.fillRect(28, 28, canvas.width - 56, canvas.height - 56);
+  drawSignIcon(ctx, sign, 168, canvas.height / 2);
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#8b8a86";
+  ctx.font = `500 64px "${mono}", monospace`;
+  ctx.fillText(copy.kicker, 320, 78);
+  ctx.fillStyle = "#d4d2cc";
+  ctx.font = `700 168px "${display}", sans-serif`;
+  ctx.fillText(copy.name, 320, 168);
+  ctx.fillStyle = toneColor(tone);
+  let statusSize = 112;
+  ctx.font = `500 ${statusSize}px "${mono}", monospace`;
+  while (statusSize > 72 && ctx.measureText(status).width > canvas.width - 380) {
+    statusSize -= 4;
+    ctx.font = `500 ${statusSize}px "${mono}", monospace`;
+  }
+  ctx.fillText(status, 320, 400);
 }
 
 function paintBoard(canvas: HTMLCanvasElement, title: string, rows: BoardRow[], compact: boolean, band: boolean) {
@@ -138,40 +211,48 @@ function Screen({
   rows = [],
   size = [3.4, 1.92],
   rotation = [0, 0, 0],
+  sign,
+  status = "",
+  tone = "green",
 }: {
   position: [number, number, number];
   title: string;
   rows?: BoardRow[];
   size?: [number, number];
   rotation?: [number, number, number];
+  sign?: BoardSign;
+  status?: string;
+  tone?: BoardRow["tone"];
 }) {
-  const key = `${title}|${rows.map((row) => `${row.label}:${row.value ?? ""}:${row.tone ?? ""}`).join("|")}`;
+  const key = sign ? `${sign}|${status}|${tone}` : `${title}|${rows.map((row) => `${row.label}:${row.value ?? ""}:${row.tone ?? ""}`).join("|")}`;
   const [width, height] = size;
-  const compact = height < 0.85;
-  const band = width / height > 8;
+  const compact = !sign && height < 0.85;
+  const band = !sign && width / height > 8;
   const map = useMemo(() => {
     const canvas = document.createElement("canvas");
-    canvas.width = band ? 3072 : 1024;
-    canvas.height = band ? 384 : 576;
+    canvas.width = sign ? 1024 : band ? 3072 : 1024;
+    canvas.height = sign ? 640 : band ? 384 : 576;
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = true;
     texture.anisotropy = 8;
     texture.needsUpdate = true;
     return texture;
-  }, [band]);
+  }, [band, sign]);
   useLayoutEffect(() => {
     let dead = false;
     const draw = () => {
-      paintBoard(map.image as HTMLCanvasElement, title, rows, compact, band);
+      const canvas = map.image as HTMLCanvasElement;
+      if (sign) paintSign(canvas, sign, status, tone);
+      else paintBoard(canvas, title, rows, compact, band);
       map.needsUpdate = true;
     };
     draw();
     const display = quotedFamily("--font-display", "sans-serif");
     const mono = quotedFamily("--font-mono", "monospace");
     const fonts = Promise.all([
-      document.fonts.load(`700 ${band ? 72 : compact ? 150 : 84}px "${display}"`),
-      document.fonts.load(`500 ${band ? 56 : compact ? 132 : 60}px "${mono}"`),
+      document.fonts.load(`700 ${sign ? 168 : band ? 72 : compact ? 150 : 84}px "${display}"`),
+      document.fonts.load(`500 ${sign ? 112 : band ? 56 : compact ? 132 : 60}px "${mono}"`),
     ]).catch(() => undefined);
     const raced = Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 400))]);
     raced.then(() => {
@@ -181,7 +262,7 @@ function Screen({
       dead = true;
     };
     // key is the line text. Repaint when it changes, including after the font load.
-  }, [key, map, compact, band, title]);
+  }, [key, map, compact, band, title, sign, status, tone]);
   return (
     <group position={position} rotation={rotation}>
       <mesh position={[0, 0, -0.06]} castShadow>
@@ -208,6 +289,12 @@ function useClock() {
   return now;
 }
 
+function placed(id: string, name: string): FrameBoard {
+  const board = FRAME_BOARDS[id]?.find((entry) => entry.name === name);
+  if (!board) throw new Error(`${id} ${name}`);
+  return board;
+}
+
 function RoomBoards({ id }: { id: string }) {
   const now = useClock();
   const clock = heistCountdown(now);
@@ -223,92 +310,202 @@ function RoomBoards({ id }: { id: string }) {
     tone: "orange",
   }));
   const quotes = mockQuotes(now);
+  const screen = (name: string, rows: BoardRow[]) => {
+    const board = placed(id, name);
+    return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} />;
+  };
   if (id === "vault-quarter") {
     return (
       <>
-        <Screen
-          position={[-3.6, 1.85, -5.9]}
-          size={[2.8, 1.35]}
-          title="SCHEDULE"
-          rows={[clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }]}
-        />
-        <Screen position={[3.6, 1.85, -5.9]} size={[2.8, 1.35]} title="SEASON" rows={rankRows} />
+        {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }])}
+        {screen("SEASON", rankRows)}
       </>
     );
   }
   if (id === "trading-village") {
     return (
       <>
-        <Screen
-          position={[0, 4.55, -5.78]}
-          size={[11.4, 0.7]}
-          title="TICKER"
-          rows={quotes.map((row) => ({
+        {screen(
+          "TICKER",
+          quotes.map((row) => ({
             label: row.symbol,
             value: (row.mark / 1_000_000).toFixed(2),
             tone: row.pnlMicros >= 0 ? "green" : "orange",
-          }))}
-        />
-        <Screen
-          position={[5.55, 2.35, -5.78]}
-          size={[2.2, 1.5]}
-          title="PNL"
-          rows={quotes.map((row) => ({
+          })),
+        )}
+        {screen(
+          "PNL",
+          quotes.map((row) => ({
             label: `${row.fundingBps} BPS`,
             value: (row.pnlMicros / 1_000_000).toFixed(2),
             tone: row.pnlMicros >= 0 ? "green" : "orange",
-          }))}
-        />
+          })),
+        )}
       </>
     );
   }
   if (id === "war-room") {
     return (
       <>
-        <Screen position={[-4.4, 2.15, -3.4]} size={[2.2, 0.7]} title="CONTRACT" rows={[{ label: "", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" }]} />
-        <Screen position={[0, 2.15, -3.4]} size={[2.2, 0.7]} title="WEB" rows={[{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }]} />
-        <Screen position={[4.4, 2.15, -3.4]} size={[2.2, 0.7]} title="CRYPTO" rows={[{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }]} />
-        <Screen
-          position={[0, 2.95, -5.82]}
-          size={[6.2, 1.05]}
-          title="SCORE"
-          rows={[
-            { label: "CONTRACT", value: "100", tone: "orange" },
-            { label: "WEB", value: "150", tone: "green" },
-            { label: "CRYPTO", value: "80", tone: "orange" },
-          ]}
-        />
+        {screen("CONTRACT", [{ label: "", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" }])}
+        {screen("WEB", [{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }])}
+        {screen("CRYPTO", [{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }])}
+        {screen("SCORE", [
+          { label: "CONTRACT", value: "100", tone: "orange" },
+          { label: "WEB", value: "150", tone: "green" },
+          { label: "CRYPTO", value: "80", tone: "orange" },
+        ])}
+        <HoloMap />
       </>
     );
   }
   if (id === "skin-forge") {
+    const vaultStatus = `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}`;
     return (
       <>
-        <Screen
-          position={[-2.6, 5.15, -5.78]}
-          size={[4.6, 1.35]}
-          title="HALL"
-          rows={[clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }]}
-        />
-        <Screen position={[2.7, 5.15, -5.78]} size={[4.4, 1.35]} title="SEASON" rows={rankRows} />
-        <Screen position={[-4.7, 2.55, -5.72]} size={[1.25, 0.42]} title="VAULT" />
-        <Screen position={[-1.6, 2.55, -5.72]} size={[1.25, 0.42]} title="CUP" />
-        <Screen position={[1.6, 2.55, -5.72]} size={[1.25, 0.42]} title="FLOOR" />
-        <Screen position={[4.7, 2.55, -5.72]} size={[1.25, 0.42]} title="WAR" />
+        {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
+        {screen("SEASON", rankRows)}
+        {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => (
+          <Screen
+            key={board.name}
+            position={board.at}
+            size={board.size}
+            title={board.name}
+            sign={board.sign}
+            status={board.sign === "vault" ? vaultStatus : "LIVE"}
+            tone={board.sign === "vault" && !clock.live ? "orange" : "green"}
+          />
+        ))}
       </>
     );
   }
+  const cup = placed(id, "CUP");
   return (
-    <Screen
-      position={[0, 4.15, -1.15]}
-      size={[4.2, 1.2]}
-      title="CUP"
-      rows={[
-        { label: "MASON", value: "2", tone: "green" },
-        { label: "SCOUT", value: "1", tone: "orange" },
-        { label: "TAPE", value: "WATCH" },
-      ]}
-    />
+    <>
+      <Screen
+        position={cup.at}
+        size={cup.size}
+        title="CUP"
+        rows={[
+          { label: "MASON", value: "2", tone: "green" },
+          { label: "SCOUT", value: "1", tone: "orange" },
+          { label: "TAPE", value: "WATCH" },
+        ]}
+      />
+      <StadiumBeams />
+    </>
+  );
+}
+
+function paintHolo(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(16, 64, 42, 0.72)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "rgba(47, 184, 106, 0.45)";
+  ctx.lineWidth = 2;
+  for (let y = 4; y < canvas.height; y += 10) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(47, 184, 106, 0.85)";
+  ctx.lineWidth = 3;
+  for (let i = 36; i < canvas.width; i += 68) {
+    ctx.beginPath();
+    ctx.moveTo(i, 28);
+    ctx.lineTo(i, canvas.height - 28);
+    ctx.moveTo(28, i);
+    ctx.lineTo(canvas.width - 28, i);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#2fb86a";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(48, 150);
+  ctx.bezierCurveTo(140, 90, 210, 250, 320, 180);
+  ctx.bezierCurveTo(410, 120, 460, 220, 500, 170);
+  ctx.moveTo(180, 70);
+  ctx.bezierCurveTo(160, 180, 240, 300, 200, 420);
+  ctx.stroke();
+}
+
+function HoloMap() {
+  const material = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    paintHolo(canvas);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.needsUpdate = true;
+    return new THREE.MeshBasicMaterial({
+      map,
+      color: "#ffffff",
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+  }, []);
+  return (
+    <mesh position={[0, 1.12, -0.4]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={4}>
+      <planeGeometry args={[1.5, 1.5]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
+}
+
+function StadiumBeams() {
+  const material = useMemo(() => {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+      uniforms: { uHalf: { value: 2.2 }, uGain: { value: 1 } },
+      vertexShader: `
+        varying float vY;
+        varying vec3 vNormal;
+        void main() {
+          vY = position.y;
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying float vY;
+        varying vec3 vNormal;
+        uniform float uHalf;
+        uniform float uGain;
+        void main() {
+          float t = clamp(vY / uHalf * 0.5 + 0.5, 0.0, 1.0);
+          float along = smoothstep(0.0, 0.32, t) * smoothstep(1.0, 0.52, t);
+          float rim = pow(1.0 - abs(normalize(vNormal).z), 1.4);
+          float alpha = along * (0.04 + 0.18 * rim) * uGain;
+          gl_FragColor = vec4(0.91, 0.79, 0.64, alpha);
+        }
+      `,
+    });
+    return mat;
+  }, []);
+  const spots: Array<[number, number, number]> = [
+    [-2.35, 3.35, -0.2],
+    [2.4, 3.35, -2.9],
+    [0.1, 3.35, 0.7],
+  ];
+  return (
+    <>
+      {spots.map((at) => (
+        <mesh key={at.join(",")} position={at} material={material} renderOrder={2}>
+          <coneGeometry args={[0.58, 4.4, 18, 1, true]} />
+        </mesh>
+      ))}
+    </>
   );
 }
 

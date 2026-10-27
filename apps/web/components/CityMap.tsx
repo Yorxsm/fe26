@@ -22,7 +22,8 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { FRAME_BOARDS } from "@/lib/boards";
+import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -778,8 +779,15 @@ function Station({
   );
 }
 
-const tagSlots = new Map<number, { x: number; y: number; depth: number }>();
+const tagSlots = new Map<number, { left: number; top: number; width: number; height: number; depth: number }>();
 const tagPoint = new THREE.Vector3();
+
+function tagRectsOverlap(
+  a: { left: number; top: number; width: number; height: number },
+  b: { left: number; top: number; width: number; height: number },
+) {
+  return a.left < b.left + b.width && a.left + a.width > b.left && a.top < b.top + b.height && a.top + a.height > b.top;
+}
 
 function stackNameTag(
   index: number,
@@ -792,21 +800,25 @@ function stackNameTag(
   tagPoint.project(camera);
   const sx = (tagPoint.x * 0.5 + 0.5) * size.width;
   const sy = (1 - (tagPoint.y * 0.5 + 0.5)) * size.height;
+  const width = Math.max(chip.offsetWidth, 72);
+  const height = Math.max(chip.offsetHeight, 28);
+  const gap = 4;
+  const others = [...tagSlots.entries()].filter(([other]) => other !== index).map(([, slot]) => slot);
   let stack = 0;
   let fade = false;
-  const placed = [...tagSlots.entries()].filter(([other]) => other !== index).map(([, slot]) => slot);
-  for (let step = 0; step < 3; step += 1) {
-    const y = sy - step * 30;
-    const hit = placed.find((slot) => Math.abs(slot.x - sx) < 112 && Math.abs(slot.y - y) < 26);
+  for (let step = 0; step < 4; step += 1) {
+    const rect = { left: sx - width / 2, top: sy - height / 2 - step * (height + gap), width, height };
+    const hit = others.find((slot) => tagRectsOverlap(rect, slot));
     if (!hit) {
       stack = step;
       break;
     }
     stack = step;
-    if (step === 2 && tagPoint.z > hit.depth) fade = true;
+    if (step === 3) fade = tagPoint.z > Math.min(...others.map((slot) => slot.depth));
   }
-  tagSlots.set(index, { x: sx, y: sy - stack * 30, depth: tagPoint.z });
-  chip.style.transform = stack ? `translateY(${-stack * 30}px)` : "";
+  const top = sy - height / 2 - stack * (height + gap);
+  tagSlots.set(index, { left: sx - width / 2, top, width, height, depth: tagPoint.z });
+  chip.style.transform = stack ? `translateY(${-stack * (height + gap)}px)` : "";
   chip.style.opacity = fade ? "0.32" : "1";
 }
 
@@ -1130,7 +1142,7 @@ function AgentMesh({
       />
       <group ref={tag} position={[0, 5.2, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
-          <div ref={tagEl} className={audit ? "name-tag audit" : "name-tag"}>
+          <div ref={tagEl} className={audit ? "name-tag audit" : "name-tag"} data-agent={agent.name}>
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
           </div>
@@ -1687,6 +1699,126 @@ function WindowGlow() {
   );
 }
 
+type AuditRect = { left: number; top: number; right: number; bottom: number };
+
+function auditHits(a: AuditRect, b: AuditRect) {
+  const width = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return width > 2 && height > 2;
+}
+
+/** Projects the interior crew against the boards while `?frame=` is set. The shot script reads `#frame-audit`. */
+function FrameAudit() {
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+  const point = useRef(new THREE.Vector3());
+  useFrame(() => {
+    const frame = new URLSearchParams(window.location.search).get("frame");
+    const boards = frame ? FRAME_BOARDS[frame] : undefined;
+    const cast = frame ? INTERIOR_CAST[frame] : undefined;
+    const origin = frame ? ROOM_XZ[frame] : undefined;
+    let node = document.getElementById("frame-audit");
+    if (!frame || frame.endsWith("-out") || !boards || !cast || !origin) {
+      if (node) node.textContent = "";
+      return;
+    }
+    if (!node) {
+      node = document.createElement("p");
+      node.id = "frame-audit";
+      node.hidden = true;
+      document.body.appendChild(node);
+    }
+    const canvas = gl.domElement.getBoundingClientRect();
+    const project = (x: number, y: number, z: number) => {
+      point.current.set(x, y, z);
+      const view = point.current.clone().applyMatrix4(camera.matrixWorldInverse);
+      point.current.project(camera);
+      return {
+        x: canvas.left + (point.current.x * 0.5 + 0.5) * canvas.width,
+        y: canvas.top + (1 - (point.current.y * 0.5 + 0.5)) * canvas.height,
+        front: view.z < 0,
+      };
+    };
+    const bounds = (samples: Array<{ x: number; y: number; front: boolean }>) => {
+      const front = samples.filter((sample) => sample.front);
+      if (front.length < 4) return null;
+      const xs = front.map((sample) => sample.x);
+      const ys = front.map((sample) => sample.y);
+      return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) };
+    };
+    const boardRects = boards.map((board) => {
+      const [ox, oz] = origin;
+      const [lx, ly, lz] = board.at;
+      const [w, h] = board.size;
+      const samples = [-1, 1].flatMap((sx) => [-1, 1].map((sy) => project(ox + lx + (sx * w) / 2, ly + (sy * h) / 2, oz + lz)));
+      return { name: board.name, rect: bounds(samples) };
+    });
+    const agents = cast.map((pose) => {
+      const name = CITY_AGENTS[pose.index]?.name ?? String(pose.index);
+      const samples = [-1, 1].flatMap((sx) =>
+        [-1, 1].flatMap((sz) => [0.02, 1.75].map((y) => project(pose.x + sx * 0.46, y, pose.z + sz * 0.3))),
+      );
+      const hx = 0.46;
+      const hz = 0.3;
+      const cam = camera.position;
+      const cx = Math.max(pose.x - hx, Math.min(cam.x, pose.x + hx));
+      const cy = Math.max(0.02, Math.min(cam.y, 1.75));
+      const cz = Math.max(pose.z - hz, Math.min(cam.z, pose.z + hz));
+      const meters = Math.hypot(cam.x - cx, cam.y - cy, cam.z - cz);
+      const chip = document.querySelector(`[data-agent="${name}"]`) as HTMLElement | null;
+      const visible = Boolean(chip && chip.style.visibility !== "hidden" && chip.getBoundingClientRect().width > 2);
+      const tag = visible && chip ? chip.getBoundingClientRect() : null;
+      return {
+        name,
+        meters: Math.round(meters * 100) / 100,
+        body: bounds(samples),
+        tag: tag ? { left: tag.left, top: tag.top, right: tag.right, bottom: tag.bottom } : null,
+      };
+    });
+    const issues: string[] = [];
+    for (const board of boardRects) {
+      if (!board.rect) {
+        issues.push(`${board.name} is off screen`);
+        continue;
+      }
+      if (board.rect.left < canvas.left - 1 || board.rect.top < canvas.top - 1 || board.rect.right > canvas.right + 1 || board.rect.bottom > canvas.bottom + 1) {
+        issues.push(`${board.name} is cut off`);
+      }
+    }
+    agents.forEach((agent, index) => {
+      if (agent.meters < 3) issues.push(`${agent.name} is ${agent.meters.toFixed(2)} m from the camera`);
+      for (const board of boardRects) {
+        if (!board.rect) continue;
+        if (agent.body && auditHits(agent.body, board.rect)) issues.push(`${agent.name} covers ${board.name}`);
+        if (agent.tag && auditHits(agent.tag, board.rect)) issues.push(`${agent.name} tag covers ${board.name}`);
+      }
+      for (const other of agents.slice(index + 1)) {
+        if (agent.body && other.body && auditHits(agent.body, other.body)) issues.push(`${agent.name} overlaps ${other.name}`);
+        if (agent.tag && other.tag && auditHits(agent.tag, other.tag)) issues.push(`${agent.name} tag overlaps ${other.name} tag`);
+      }
+    });
+    const ready = agents.length > 0 && agents.every((agent) => agent.body && agent.tag);
+    const round = (rect: AuditRect | null) =>
+      rect
+        ? {
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            right: Math.round(rect.right),
+            bottom: Math.round(rect.bottom),
+          }
+        : null;
+    node.textContent = JSON.stringify({
+      ready,
+      ok: ready && issues.length === 0,
+      room: frame,
+      issues,
+      agents: agents.map((agent) => ({ ...agent, body: round(agent.body), tag: round(agent.tag) })),
+      boards: boardRects.map((board) => ({ name: board.name, rect: round(board.rect) })),
+    });
+  }, 1);
+  return null;
+}
+
 function DrawProbe() {
   const gl = useThree((state) => state.gl);
   const armed = useRef(false);
@@ -1866,6 +1998,7 @@ export default function CityMap({
       ) : null}
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
       <DrawProbe />
+      <FrameAudit />
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
       ) : (

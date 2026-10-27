@@ -325,8 +325,9 @@ def vault_door(room):
 
 
 def lasers(room):
-    for height in (0.9, 1.35, 1.8):
-        room.box("laser", (0.1, height, -1.6), (4.2, 0.008, 0.008))
+    # Under the boards (board bottoms sit at y 1.18). The housings share these heights.
+    for height in (0.36, 0.54, 0.72):
+        room.box("laser", (0.0, height, -5.55), (4.6, 0.008, 0.008))
 
 
 def shell_box(room, wall, floor, ceiling, height):
@@ -390,12 +391,10 @@ def shell_war(room):
     room.mat("floor", (0.05, 0.05, 0.06), 0.15, 0.55)
     room.mat("trim", (0.12, 0.12, 0.13), 0.45, 0.45)
     room.mat("metal", (0.16, 0.17, 0.18), 0.8, 0.35)
-    room.mat("glow", (0.55, 0.28, 0.1), 0.0, 0.4, (0.79, 0.29, 0.1), 0.45)
     height = 3.7
     shell_box(room, "wall", "floor", "metal", height)
     for z in (-2.4, 0.6, 3.2):
         room.box("trim", (0, 3.48, z), (12.8, 0.08, 0.16))
-    room.box("glow", (0, 0.84, -0.4), (1.45, 0.03, 1.45))
     room.box("metal", (0, 0.78, -0.4), (1.7, 0.06, 1.7))
 
 
@@ -425,7 +424,6 @@ def shell_stadium(room):
     room.mat("trim", (0.24, 0.24, 0.25), 0.35, 0.48)
     room.mat("metal", (0.34, 0.35, 0.37), 0.82, 0.32)
     room.mat("glow", (0.7, 0.48, 0.22), 0.0, 0.35, (0.85, 0.55, 0.22), 0.5)
-    room.mat("beam", (0.55, 0.38, 0.18), 0.0, 0.5, (0.9, 0.62, 0.28), 0.85)
     height = 6.2
     shell_box(room, "wall", "floor", "metal", height)
     room.box("trim", (0, 0.2, -1.25), (4.8, 0.22, 3.6))
@@ -437,12 +435,11 @@ def shell_stadium(room):
         rise = 0.38 + index * 0.42
         room.box("trim", (x, rise / 2, -0.2), (0.85, rise, 6.2))
         room.box("trim", (-x, rise / 2, -0.2), (0.85, rise, 6.2))
-    room.box("metal", (0, 5.7, -1.1), (0.12, 2.2, 0.12))
-    room.box("metal", (0, 4.55, -1.1), (4.8, 0.12, 0.12))
-    room.box("metal", (0, 4.55, -1.1), (0.12, 0.12, 1.6))
-    for x, z in ((-1.7, -2.5), (1.7, -2.5), (0, 0.55)):
-        room.cone("metal", (x, 5.55, z), 0.08, 0.28, 0.42, axis="y", segments=8)
-        room.cone("beam", (x, 3.15, z), 0.85, 0.06, 4.6, axis="y", segments=8)
+    # Bar sits above the scoreboard (board top y 3.63), not through the text.
+    room.box("metal", (0, 5.0, -1.28), (0.08, 2.3, 0.08))
+    room.box("metal", (0, 3.82, -1.28), (4.55, 0.07, 0.08))
+    for x, z in ((-2.35, -0.2), (2.4, -2.9), (0.1, 0.7)):
+        room.cone("metal", (x, 5.55, z), 0.07, 0.2, 0.28, axis="y", segments=8)
 
 
 def shell_for(kind):
@@ -555,9 +552,9 @@ def build():
         spawn(rug, 0.2, 0, 0.6)
         for x, z in ((-6.2, -4.6), (6.2, -4.6), (0.2, -5.2)):
             spawn(camera, x, 2.72, z, yaw=0.6 if x < 0 else -0.6)
-        for height in (0.9, 1.35, 1.8):
-            spawn(speaker, -2.35, height, -1.6, yaw=math.pi / 2)
-            spawn(speaker, 2.35, height, -1.6, yaw=-math.pi / 2)
+        for height in (0.36, 0.54, 0.72):
+            spawn(speaker, -2.4, height, -5.55, yaw=math.pi / 2)
+            spawn(speaker, 2.4, height, -5.55, yaw=-math.pi / 2)
 
     def room_market():
         for x in (-3.8, 0.0, 3.6):
@@ -608,12 +605,12 @@ def build():
 
     def room_lobby():
         spawn(desk, 0, 0, 1.7, yaw=math.pi)
-        spawn(q_chair, 0.7, 0, 2.5, yaw=0)
+        spawn(q_chair, -3.6, 0, 0.15, yaw=math.pi / 2)
         spawn(q_sofa, -2.4, 0, -0.6, yaw=math.pi)
         spawn(q_sofa, 2.4, 0, -0.6, yaw=0)
         spawn(q_table, 0.1, 0, -0.5)
         spawn(bench, -4.6, 0, -2.6, yaw=math.pi / 2)
-        spawn(bench, 1.2, 0, 2.2, yaw=math.pi / 2)
+        spawn(bench, 4.6, 0, 0.4, yaw=math.pi / 2)
         spawn(rug, 0, 0, -0.7)
         spawn(rug, 3.6, 0, -3.3, yaw=math.pi / 2)
         spawn(q_plant, -4.6, 0, -2.4)
@@ -628,8 +625,8 @@ def build():
         spawn(books, 0.25, 0.78, 1.45)
 
     def room_stadium():
-        spawn(side, 0, 0.32, -1.25)
-        spawn(trophy, 0, 0.9, -1.25)
+        spawn(side, -1.15, 0.32, -2.2)
+        spawn(trophy, -1.15, 0.9, -2.2)
         for x in (-2.15, 2.15):
             spawn(barrier, x, 0.32, -1.25, yaw=math.pi / 2)
         spawn(barrier, 0, 0.32, 0.45)
