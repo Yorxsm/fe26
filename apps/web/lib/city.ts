@@ -119,8 +119,11 @@ export const LINEUP_SPOTS: Array<[number, number]> = [
 
 export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8 / 1.5, 18], aim: [0, 2.7 / 1.5, 0], fov: 50 };
 
-/** Eye height on the ring road, close enough that the smaller faces still read. */
-export const STREET_SHOT: CameraShot = { eye: [-16.5, 1.65, 12.5], aim: [-12, AGENT_HEAD * 0.72, 8], fov: 46 };
+/**
+ * Street scale. Eye height, 7.6 units back from the agents in front of the
+ * vault, so a lamp and the building stay in frame. The old eye sat inside a body.
+ */
+export const STREET_SHOT: CameraShot = { eye: [-41.2, 1.85, 38.2], aim: [-41.2, 1.35, 30.6], fov: 46 };
 
 export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: [0, 3.35 / 1.5, 0], fov: 28 };
 

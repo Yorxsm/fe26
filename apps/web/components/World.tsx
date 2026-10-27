@@ -133,24 +133,42 @@ const LAMP_SPOTS: Array<[number, number]> = [
 ];
 
 function StreetLamps() {
+  const poles = useRef<THREE.InstancedMesh>(null);
+  const heads = useRef<THREE.InstancedMesh>(null);
+  const pools = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const dummy = new THREE.Object3D();
+    const write = (field: THREE.InstancedMesh | null, y: number, rotX: number) => {
+      if (!field) return;
+      LAMP_SPOTS.forEach(([x, z], index) => {
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(rotX, 0, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        field.setMatrixAt(index, dummy.matrix);
+      });
+      field.instanceMatrix.needsUpdate = true;
+    };
+    write(poles.current, 2.6, 0);
+    write(heads.current, 5.3, 0);
+    write(pools.current, 0.05, -Math.PI / 2);
+  }, []);
   return (
     <group>
-      {LAMP_SPOTS.map(([x, z], index) => (
-        <group key={`${x}-${z}`} position={[x, 0, z]}>
-          <mesh position={[0, 2.6, 0]}>
-            <cylinderGeometry args={[0.06, 0.08, 5.2, 6]} />
-            <meshStandardMaterial color="#2a241c" roughness={0.7} metalness={0.3} />
-          </mesh>
-          <mesh position={[0, 5.3, 0]}>
-            <sphereGeometry args={[0.22, 8, 6]} />
-            <meshStandardMaterial color="#ffd7a0" emissive="#ffb15a" emissiveIntensity={2.4} roughness={0.4} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-            <circleGeometry args={[5.2, 20]} />
-            <meshBasicMaterial color="#ffb56a" transparent opacity={0.38} depthWrite={false} />
-          </mesh>
-          <pointLight position={[0, 4.6, 0]} color="#ffb060" intensity={14} distance={26} decay={2} />
-        </group>
+      <instancedMesh ref={poles} args={[undefined, undefined, LAMP_SPOTS.length]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.06, 0.08, 5.2, 6]} />
+        <meshStandardMaterial color="#2a241c" roughness={0.7} metalness={0.3} />
+      </instancedMesh>
+      <instancedMesh ref={heads} args={[undefined, undefined, LAMP_SPOTS.length]} castShadow>
+        <sphereGeometry args={[0.22, 8, 6]} />
+        <meshStandardMaterial color="#ffd7a0" emissive="#ffb15a" emissiveIntensity={2.4} roughness={0.4} />
+      </instancedMesh>
+      <instancedMesh ref={pools} args={[undefined, undefined, LAMP_SPOTS.length]}>
+        <circleGeometry args={[5.2, 20]} />
+        <meshBasicMaterial color="#ffb56a" transparent opacity={0.38} depthWrite={false} />
+      </instancedMesh>
+      {LAMP_SPOTS.map(([x, z]) => (
+        <pointLight key={`${x}-${z}`} position={[x, 4.6, z]} color="#ffb060" intensity={14} distance={26} decay={2} />
       ))}
     </group>
   );

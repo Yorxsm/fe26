@@ -19,6 +19,7 @@ import { Nature } from "@/components/Nature";
 import { World } from "@/components/World";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
@@ -74,6 +75,8 @@ const driftUp = new THREE.Vector3(0, 1, 0);
 const fit = AGENT_SCALE / 5.3;
 const FULL_CAP = 24;
 const CULL_DISTANCE = 140;
+/** Composer passes, filled when the grade is built. Shadow maps are not in this list. */
+const postBudget = { composerPasses: 0 };
 const impostorDummy = new THREE.Object3D();
 const impostorColor = new THREE.Color();
 const projected = new THREE.Vector3();
@@ -84,7 +87,7 @@ function readCrowd(): { count: number; measure: boolean; full: boolean } {
   const raw = params.get("agents");
   if (raw === null) return { count: CITY_AGENTS.length, measure: false, full: false };
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 1) return { count: CITY_AGENTS.length, measure: false, full: false };
+  if (!Number.isFinite(parsed) || parsed < 0) return { count: CITY_AGENTS.length, measure: false, full: false };
   return { count: Math.min(5000, Math.floor(parsed)), measure: true, full: params.get("detail") === "all" };
 }
 
@@ -361,11 +364,13 @@ function Kits({
       const finished = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
       finished.forEach(dropBakedShadow);
     });
+    mergeStatic(cloned, () => false, true);
     return cloned;
   }, [gltf.scene]);
   useLayoutEffect(() => {
     const openId = beatId ?? (frameMode === "in" ? focusId : null);
     scene.traverse((node) => {
+      if (node.userData.mergedAway) return;
       const id = node.userData.district as string | undefined;
       if (!id) return;
       node.visible = !(openId === id && INTERIOR_IDS.has(id));
@@ -462,6 +467,106 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
   return root;
 }
 
+function chainShown(node: THREE.Object3D) {
+  let current: THREE.Object3D | null = node;
+  while (current) {
+    if (!current.visible) return false;
+    current = current.parent;
+  }
+  return true;
+}
+
+function districtOf(node: THREE.Object3D) {
+  let current: THREE.Object3D | null = node;
+  while (current) {
+    const id = current.userData.district;
+    if (typeof id === "string" && id) return id;
+    current = current.parent;
+  }
+  return "";
+}
+
+function materialSignature(material: THREE.Material) {
+  const standard = material as THREE.MeshStandardMaterial;
+  const cache = material.customProgramCacheKey?.() ?? "";
+  return [
+    material.type,
+    standard.map?.uuid ?? "",
+    standard.color?.getHexString() ?? "",
+    standard.emissive?.getHexString() ?? "",
+    standard.roughness ?? "",
+    standard.metalness ?? "",
+    standard.emissiveIntensity ?? "",
+    standard.alphaTest ?? "",
+    material.transparent ? 1 : 0,
+    material.opacity ?? "",
+    material.side ?? "",
+    material.depthWrite === false ? 0 : 1,
+    cache,
+  ].join("|");
+}
+
+function geometrySignature(geometry: THREE.BufferGeometry) {
+  const names = Object.keys(geometry.attributes).sort();
+  return `${names.join(",")}${geometry.index ? ":i" : ""}`;
+}
+
+/**
+ * Collapse static meshes that share a material into one geometry.
+ * Animated parts, roofs, and screens stay separate so they can still move or hide.
+ * `perDistrict` keeps a building's batch on that building, so opening an interior hides only that batch.
+ */
+function mergeStatic(root: THREE.Object3D, skip: (mesh: THREE.Mesh) => boolean, perDistrict: boolean) {
+  root.updateMatrixWorld(true);
+  const groups = new Map<string, THREE.Mesh[]>();
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry || mesh.userData.mergedAway) return;
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
+    if (!chainShown(mesh) || skip(mesh)) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (materials.length !== 1 || mesh.renderOrder !== 0) return;
+    const district = perDistrict ? districtOf(mesh) : "";
+    const key = `${district}|${materialSignature(materials[0])}|${geometrySignature(mesh.geometry)}`;
+    const list = groups.get(key);
+    if (list) list.push(mesh);
+    else groups.set(key, [mesh]);
+  });
+  const inverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const relative = new THREE.Matrix4();
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const geometries: THREE.BufferGeometry[] = [];
+    for (const mesh of list) {
+      const geometry = mesh.geometry.clone();
+      relative.multiplyMatrices(inverse, mesh.matrixWorld);
+      geometry.applyMatrix4(relative);
+      geometries.push(geometry);
+    }
+    let merged: THREE.BufferGeometry | null = null;
+    try {
+      merged = mergeGeometries(geometries, false);
+    } catch {
+      merged = null;
+    }
+    geometries.forEach((geometry) => geometry.dispose());
+    if (!merged) continue;
+    merged.computeBoundingSphere();
+    const batch = new THREE.Mesh(merged, list[0].material);
+    batch.castShadow = list.some((mesh) => mesh.castShadow);
+    batch.receiveShadow = list.some((mesh) => mesh.receiveShadow);
+    batch.frustumCulled = true;
+    const district = perDistrict ? districtOf(list[0]) : "";
+    if (district) batch.userData.district = district;
+    batch.userData.name = sourceName(list[0]);
+    root.add(batch);
+    for (const mesh of list) {
+      mesh.visible = false;
+      mesh.userData.mergedAway = true;
+    }
+  }
+}
+
 function moodFor(x: number, z: number): Mood {
   let bestId = "";
   let bestDistance = Infinity;
@@ -497,7 +602,20 @@ function Station({
   beatPrefix: string | null;
 }) {
   const gltf = useGLTF("/models/station.glb", false, true);
-  const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
+  const scene = useMemo(() => {
+    const root = dress(gltf.scene.clone(true));
+    mergeStatic(root, (mesh) => {
+      let node: THREE.Object3D | null = mesh;
+      while (node) {
+        const bits = sourceName(node).split(".");
+        if (bits.includes("roof") || bits.includes("wheel") || bits.includes("holo") || bits.includes("beacon")) return true;
+        if (bits.includes("screen") || (bits[0] === "war" && bits.includes("map"))) return true;
+        node = node.parent;
+      }
+      return false;
+    }, true);
+    return root;
+  }, [gltf.scene]);
   useLayoutEffect(() => {
     paintScreen(scene, "market.screen", paintMarket);
     paintScreen(scene, "stadium.screen", paintStadium);
@@ -508,6 +626,7 @@ function Station({
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
     scene.traverse((node) => {
+      if (node.userData.mergedAway) return;
       const bits = sourceName(node).split(".");
       if (!bits.includes("roof")) return;
       // The market kit is the exterior. The shell roof sits in front of it and reads as a black slab.
@@ -565,7 +684,8 @@ function Station({
 function tagLift(index: number, time: number, paused: boolean) {
   const here = placeAgent(index, time, paused);
   let lift = 0;
-  for (let other = 0; other < index; other += 1) {
+  const start = Math.max(0, index - 40);
+  for (let other = start; other < index; other += 1) {
     const pose = placeAgent(other, time, paused);
     const dx = here.x - pose.x;
     const dz = here.z - pose.z;
@@ -664,6 +784,7 @@ function AgentMesh({
   const tag = useRef<THREE.Group>(null);
   const clipName = useRef("");
   const clipAction = useRef<THREE.AnimationAction | null>(null);
+  const clipFade = useRef<THREE.AnimationAction[]>([]);
   const mood = useRef<Mood>("trait");
   const skin = useMemo(() => displaySkin(agent, index, poster), [agent, index, poster]);
   const scene = useMemo(() => {
@@ -702,10 +823,15 @@ function AgentMesh({
       const col = index % 4;
       const row = Math.floor(index / 4);
       pose = { x: (col - 1.5) * 7, y: 0, z: (1 - row) * 7, rot: 0 };
-    } else if (poster === "street" && index < 3) {
-      const x = -15 + index * 3.4;
-      const z = 11 - index * 2.1;
-      pose = { x, y: 0, z, rot: Math.atan2(-18 - x, 14 - z) };
+    } else if (poster === "street" && index < 4) {
+      const spots: Array<[number, number]> = [
+        [-46.2, 31.2],
+        [-43.4, 30.1],
+        [-40.2, 31.4],
+        [-37.0, 30.3],
+      ];
+      const spot = spots[index];
+      pose = { x: spot[0], y: 0, z: spot[1], rot: 1.15 };
     }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
@@ -714,6 +840,14 @@ function AgentMesh({
     }
     const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
     const planted = !poster && speed < 0.4;
+    const fading = clipFade.current;
+    if (fading.length) {
+      clipFade.current = fading.filter((action) => {
+        if (action.getEffectiveWeight() > 0.02) return true;
+        action.stop();
+        return false;
+      });
+    }
     if (poster === "walk" || poster === "expressions") {
       const hold = poster === "expressions" ? ["idle", "walk", "celebrate", "caught"][index] ?? "idle" : "walk";
       const token = `${hold}-hold`;
@@ -731,23 +865,35 @@ function AgentMesh({
         clipName.current = token;
       }
     } else {
-      const nextClip = paused || lineup || poster || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
+      const holdStill = paused || lineup || (poster !== null && poster !== "street");
+      const nextClip = holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
       if (clipName.current !== nextClip) {
-        mixer.stopAllAction();
+        const prev = clipAction.current;
         const clip = gltf.animations.find((entry) => entry.name === nextClip);
-        clipAction.current = clip ? mixer.clipAction(clip).reset().play() : null;
+        const next = clip ? mixer.clipAction(clip) : null;
+        if (prev && next && prev !== next) {
+          prev.fadeOut(0.2);
+          clipFade.current.push(prev);
+          next.reset().fadeIn(0.2).play();
+        } else if (next) {
+          next.reset().play();
+        }
+        clipAction.current = next;
         clipName.current = nextClip;
       }
-      if (clipAction.current) clipAction.current.timeScale = nextClip === "walk" ? Math.min(3.2, Math.max(0.25, speed / 1.7)) : 1;
+      if (clipAction.current) {
+        const pace = poster === "street" ? 1 : nextClip === "walk" ? Math.min(3.2, Math.max(0.25, speed / 1.7)) : 1;
+        clipAction.current.timeScale = pace;
+      }
     }
-    if (!paused || poster === "walk" || poster === "expressions") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
+    if (!paused || poster === "walk" || poster === "expressions" || poster === "street") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
       poster === "face" ? index === 0
       : poster === "front6" || poster === "q34" ? index < 6
       : poster === "expressions" || poster === "walk" || poster === "trails" ? index < 4
       : poster === "eyes" ? index < 6
       : poster === "skins" ? index < 12
-      : poster === "street" ? index < 8
+      : poster === "street" ? index < 4
       : !lineup || index < LINEUP_SPOTS.length;
     if (group.current) {
       group.current.visible = shown;
@@ -755,7 +901,7 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34" && poster !== "street";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
     }
     if (face && group.current?.visible) {
@@ -858,6 +1004,8 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
     });
     composer.addPass(normal);
     composer.addPass(new RenderPass(scene, camera));
+    // NormalPass draws the scene with shadows off. RenderPass draws the shadow map, then the color.
+    // SSAO, depth of field, bloom, and ACES share the one EffectPass below. That is 3 composer passes.
     composer.addPass(
       new EffectPass(
         camera,
@@ -867,6 +1015,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
+    postBudget.composerPasses = composer.passes.length;
     return { composer, dof };
   }, [camera, gl, scene]);
 
@@ -1097,24 +1246,85 @@ function CameraDriver({
   return null;
 }
 
-function ImpostorCrowd({ count, skip, paused }: { count: number; skip: number; paused: boolean }) {
+function nearestIndices(count: number, time: number, paused: boolean, camera: THREE.Vector3, cap: number) {
+  if (cap <= 0 || count <= 0) return [];
+  const scored: Array<[number, number]> = [];
+  for (let index = 0; index < count; index += 1) {
+    const pose = placeAgent(index, time, paused);
+    const dx = pose.x - camera.x;
+    const dy = pose.y - camera.y;
+    const dz = pose.z - camera.z;
+    scored.push([dx * dx + dy * dy + dz * dz, index]);
+  }
+  scored.sort((a, b) => a[0] - b[0]);
+  return scored.slice(0, Math.min(cap, count)).map((entry) => entry[1]);
+}
+
+function sameSlots(a: readonly number[], b: readonly number[]) {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort((x, y) => x - y);
+  const right = [...b].sort((x, y) => x - y);
+  return left.every((value, index) => value === right[index]);
+}
+
+/** Swap a full-detail slot only when a nearer agent is clearly closer than the farthest one. */
+function pickFull(count: number, time: number, paused: boolean, camera: THREE.Vector3, previous: readonly number[]) {
+  const cap = Math.min(FULL_CAP, count);
+  if (previous.length !== cap) return nearestIndices(count, time, paused, camera, cap);
+  const distance = (index: number) => {
+    const pose = placeAgent(index, time, paused);
+    const dx = pose.x - camera.x;
+    const dy = pose.y - camera.y;
+    const dz = pose.z - camera.z;
+    return dx * dx + dy * dy + dz * dz;
+  };
+  let farthest = previous[0];
+  let farthestD = -1;
+  const inside = new Set(previous);
+  for (const index of previous) {
+    const value = distance(index);
+    if (value > farthestD) {
+      farthestD = value;
+      farthest = index;
+    }
+  }
+  let closest = -1;
+  let closestD = Infinity;
+  for (let index = 0; index < count; index += 1) {
+    if (inside.has(index)) continue;
+    const value = distance(index);
+    if (value < closestD) {
+      closestD = value;
+      closest = index;
+    }
+  }
+  const margin = 4;
+  if (closest >= 0 && closestD + margin * margin < farthestD) {
+    return previous.filter((index) => index !== farthest).concat(closest);
+  }
+  return previous;
+}
+
+function ImpostorCrowd({ count, hide, paused }: { count: number; hide: readonly number[]; paused: boolean }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const camera = useThree((state) => state.camera);
-  const slots = Math.max(0, count - skip);
+  const hidden = useRef(new Set<number>());
+  hidden.current = new Set(hide);
   useLayoutEffect(() => {
     const field = mesh.current;
     if (!field) return;
-    for (let index = 0; index < slots; index += 1) {
-      impostorColor.set(PAINT_COLORS[(index + skip) % PAINT_COLORS.length]);
+    for (let index = 0; index < count; index += 1) {
+      impostorColor.set(PAINT_COLORS[index % PAINT_COLORS.length]);
       field.setColorAt(index, impostorColor);
     }
     if (field.instanceColor) field.instanceColor.needsUpdate = true;
-  }, [skip, slots]);
+  }, [count]);
   useFrame((state) => {
     const field = mesh.current;
     if (!field) return;
     const t = state.clock.elapsedTime;
-    for (let index = skip; index < count; index += 1) {
+    const full = hidden.current;
+    for (let index = 0; index < count; index += 1) {
       const pose = placeAgent(index, t, paused);
       const dx = pose.x - camera.position.x;
       const dy = pose.y - camera.position.y;
@@ -1122,20 +1332,106 @@ function ImpostorCrowd({ count, skip, paused }: { count: number; skip: number; p
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       projected.set(pose.x, AGENT_HEAD, pose.z).project(camera);
       const outside = projected.z < 0 || projected.z > 1 || Math.abs(projected.x) > 1.15 || Math.abs(projected.y) > 1.15;
-      const hidden = dist > CULL_DISTANCE || (outside && dist > 18);
+      const culled = full.has(index) || dist > CULL_DISTANCE || (outside && dist > 18);
       impostorDummy.position.set(pose.x, 0, pose.z);
       impostorDummy.rotation.set(0, pose.rot, 0);
-      impostorDummy.scale.setScalar(hidden ? 0 : AGENT_SCALE);
+      impostorDummy.scale.setScalar(culled ? 0 : AGENT_SCALE);
       impostorDummy.updateMatrix();
-      field.setMatrixAt(index - skip, impostorDummy.matrix);
+      field.setMatrixAt(index, impostorDummy.matrix);
     }
     field.instanceMatrix.needsUpdate = true;
   });
-  if (slots === 0) return null;
+  if (count === 0) return null;
   return (
-    <instancedMesh ref={mesh} args={[undefined, undefined, slots]} frustumCulled={false} castShadow={false} receiveShadow>
+    <instancedMesh ref={mesh} args={[undefined, undefined, count]} frustumCulled={false} castShadow={false} receiveShadow>
       <capsuleGeometry args={[0.16, 0.62, 2, 6]} />
       <meshStandardMaterial roughness={0.55} metalness={0.15} />
+    </instancedMesh>
+  );
+}
+
+function StressCrowd({
+  count,
+  fullDetail,
+  paused,
+  audit,
+  focusId,
+  onFollow,
+}: {
+  count: number;
+  fullDetail: boolean;
+  paused: boolean;
+  audit: boolean;
+  focusId: string | null;
+  onFollow: (index: number) => void;
+}) {
+  const cap = fullDetail ? count : Math.min(FULL_CAP, count);
+  const [slots, setSlots] = useState<number[]>(() => nearestIndices(count, 0, paused, overviewEye, cap));
+  const held = useRef(slots);
+  const wait = useRef(0);
+  useFrame((state, delta) => {
+    if (fullDetail) return;
+    wait.current += delta;
+    if (wait.current < 0.3) return;
+    wait.current = 0;
+    const next = pickFull(count, state.clock.elapsedTime, paused, state.camera.position, held.current);
+    if (sameSlots(next, held.current)) return;
+    const copy = next.slice();
+    held.current = copy;
+    setSlots(copy);
+  });
+  const shown = fullDetail ? Array.from({ length: count }, (_, index) => index) : slots;
+  return (
+    <>
+      {shown.map((index) => (
+        <AgentMesh
+          key={`crowd-${index}`}
+          agent={CITY_AGENTS[index % CITY_AGENTS.length]}
+          index={index}
+          paused={paused}
+          audit={audit}
+          focusId={focusId}
+          lineup={false}
+          poster={null}
+          onFollow={onFollow}
+          rim={count <= FULL_CAP}
+        />
+      ))}
+      {!fullDetail && count > shown.length ? <ImpostorCrowd count={count} hide={shown} paused={paused} /> : null}
+    </>
+  );
+}
+
+function WindowGlow() {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const spots = useMemo(() => {
+    const list: Array<[number, number, number]> = [];
+    for (const district of DISTRICTS) {
+      if (district.status !== "live") continue;
+      list.push([district.x - 2.6, 4.8, district.z + 7.8]);
+      list.push([district.x + 2.4, 6.6, district.z + 7.8]);
+      list.push([district.x, 8.8, district.z + 7.5]);
+    }
+    return list;
+  }, []);
+  useLayoutEffect(() => {
+    const field = mesh.current;
+    if (!field) return;
+    const dummy = new THREE.Object3D();
+    spots.forEach((position, index) => {
+      dummy.position.set(position[0], position[1], position[2]);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      field.setMatrixAt(index, dummy.matrix);
+    });
+    field.instanceMatrix.needsUpdate = true;
+  }, [spots]);
+  if (spots.length === 0) return null;
+  return (
+    <instancedMesh ref={mesh} args={[undefined, undefined, spots.length]}>
+      <planeGeometry args={[1.5, 1.15]} />
+      <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={3.4} roughness={0.35} />
     </instancedMesh>
   );
 }
@@ -1165,7 +1461,7 @@ function FrameStats({ count }: { count: number }) {
     const node = document.getElementById("stress-readout");
     if (node) {
       const fps = run.frames / run.time;
-      node.textContent = `${count} agents · ${fps.toFixed(1)} fps · ${run.calls} draws · dpr ${gl.getPixelRatio().toFixed(2)}`;
+      node.textContent = `${count} agents · ${fps.toFixed(1)} fps · ${run.calls} draws · ${postBudget.composerPasses} passes · dpr ${gl.getPixelRatio().toFixed(2)}`;
     }
     run.frames = 0;
     run.time = 0;
@@ -1207,7 +1503,6 @@ export default function CityMap({
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
-  const fullSlots = crowdOn ? (crowd.full ? crowd.count : Math.min(crowd.count, FULL_CAP)) : 0;
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
 
@@ -1267,18 +1562,7 @@ export default function CityMap({
           </Text>
         </group>
       ))}
-      {DISTRICTS.filter((district) => district.status === "live").flatMap((district) =>
-        [
-          [district.x - 2.6, 4.8, district.z + 7.8],
-          [district.x + 2.4, 6.6, district.z + 7.8],
-          [district.x, 8.8, district.z + 7.5],
-        ].map((position) => (
-          <mesh key={`${district.id}-${position[1]}`} position={position as [number, number, number]}>
-            <planeGeometry args={[1.5, 1.15]} />
-            <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={3.4} roughness={0.35} />
-          </mesh>
-        )),
-      )}
+      <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
         <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 8]} color="#ffb060" intensity={18} distance={22} decay={2} />
       ))}
@@ -1303,25 +1587,13 @@ export default function CityMap({
         </mesh>
       ) : null}
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
-      {crowdOn
-        ? Array.from({ length: fullSlots }, (_, index) => (
-            <AgentMesh
-              key={`crowd-${index}`}
-              agent={CITY_AGENTS[index % CITY_AGENTS.length]}
-              index={index}
-              paused={paused}
-              audit={audit}
-              focusId={focusId}
-              lineup={false}
-              poster={null}
-              onFollow={onFollow}
-              rim={crowd.count <= FULL_CAP}
-            />
-          ))
-        : (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
-            <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
-          ))}
-      {crowdOn && !crowd.full && crowd.count > FULL_CAP ? <ImpostorCrowd count={crowd.count} skip={FULL_CAP} paused={paused} /> : null}
+      {crowdOn ? (
+        <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
+      ) : (
+        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
+          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
+        ))
+      )}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} />
