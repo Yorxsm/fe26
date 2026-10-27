@@ -1,0 +1,6 @@
+# Wrangler local variables for workers/api. Copy to workers/api/.dev.vars.
+# Leave the ingest token empty for an open relay. Every response is labeled unverified.
+# Set a token only in your local file or with `wrangler secret put`. Do not commit it.
+
+FE26_NETWORK=testnet
+FE26_INGEST_TOKEN=

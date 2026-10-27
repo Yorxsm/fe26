@@ -1,0 +1,22 @@
+[package]
+name = "fe26-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "fe26 command line for the NEAR testnet arena."
+
+[[bin]]
+name = "fe26"
+path = "src/main.rs"
+
+[dependencies]
+fe26-core = { path = "../fe26-core" }
+clap = { version = "4.5", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+near-crypto = "=0.28.0"
+near-primitives = "=0.28.0"
+borsh.workspace = true
+base64 = "0.22"

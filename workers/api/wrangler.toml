@@ -1,0 +1,20 @@
+name = "fe26-api"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-01-15"
+workers_dev = true
+
+# Build the wasm shim locally. Do not deploy from this foundation.
+[build]
+command = "worker-build --release"
+
+[durable_objects]
+bindings = [
+  { name = "SPECTATOR", class_name = "SpectatorFeed" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SpectatorFeed"]
+
+[vars]
+FE26_NETWORK = "testnet"

@@ -1,0 +1,22 @@
+[package]
+name = "fe26-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Cloudflare Worker: HTTP API, GAME.md, and a Durable Object spectator feed."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fe26-core = { path = "../../crates/fe26-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker = { version = "=0.8.6", default-features = false }
+# Pin the 0.8.6 macro and sys crates. Cargo would otherwise float them to 0.8.7,
+# whose Durable Object trait does not match worker 0.8.6.
+worker-macros = "=0.8.6"
+worker-sys = "=0.8.6"

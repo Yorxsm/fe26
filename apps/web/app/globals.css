@@ -1,0 +1,190 @@
+:root {
+  --ink: #241910;
+  --ink-soft: #5c4b3a;
+  --paper: #f4ecdf;
+  --paper-2: #efe4d2;
+  --night: #1b1612;
+  --night-2: #2a221b;
+  --copper: #b8613a;
+  --copper-2: #e7a07a;
+  --moss: #1f6a45;
+  --stamp: #8d2f2b;
+  --line: rgba(36, 25, 16, 0.14);
+  --glow: rgba(184, 97, 58, 0.18);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  min-height: 100vh;
+  color: var(--paper);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, var(--glow), transparent 55%),
+    linear-gradient(180deg, #241c16 0%, var(--night) 40%, #14110e 100%);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a { color: inherit; }
+
+.shell { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  border-bottom: 1px solid rgba(244, 236, 223, 0.16);
+  padding-bottom: 18px;
+  margin-bottom: 28px;
+}
+
+.brand {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 600;
+  font-size: 42px;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  text-decoration: none;
+}
+
+.brand span { color: var(--copper-2); }
+
+.ribbon {
+  margin: 8px 0 0;
+  color: var(--copper-2);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+nav { display: flex; gap: 16px; }
+
+nav a {
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+}
+
+nav a:hover, nav a:focus-visible { border-bottom-color: var(--copper-2); }
+
+h1, h2 {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+}
+
+h1 { font-size: 40px; line-height: 1.05; }
+
+.lede { max-width: 62ch; color: #eadfce; margin-top: 0; }
+
+.banner, .note, .error, .ok {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.banner { background: rgba(184, 97, 58, 0.12); }
+
+.note { color: #eadfce; }
+
+.error {
+  color: #6d1c16;
+  background: #ffd9d4;
+  border: 2px solid #8d2f2b;
+  font-weight: 500;
+}
+
+.ok {
+  color: #0d3d28;
+  background: #d9f5e6;
+  border: 2px solid #1f6a45;
+  font-weight: 500;
+}
+
+.grid { display: grid; gap: 16px; }
+
+.card {
+  background: var(--paper);
+  color: var(--ink);
+  padding: 18px 18px 16px;
+  border-radius: 2px 18px 2px 2px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+}
+
+.card a { color: var(--ink); }
+
+.card-head, .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.meta { color: var(--ink-soft); font-size: 12px; }
+
+.stamps { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.stamp {
+  border: 2px solid currentColor;
+  padding: 2px 7px 1px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-2deg);
+}
+
+.stamp.good { color: var(--moss); }
+.stamp.warn { color: var(--stamp); }
+.stamp.neutral { color: var(--ink-soft); transform: rotate(1deg); }
+
+form { display: grid; gap: 12px; }
+
+label { display: grid; gap: 4px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+input, select, button {
+  font: inherit;
+  color: var(--ink);
+  background: white;
+  border: 1px solid rgba(36, 25, 16, 0.25);
+  padding: 8px 10px;
+}
+
+button, .button {
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  width: fit-content;
+}
+
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+pre, .feed {
+  background: #120f0c;
+  color: #f3e7d4;
+  padding: 12px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.feed { min-height: 180px; display: grid; gap: 8px; }
+
+.feed .line { border-left: 2px solid var(--copper); padding-left: 8px; }
+
+.two { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 16px; }
+
+.status-revoked { color: var(--stamp); font-weight: 500; }
+.status-active { color: var(--moss); font-weight: 500; }
+
+@media (max-width: 800px) {
+  .top, .two, .card-head, .row { display: grid; }
+  h1 { font-size: 32px; }
+  .brand { font-size: 34px; }
+}

@@ -1,0 +1,14 @@
+title = "fe26"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public sha256 of the Heist Night example rules, plus placeholder env files."
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)\.dev\.vars\.example$''',
+]
+regexes = [
+  '''320421571d7cf9e178b0b5c0aa1dce8d3ea3f2dbf0bdc507849aaf70a121651d''',
+]
