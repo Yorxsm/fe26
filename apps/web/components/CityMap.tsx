@@ -94,9 +94,9 @@ function dropBakedShadow(material: THREE.Material) {
   if (!standard.isMeshStandardMaterial || !standard.map) return;
   standard.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <map_fragment>",
-      `#include <map_fragment>
-       if (diffuseColor.r < 0.045 && diffuseColor.g < 0.045 && diffuseColor.b < 0.045) discard;`,
+      "#include <color_fragment>",
+      `#include <color_fragment>
+       if (diffuseColor.r < 0.05 && diffuseColor.g < 0.05 && diffuseColor.b < 0.05) discard;`,
     );
   };
   standard.customProgramCacheKey = () => "fe2vi-drop-baked-shadow";
@@ -270,6 +270,10 @@ function warmAtlas(source: THREE.Texture, key: string, tint: string): THREE.Text
     const min = Math.min(r, g, b);
     const luma = (r + g + b) / 3;
     const lilac = b + 0.02 >= r && b + 0.02 >= g && max - min < 0.36 && luma > 0.12 && luma < 0.92;
+    if (r < 0.08 && g < 0.08 && b < 0.08) {
+      data[i + 3] = 0;
+      continue;
+    }
     if (!lilac) continue;
     const shade = 0.42 + luma * 0.9;
     data[i] = Math.min(255, Math.round(wr * shade));
@@ -332,6 +336,8 @@ function Kits({
             if (copy.map) {
               copy.map = warmAtlas(copy.map, atlasKey, grade.tint);
               copy.color.set("#ffffff");
+              copy.alphaTest = 0.4;
+              copy.transparent = false;
             } else {
               copy.color.set(grade.tint);
             }
@@ -399,6 +405,7 @@ function paintColor(material: THREE.MeshStandardMaterial, finish: PaintFinish, e
 }
 
 function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
+  const cooled = new WeakSet<THREE.Material>();
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
@@ -427,7 +434,10 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
       if (!("envMapIntensity" in material)) return;
       const metal = "metalness" in material ? material.metalness : 0;
       material.envMapIntensity = metal > 0.45 ? 0.16 : 0.03;
-      if (!finish && material.color) material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
+      if (!finish && material.color && !cooled.has(material)) {
+        material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
+        cooled.add(material);
+      }
     });
     const label = sourceName(mesh);
     if (label.startsWith("terrain.")) {
@@ -500,7 +510,8 @@ function Station({
     scene.traverse((node) => {
       const bits = sourceName(node).split(".");
       if (!bits.includes("roof")) return;
-      node.visible = bits[0] !== openPrefix;
+      // The market kit is the exterior. The shell roof sits in front of it and reads as a black slab.
+      node.visible = bits[0] !== openPrefix && bits[0] !== "market";
     });
     const holo = scene.getObjectByName("war.holo");
     if (holo) holo.rotateY(delta * 0.8);

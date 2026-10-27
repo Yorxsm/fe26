@@ -156,15 +156,6 @@ function StreetLamps() {
   );
 }
 
-function HorizonField() {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.55, 0]} receiveShadow>
-      <circleGeometry args={[900, 64]} />
-      <meshStandardMaterial color="#2a4034" emissive="#1c3428" emissiveIntensity={0.55} roughness={1} metalness={0} envMapIntensity={0.02} />
-    </mesh>
-  );
-}
-
 function GroundMist() {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.4, 0]}>
@@ -213,7 +204,6 @@ export function World() {
     <>
       <Sky />
       <EnvironmentLight />
-      <HorizonField />
       <GrassBlades />
       <StreetLamps />
       <GroundMist />
