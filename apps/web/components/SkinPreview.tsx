@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
-import { ROLE_COLORS, roleVisible, type Mood, type SkinTraits } from "@/lib/skin";
+import { ROLE_COLORS, expressionVisible, roleVisible, type Mood, type SkinTraits } from "@/lib/skin";
 import type { Object3D } from "three";
 
 function sourceName(node: Object3D): string {
@@ -35,7 +35,8 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
   useLayoutEffect(() => {
     const color = ROLE_COLORS[traits.role] ?? ROLE_COLORS[0];
     scene.traverse((node) => {
-      const shown = roleVisible(sourceName(node), traits, mood);
+      const label = sourceName(node);
+      const shown = roleVisible(label, traits, mood) ?? expressionVisible(label, traits, mood);
       if (shown !== null) node.visible = shown;
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh) return;

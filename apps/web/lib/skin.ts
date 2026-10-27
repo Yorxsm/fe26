@@ -57,6 +57,17 @@ export function defaultSkin(accountId: string): SkinTraits {
   };
 }
 
+/** One expression set at a time. 0 neutral, 1 happy, 2 angry, 3 smile. */
+export function expressionVisible(label: string, skin: SkinTraits, mood: Mood): boolean | null {
+  const face = label.match(/face\.(\d+)/);
+  if (!face) return null;
+  const index = Number(face[1]);
+  if (mood === "happy") return index === 1;
+  if (mood === "alarm") return index === 2;
+  if (skin.role % ROLE_OUTFITS === 4) return index === 3;
+  return index === 0;
+}
+
 /** null means the node is not a role part. Otherwise whether this authored name should show. */
 export function roleVisible(label: string, skin: SkinTraits, mood: Mood): boolean | null {
   if (!label.startsWith("role.")) return null;

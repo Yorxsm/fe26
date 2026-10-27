@@ -103,16 +103,19 @@ const ROOM_XZ: Record<string, [number, number]> = {
 export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
 /** Six roles, shoulder to shoulder, facing the lawn camera. */
+/** World scale for the 1.0-unit ingot. About 1.3× the previous block body. */
+export const AGENT_SCALE = 5.3;
+
 export const LINEUP_SPOTS: Array<[number, number]> = [
-  [-7.25, 0],
-  [-4.35, 0],
-  [-1.45, 0],
-  [1.45, 0],
-  [4.35, 0],
-  [7.25, 0],
+  [-11.25, 0],
+  [-6.75, 0],
+  [-2.25, 0],
+  [2.25, 0],
+  [6.75, 0],
+  [11.25, 0],
 ];
 
-export const LINEUP_SHOT: CameraShot = { eye: [0, 2.55, 19], aim: [0, 1.7, 0], fov: 36 };
+export const LINEUP_SHOT: CameraShot = { eye: [0, 3.2, 26], aim: [0, 2.5, 0], fov: 36 };
 
 /** Eye height on the ring road, looking along the lamps. */
 export const STREET_SHOT: CameraShot = { eye: [-24, 1.65, 16], aim: [8, 1.4, -8], fov: 52 };
@@ -198,7 +201,7 @@ export function placeAgent(index: number, time: number, paused: boolean) {
   const phase = index * 1.7;
   const home = WALK_LOOP[index % WALK_LOOP.length];
   if (paused) {
-    return { x: home[0], y: 0, z: home[1], rot: 0 };
+    return { x: home[0], y: 0, z: home[1], rot: 0, speed: 0 };
   }
   const travel = time * 0.28 + phase;
   const span = WALK_LOOP.length;
@@ -210,11 +213,13 @@ export function placeAgent(index: number, time: number, paused: boolean) {
   const to = WALK_LOOP[(slot + 1) % span];
   const dx = to[0] - from[0];
   const dz = to[1] - from[1];
+  const dist = Math.hypot(dx, dz);
   return {
     x: from[0] + dx * smooth,
     y: 0,
     z: from[1] + dz * smooth,
     rot: Math.atan2(dx, dz),
+    speed: dist * 0.28,
   };
 }
 

@@ -21,8 +21,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
-import { ROLE_COLORS, roleVisible, type Mood } from "@/lib/skin";
+import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { ROLE_COLORS, expressionVisible, roleVisible, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
 useGLTF.preload("/models/station.glb", false, true);
@@ -352,11 +352,16 @@ function dress(root: THREE.Object3D, recolor?: string) {
     if (mesh.isMesh) meshes.push(mesh);
   });
   meshes.forEach((mesh) => {
-    const sources = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
+    let sources = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
     if (recolor) {
-      sources.forEach((material) => {
-        if (material.name === "Body" && material.color) material.color.set(recolor);
+      sources = sources.map((material) => {
+        if (material.name !== "Body" || !material.color) return material;
+        const copy = material.clone();
+        copy.name = "Body";
+        copy.color.set(recolor);
+        return copy;
       });
+      mesh.material = Array.isArray(mesh.material) ? sources : sources[0];
     }
     sources.forEach((material) => {
       if (!("envMapIntensity" in material)) return;
@@ -398,7 +403,8 @@ function moodFor(x: number, z: number): Mood {
 function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood, role: number) {
   const skin = { ...agent.skin, role };
   root.traverse((node) => {
-    const shown = roleVisible(sourceName(node), skin, mood);
+    const label = sourceName(node);
+    const shown = roleVisible(label, skin, mood) ?? expressionVisible(label, skin, mood);
     if (shown === null) return;
     node.visible = shown;
   });
@@ -511,6 +517,7 @@ function AgentMesh({
   const group = useRef<THREE.Group>(null);
   const tag = useRef<THREE.Group>(null);
   const clipName = useRef("");
+  const clipAction = useRef<THREE.AnimationAction | null>(null);
   const mood = useRef<Mood>("trait");
   const role = lineup && index < LINEUP_SPOTS.length ? index : index % ROLE_COLORS.length;
   const scene = useMemo(() => {
@@ -531,12 +538,16 @@ function AgentMesh({
       mood.current = nextMood;
       applyMood(scene, agent, nextMood, role);
     }
-    const nextClip = paused ? "idle" : nextMood === "happy" ? "celebrate" : "walk";
+    const nextClip = paused || lineup ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
     if (clipName.current !== nextClip) {
       mixer.stopAllAction();
       const clip = gltf.animations.find((entry) => entry.name === nextClip);
-      if (clip) mixer.clipAction(clip).reset().play();
+      clipAction.current = clip ? mixer.clipAction(clip).reset().play() : null;
       clipName.current = nextClip;
+    }
+    if (clipAction.current) {
+      const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+      clipAction.current.timeScale = nextClip === "walk" ? Math.min(3.4, Math.max(0.7, speed / 1.9)) : 1;
     }
     if (!paused) mixer.update(delta);
     const blink = Math.sin(state.clock.elapsedTime * 2.1 + index * 1.3) > 0.92;
@@ -550,14 +561,19 @@ function AgentMesh({
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.rotation.y = pose.rot;
     }
-    if (tag.current) tag.current.position.y = 1.55 + tagLift(index, state.clock.elapsedTime, paused);
+    if (tag.current) tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
   });
 
   return (
     <group ref={group}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+        <circleGeometry args={[1.15, 24]} />
+        <meshBasicMaterial color="#05060a" transparent opacity={0.45} depthWrite={false} />
+      </mesh>
+      <pointLight position={[0, 3.6, -2.6]} color="#9eb4ee" intensity={3.2} distance={9} decay={2} />
       <primitive
         object={scene}
-        scale={3.4}
+        scale={AGENT_SCALE}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           onFollow(index);
