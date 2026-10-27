@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 4
+ART_STEP = 5
 
 # three.js (x, z). Blender y is -z.
 SITES = [
@@ -275,6 +275,46 @@ def build_vault_bank(kit, mats):
         kit.ico(f"vault.bulb.{bulb}", (cx + math.cos(angle) * 0.7, cy - 1 + math.sin(angle) * 0.7, 6.35), 0.12, mats["amber"])
 
 
+def front_shell(kit, mats, prefix, cx, cy, sx, sy, height, wall, floor, roof, trim):
+    box(kit, f"{prefix}.floor", (cx, cy, 0.16), (sx, sy, 0.22), floor, 0)
+    wall_z = 0.2 + height / 2
+    thick = 0.4
+    box(kit, f"{prefix}.wall.n", (cx, cy + sy / 2, wall_z), (sx, thick, height), wall, 0)
+    box(kit, f"{prefix}.wall.e", (cx + sx / 2, cy, wall_z), (thick, sy, height), wall, 0)
+    box(kit, f"{prefix}.wall.w", (cx - sx / 2, cy, wall_z), (thick, sy, height), wall, 0)
+    door = 4.2
+    front_y = cy - sy / 2
+    jamb = (sx - door) / 2
+    box(kit, f"{prefix}.jamb.L", (cx - door / 2 - jamb / 2, front_y, wall_z), (jamb, thick, height), wall, 0)
+    box(kit, f"{prefix}.jamb.R", (cx + door / 2 + jamb / 2, front_y, wall_z), (jamb, thick, height), wall, 0)
+    box(kit, f"{prefix}.lintel", (cx, front_y, 0.2 + height - 1.1), (door, thick, 2.2), wall, 0)
+    box(kit, f"{prefix}.roof", (cx, cy, 0.2 + height), (sx + 0.6, sy + 0.6, 0.28), roof, 0)
+    box(kit, f"{prefix}.sign", (cx, front_y - 0.35, height - 0.55), (7.2, 0.16, 0.9), trim, 0)
+    return front_y
+
+
+def build_market(kit, mats):
+    cx, cy = blender_xy(46.0, 14.0)
+    sx, sy, height = 24.0, 16.0, 7.0
+    front_y = front_shell(kit, mats, "market", cx, cy, sx, sy, height, mats["timber"], mats["stone"], mats["timber"], mats["awning.0"])
+    for post, x in enumerate((-9, -3, 3, 9)):
+        kit.cylinder(f"market.post.{post}", (cx + x, front_y - 0.8, height / 2), 0.22, height, mats["wood"], vertices=6)
+    box(kit, "market.screen", (cx, cy + sy / 2 - 0.5, 2.4), (6.4, 0.12, 3.2), mats["screen"], 0)
+    for index in range(6):
+        x = cx - 8.5 + index * 3.4
+        y = cy - 1.5
+        box(kit, f"market.counter.{index}", (x, y, 0.7), (2.4, 1.1, 1.0), mats["wood"], 0)
+        box(kit, f"market.awning.{index}", (x, y - 0.2, 2.15), (2.8, 1.6, 0.1), mats[f"awning.{index}"], 0)
+        box(kit, f"market.stripe.{index}", (x, y - 0.2, 2.22), (0.35, 1.62, 0.04), mats["cloth"], 0)
+        box(kit, f"market.good.{index}", (x, y, 1.35), (0.35, 0.28, 0.28), mats[f"awning.{(index + 2) % 6}"], 0)
+        kit.cylinder(f"market.lantern.{index}", (x + 1.0, y, 2.5), 0.08, 0.2, mats["amber"], vertices=6)
+    for index, (ox, oy) in enumerate(((-6, 3.2), (-2, 4.1), (4, 3.4), (8, 2.2), (1, -4))):
+        kit.cylinder(f"market.barrel.{index}", (cx + ox, cy + oy, 0.45), 0.32, 0.7, mats["wood"], vertices=8)
+        box(kit, f"market.crate.{index}", (cx + ox + 0.8, cy + oy - 0.6, 0.35), (0.55, 0.45, 0.45), mats["crate"], 0.2)
+    for light in range(8):
+        kit.ico(f"market.string.{light}", (cx - 9 + light * 2.5, cy, 5.6), 0.1, mats["amber"])
+
+
 def build_village():
     core.reset_scene()
     kit = core.Kit()
@@ -302,6 +342,16 @@ def build_village():
         "goldhi": core.material("goldhi", "#fff1a8", "#fff6c8", 0.45, 0.8, 0.18),
         "velvet": core.material("velvet", "#7a1f33", metallic=0.0, roughness=0.8),
         "alarm": core.material("alarm", "#ff3355", "#ff3355", 3.2, 0.05, 0.25),
+        "timber": core.material("timber", "#c4a574", metallic=0.02, roughness=0.7),
+        "screen": core.material("screen", "#101418", "#7dffe0", 0.4, 0.1, 0.35),
+        "cloth": core.material("cloth", "#f3e6c8", metallic=0.0, roughness=0.8),
+        "crate": core.material("crate", "#a56b3c", metallic=0.0, roughness=0.8),
+        "awning.0": core.material("awning.0", "#2ec4b6", metallic=0.0, roughness=0.65),
+        "awning.1": core.material("awning.1", "#ffd166", metallic=0.0, roughness=0.65),
+        "awning.2": core.material("awning.2", "#ef476f", metallic=0.0, roughness=0.65),
+        "awning.3": core.material("awning.3", "#f4a261", metallic=0.0, roughness=0.65),
+        "awning.4": core.material("awning.4", "#8ecae6", metallic=0.0, roughness=0.65),
+        "awning.5": core.material("awning.5", "#e07a9a", metallic=0.0, roughness=0.65),
     }
     build_terrain(kit, mats)
     if ART_STEP >= 3:
@@ -309,6 +359,8 @@ def build_village():
         build_trees(kit, mats)
     if ART_STEP >= 4:
         build_vault_bank(kit, mats)
+    if ART_STEP >= 5:
+        build_market(kit, mats)
     rooms = []
     for district, name, _prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)
