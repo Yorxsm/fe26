@@ -146,12 +146,10 @@ function StreetLamps() {
             <meshStandardMaterial color="#ffd7a0" emissive="#ffb15a" emissiveIntensity={2.4} roughness={0.4} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-            <circleGeometry args={[2.4, 16]} />
-            <meshBasicMaterial color="#ffb56a" transparent opacity={0.22} depthWrite={false} />
+            <circleGeometry args={[5.2, 20]} />
+            <meshBasicMaterial color="#ffb56a" transparent opacity={0.38} depthWrite={false} />
           </mesh>
-          {index < 6 ? (
-            <pointLight position={[0, 5.1, 0]} color="#ffb060" intensity={7} distance={16} decay={2} />
-          ) : null}
+          <pointLight position={[0, 4.6, 0]} color="#ffb060" intensity={14} distance={26} decay={2} />
         </group>
       ))}
     </group>
@@ -171,7 +169,7 @@ function GroundMist() {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.4, 0]}>
       <circleGeometry args={[220, 40]} />
-      <meshBasicMaterial color="#1a1830" transparent opacity={0.34} depthWrite={false} />
+      <meshBasicMaterial color="#4a3424" transparent opacity={0.08} depthWrite={false} />
     </mesh>
   );
 }
@@ -220,12 +218,12 @@ export function World() {
       <StreetLamps />
       <GroundMist />
       <Fireflies />
-      <hemisphereLight args={["#6678a4", "#161c2c", 0.18]} />
-      <ambientLight intensity={0.06} color="#243048" />
+      <hemisphereLight args={["#a8b8d4", "#3a3228", 0.48]} />
+      <ambientLight intensity={0.3} color="#5a4c40" />
       <directionalLight
         position={[78, 9, 18]}
-        intensity={0.24}
-        color="#e09868"
+        intensity={0.38}
+        color="#ffb07a"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.001}
@@ -237,8 +235,12 @@ export function World() {
         shadow-camera-top={120}
         shadow-camera-bottom={-120}
       />
-      <directionalLight position={[-40, 16, -36]} intensity={0.12} color="#7a90c4" />
-      <fog attach="fog" args={["#100e18", 120, 460]} />
+      <directionalLight position={[2, 14, 16]} intensity={1.45} color="#ffc49a" />
+      <pointLight position={[1, 3.4, 6]} color="#ffb060" intensity={14} distance={48} decay={1} />
+      <pointLight position={[0, 4.6, -2]} color="#ffc48a" intensity={12} distance={40} decay={1} />
+      <pointLight position={[-2, 4.2, -12]} color="#ffb070" intensity={12} distance={36} decay={1} />
+      <directionalLight position={[-40, 16, -36]} intensity={0.16} color="#8ea6d4" />
+      <fog attach="fog" args={["#100e18", 70, 280]} />
     </>
   );
 }

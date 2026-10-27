@@ -39,15 +39,9 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
-const OVERVIEW_PITCH = (12 * Math.PI) / 180;
-const OVERVIEW_YAW = Math.PI / 4;
-const OVERVIEW_DIST = 250;
-const overviewEye = new THREE.Vector3(
-  Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
-  Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
-  Math.cos(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
-);
-const overviewAim = new THREE.Vector3(0, 22, 0);
+/** Inside the north plaza, low enough that the streets fill the frame under the title. */
+const overviewEye = new THREE.Vector3(2, 7.2, 16);
+const overviewAim = new THREE.Vector3(0, 2.2, -18);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
@@ -376,13 +370,23 @@ function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
       if (!recolor && material.color) material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
     });
     const label = sourceName(mesh);
+    if (label.startsWith("terrain.")) {
+      const lit = sources.map((material) => {
+        const copy = material.clone();
+        copy.color.set("#2c4a40");
+        copy.emissive = new THREE.Color("#1c342c");
+        copy.emissiveIntensity = 0.55;
+        return copy;
+      });
+      mesh.material = Array.isArray(mesh.material) ? lit : lit[0];
+    }
     const prefix = label.split(".")[0];
     const district = ROOM_PREFIX[prefix];
     if (district) mesh.userData.district = district;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
-    if (label.startsWith("tree.")) mesh.visible = false;
+    if (label.includes("tree") || label.includes("crown") || label.includes("bush")) mesh.visible = false;
     if (ROOM_PREFIX[prefix] && !label.endsWith(".pad")) mesh.visible = false;
   });
   return root;
@@ -716,7 +720,7 @@ function CameraDriver({
       camera.updateProjectionMatrix();
     };
     if (mode === "orbit") {
-      applyFov(42);
+      applyFov(48);
       rig.enabled = false;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
@@ -728,7 +732,7 @@ function CameraDriver({
     }
     if (!driving && homing.current) {
       rig.enabled = false;
-      applyFov(42);
+      applyFov(48);
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2.4);
@@ -888,10 +892,13 @@ export default function CityMap({
         ].map((position) => (
           <mesh key={`${district.id}-${position[1]}`} position={position as [number, number, number]}>
             <planeGeometry args={[1.5, 1.15]} />
-            <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={1.8} roughness={0.35} />
+            <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={3.4} roughness={0.35} />
           </mesh>
         )),
       )}
+      {DISTRICTS.filter((district) => district.status === "live").map((district) => (
+        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 8]} color="#ffb060" intensity={18} distance={22} decay={2} />
+      ))}
       <mesh position={[12, 16.2, 40]}>
         <sphereGeometry args={[0.32, 10, 8]} />
         <meshStandardMaterial color="#ff3030" emissive="#ff2020" emissiveIntensity={3.2} />

@@ -69,7 +69,7 @@ function spots(): Spot[] {
         const z = az + uz * dist + pz * side * 16;
         if (Math.abs(x) > 100 || Math.abs(z) > 100 || nearBuilding(x, z, 20) || blocksFront(x, z)) continue;
         const name = TREES[n % TREES.length];
-        placed.push({ name, x, z, rot: n * 0.7, scale: 0.85 + (n % 5) * 0.07 });
+        placed.push({ name, x, z, rot: n * 0.7, scale: 0.48 + (n % 5) * 0.04 });
         n += 1;
         placed.push({
           name: n % 2 === 0 ? "bush.a" : "bush.b",
@@ -87,7 +87,7 @@ function spots(): Spot[] {
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     if (nearBuilding(x, z, 20) || nearRoad(x, z, 11) || blocksFront(x, z)) continue;
-    placed.push({ name: TREES[i % TREES.length], x, z, rot: angle, scale: 0.9 + (i % 4) * 0.08 });
+    placed.push({ name: TREES[i % TREES.length], x, z, rot: angle, scale: 0.5 + (i % 4) * 0.05 });
     if (i % 2 === 0) {
       placed.push({ name: "rock.a", x: x + 3, z: z - 2, rot: angle, scale: 0.8 + (i % 3) * 0.3 });
     }
@@ -108,7 +108,7 @@ function windMaterials(source: THREE.Material | THREE.Material[], amount: number
   const list = (Array.isArray(source) ? source : [source]).map((material) => material.clone()) as THREE.MeshStandardMaterial[];
   list.forEach((material) => {
     material.envMapIntensity = 0.04;
-    if (amount < 0.1 && material.color) material.color.multiply(new THREE.Color("#4d6a58"));
+    if (amount < 0.1 && material.color) material.color.multiply(new THREE.Color("#8aa888"));
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uTime;
       shader.uniforms.uWind = { value: amount };
@@ -188,15 +188,19 @@ function GrassField({ source, uTime }: { source: THREE.Mesh; uTime: { value: num
 }
 
 function blocksView(x: number, z: number, camera: THREE.Vector3, direction: THREE.Vector3) {
-  const reach = 32;
+  const dx = x - camera.x;
+  const dz = z - camera.z;
+  const near = camera.y < 22 ? 46 : 22;
+  if (dx * dx + dz * dz < near * near) return true;
+  const reach = 64;
   const vx = direction.x * reach;
   const vz = direction.z * reach;
   const len2 = vx * vx + vz * vz || 1;
-  const t = Math.max(0, Math.min(1, ((x - camera.x) * vx + (z - camera.z) * vz) / len2));
-  if (t < 0.08 || t > 0.9) return false;
+  const t = (dx * vx + dz * vz) / len2;
+  if (t < 0.02 || t > 0.92) return false;
   const px = camera.x + vx * t;
   const pz = camera.z + vz * t;
-  return (x - px) ** 2 + (z - pz) ** 2 < 18;
+  return (x - px) ** 2 + (z - pz) ** 2 < 18 * 18;
 }
 
 export function Nature() {
@@ -225,8 +229,7 @@ export function Nature() {
       if (!spots || !base) return;
       let changed = false;
       spots.forEach((spot, index) => {
-        const tree = spot.name.startsWith("pine") || spot.name.startsWith("oak") || spot.name.startsWith("birch");
-        const cull = tree && blocksView(spot.x, spot.z, camera.position, view.current);
+        const cull = blocksView(spot.x, spot.z, camera.position, view.current);
         const next = cull ? hidden : base[index];
         field.setMatrixAt(index, next);
         changed = true;
