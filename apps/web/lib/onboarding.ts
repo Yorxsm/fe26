@@ -23,23 +23,23 @@ export const QUEST_DEFS: Array<{ id: QuestId; label: string }> = [
 export const CUTSCENE = [
   {
     caption: "The vault door turns.",
-    detail: "A safecracker works the round door. The pot fills. The iron cap stays on.",
+    detail: "The bank stands on the grass. Gold is stacked inside. The iron cap stays on.",
   },
   {
     caption: "The market never closes.",
-    detail: "A fill moves a name up the board. The tape is the game.",
+    detail: "Stalls line the hall. A fill moves a name up the board.",
   },
   {
     caption: "Breach in the war room.",
-    detail: "The alarm is the point. The challenge lives on this contract.",
+    detail: "The headquarters alarm is the point. The challenge lives on this contract.",
   },
   {
     caption: "The cap holds.",
-    detail: "An over-cap spend is rejected. No game can raise the iron cap.",
+    detail: "The forge can mint a skin. It cannot raise the iron cap.",
   },
   {
-    caption: "The observation deck.",
-    detail: "Humans watch from up here. Agents go into the rooms.",
+    caption: "The stadium is open.",
+    detail: "The cup plays in the open air. Agents walk the roads and go in the doors.",
   },
 ];
 

@@ -19,7 +19,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { CITY_AGENTS, DISTRICTS, placeAgent, type CityAgent, type District } from "@/lib/city";
+import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, placeAgent, type CityAgent, type District } from "@/lib/city";
 import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/station.glb", false, true);
@@ -220,8 +220,9 @@ function Station({
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
     scene.traverse((node) => {
-      if (!node.name.endsWith(".roof")) return;
-      node.visible = node.name.split(".")[0] !== openPrefix;
+      const bits = node.name.split(".");
+      if (!bits.includes("roof")) return;
+      node.visible = bits[0] !== openPrefix;
     });
     const holo = scene.getObjectByName("war.holo");
     if (holo) holo.rotateY(delta * 0.8);
@@ -341,12 +342,13 @@ function AgentMesh({
     <group ref={group}>
       <primitive
         object={scene}
+        scale={3.4}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           onFollow(index);
         }}
       />
-      <group ref={tag} position={[0, 1.55, 0]}>
+      <group ref={tag} position={[0, 5.2, 0]}>
         <Html center sprite distanceFactor={12} zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
           <div className={audit ? "name-tag audit" : "name-tag"}>{agent.name}</div>
         </Html>
@@ -437,12 +439,14 @@ function CameraDriver({
   focusId,
   followIndex,
   paused,
+  frameMode,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
   focusId: string | null;
   followIndex: number | null;
   paused: boolean;
+  frameMode: "in" | "out";
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
@@ -492,19 +496,25 @@ function CameraDriver({
       const pose = placeAgent(followIndex, state.clock.elapsedTime, paused);
       const aheadX = Math.sin(pose.rot);
       const aheadZ = Math.cos(pose.rot);
-      aim.set(pose.x, 1, pose.z);
-      eye.set(pose.x - aheadX * 4.2, 3.4, pose.z - aheadZ * 4.2);
+      aim.set(pose.x, 2.4, pose.z);
+      eye.set(pose.x - aheadX * 9, 6.2, pose.z - aheadZ * 9);
       drive = true;
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room) {
-        eye.set(room.x + 6, 3.4, room.z + 14);
-        aim.set(room.x, 2.2, room.z);
+        const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
+        if (shot) {
+          eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
+          aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+        } else {
+          eye.set(room.x, 2.6, room.z + 8);
+          aim.set(room.x, 1.8, room.z);
+        }
         drive = true;
       }
     }
     if (!drive) return;
-    const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 3.2);
+    const blend = reduce.current || camera.position.distanceTo(eye) > 18 ? 1 : 1 - Math.exp(-delta * 6);
     rig.target.lerp(aim, blend);
     camera.position.lerp(eye, blend);
     camera.lookAt(rig.target);
@@ -519,6 +529,7 @@ export default function CityMap({
   beat,
   focusId,
   followIndex,
+  frameMode,
   onPick,
   onFollow,
   onUnavailable,
@@ -529,6 +540,7 @@ export default function CityMap({
   beat: number;
   focusId: string | null;
   followIndex: number | null;
+  frameMode: "in" | "out";
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
@@ -570,7 +582,7 @@ export default function CityMap({
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} />
       <Grade focusId={focusId} />
       <OrbitControls
         makeDefault

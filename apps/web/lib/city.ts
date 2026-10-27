@@ -100,6 +100,32 @@ const ROOM_XZ: Record<string, [number, number]> = {
   "oracle-plaza": [20, -10],
 };
 
+export type CameraShot = { eye: [number, number, number]; aim: [number, number, number] };
+
+/** Inside the doorway, looking at the back wall. Plots stay outside the fence. */
+export const INTERIOR_SHOTS: Record<string, CameraShot> = {
+  "vault-quarter": { eye: [-36, 2.5, 21], aim: [-42, 2.0, 11] },
+  "trading-village": { eye: [50, 2.6, 19], aim: [46, 1.8, 8] },
+  "war-room": { eye: [16, 2.6, 45], aim: [12, 1.8, 34] },
+  "skin-forge": { eye: [-34, 2.4, -19], aim: [-38, 1.5, -29] },
+  "cup-stadium": { eye: [-2, 5.2, -30], aim: [-8, 2.0, -46] },
+  "launch-pier": { eye: [58, 5, -16], aim: [50, 2, -28] },
+  "card-club": { eye: [-46, 5, 8], aim: [-54, 2, -2] },
+  "oracle-plaza": { eye: [28, 5, 0], aim: [20, 2, -10] },
+};
+
+/** Front lawn, looking at the facade. */
+export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
+  "vault-quarter": { eye: [-34, 7, 40], aim: [-42, 3, 18] },
+  "trading-village": { eye: [54, 7, 36], aim: [46, 3, 14] },
+  "war-room": { eye: [20, 8, 62], aim: [12, 3, 40] },
+  "skin-forge": { eye: [-30, 7, -8], aim: [-38, 3, -24] },
+  "cup-stadium": { eye: [2, 8, -22], aim: [-8, 2, -42] },
+  "launch-pier": { eye: [62, 8, -12], aim: [50, 2, -28] },
+  "card-club": { eye: [-42, 8, 12], aim: [-54, 2, -2] },
+  "oracle-plaza": { eye: [32, 8, 4], aim: [20, 2, -10] },
+};
+
 export const DISTRICTS: District[] = LAYOUT.map((district) => {
   const [x, z] = ROOM_XZ[district.id] ?? [0, 0];
   return { ...district, x, z };

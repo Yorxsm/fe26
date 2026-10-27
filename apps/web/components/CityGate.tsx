@@ -106,6 +106,7 @@ export function CityGate() {
   const [audit, setAudit] = useState(false);
   const [beat, setBeat] = useState(0);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [frameMode, setFrameMode] = useState<"in" | "out">("in");
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [soundLive, setSoundLive] = useState(false);
@@ -115,6 +116,17 @@ export function CityGate() {
   useEffect(() => {
     const loaded = loadSpectator();
     setSave(loaded);
+    const frame = new URLSearchParams(window.location.search).get("frame");
+    if (frame) {
+      const outside = frame.endsWith("-out");
+      const id = outside ? frame.slice(0, -4) : frame;
+      if (DISTRICTS.some((district) => district.id === id)) {
+        setFrameMode(outside ? "out" : "in");
+        setFocusId(id);
+        setPhase("city");
+        return;
+      }
+    }
     setPhase(loaded.entered ? "city" : "title");
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPaused(true);
     setWebgl(webglAvailable());
@@ -157,6 +169,7 @@ export function CityGate() {
   }
 
   function pick(district: District) {
+    setFrameMode("in");
     setFocusId(district.id);
     setFollowIndex(null);
     const quests = { ...save.quests };
@@ -278,6 +291,7 @@ export function CityGate() {
                 beat={beat}
                 focusId={phase === "city" ? focusId : null}
                 followIndex={phase === "city" ? followIndex : null}
+                frameMode={frameMode}
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}

@@ -124,3 +124,18 @@ original IP only, 3D only, testnet only, no deploys. Commit the spec as docs/ART
 ## Push order
 1 spec+concept files+favicon/OG  2 full-screen + HUD + camera  3 station shell (floors/walls/corridors/lights)
 4 vault  5 market  6 stadium  7 war room  8 forge + coming soon  9 agents (all 6 roles)  10 intro rework  11 compare shots
+
+## Build check (v3 village)
+
+The outdoor village is in the scene: grass, a ring road, separate buildings, and a camera that opens the roof and sits inside on click. Compare plates are `compare-overview.png`, `compare-agents.png`, `compare-vault.png`, and `compare-market.png`.
+
+Still short of the spec:
+
+- The grade is a sunny green overview, not a photographed golden hour. God rays are faint. Fog is only on the far hills. Grass blades are a small cone patch near the origin, not a field of instanced blades. Trees do not sway.
+- Trees are about a hundred low-poly pines, oaks, and birches, tall enough to read, with bushes along the roads. They are not scanned trees and they are not instanced.
+- Roads are dark asphalt with kerbs, a yellow center line, white dashes, and paving sidewalks. The wear and the lamp spacing are still simple boxes.
+- Building walls use CC0 albedo only (no normal or roughness maps, not KTX2). Silhouettes differ: bank dome and columns, market and forge gables, war-room glass and dish, stadium bowl, forge chimney. They are still block-built. Rugs, posters, and shelves are missing. The market chart and the war-room map are easy to miss. Vault lasers are thin.
+- Plazas are grey paving rectangles under the buildings. They replaced the pink discs. They are not landscaped lawns.
+- Coming-soon plots have fences, scaffolds, cones, and a crane. The board is a color panel. The words COMING SOON are on the HUD sign, not painted on the billboard.
+- Agents are the same ingot, scaled up so the ten of them read from the overview, with arms and a blink. They are not six separate sculpted bodies, and there is no studio lineup framed like the role sheet. The walk path follows the road and steps into each live doorway. Foot contact was not re-checked.
+- `station.glb` is about 3.9 MB after meshopt, under the 25 MB budget. There are no LODs. Frame rate was not measured on a laptop GPU. Shots are software WebGL.
