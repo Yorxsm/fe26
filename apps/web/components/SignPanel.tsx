@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PenLine, Wallet } from "lucide-react";
 import "@near-wallet-selector/modal-ui/styles.css";
 import { connectTestnetWallet, signAndSend, type CallArgs } from "@/lib/wallet";
 
@@ -44,9 +45,11 @@ export function SignPanel({
       <p className="meta">Testnet wallet only. This page does not create an account, fund one, or accept mainnet.</p>
       <div className="row">
         <button type="button" className="btn-quiet" onClick={() => void connect()}>
+          <Wallet aria-hidden="true" strokeWidth={1.75} />
           Connect testnet wallet
         </button>
         <button type="button" onClick={() => void sign()} disabled={!call}>
+          <PenLine aria-hidden="true" strokeWidth={1.75} />
           Sign and send
         </button>
       </div>

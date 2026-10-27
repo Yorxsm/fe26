@@ -165,6 +165,32 @@ class CityAudio {
     this.tone(this.ctx.currentTime, 440, 0.04, 0.05, "square");
   }
 
+  /**
+   * Short "iron twenty-six" motif. Opens the context the way a button press
+   * does, and does not start the theme bed.
+   */
+  pronounce() {
+    if (typeof window === "undefined") return;
+    this.prefs = loadPrefs();
+    if (!this.ctx) {
+      const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      this.ctx = new Ctx();
+      this.master = this.ctx.createGain();
+      this.master.connect(this.ctx.destination);
+      this.applyMaster();
+    }
+    void this.ctx.resume();
+    if (this.prefs.muted || !this.master) return;
+    const t = this.ctx.currentTime;
+    const duck = this.prefs.quiet ? 0.35 : 1;
+    this.tone(t, 330, 0.16, 0.07 * duck, "triangle");
+    this.tone(t + 0.14, 247, 0.2, 0.06 * duck, "triangle");
+    this.tone(t + 0.42, 392, 0.1, 0.05 * duck, "sine");
+    this.tone(t + 0.52, 440, 0.1, 0.05 * duck, "sine");
+    this.tone(t + 0.64, 523, 0.18, 0.06 * duck, "sine");
+  }
+
   sting(name: Sting) {
     if (!this.ctx || !this.master || this.prefs.muted || this.heard.has(name)) return;
     this.heard.add(name);

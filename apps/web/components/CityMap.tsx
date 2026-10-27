@@ -21,7 +21,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
 
@@ -69,6 +70,37 @@ const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
 const driftOffset = new THREE.Vector3();
 const driftUp = new THREE.Vector3(0, 1, 0);
+/** Body cameras and lights were tuned at scale 5.3. */
+const fit = AGENT_SCALE / 5.3;
+const FULL_CAP = 24;
+const CULL_DISTANCE = 140;
+const impostorDummy = new THREE.Object3D();
+const impostorColor = new THREE.Color();
+const projected = new THREE.Vector3();
+
+function readCrowd(): { count: number; measure: boolean; full: boolean } {
+  if (typeof window === "undefined") return { count: CITY_AGENTS.length, measure: false, full: false };
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("agents");
+  if (raw === null) return { count: CITY_AGENTS.length, measure: false, full: false };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) return { count: CITY_AGENTS.length, measure: false, full: false };
+  return { count: Math.min(5000, Math.floor(parsed)), measure: true, full: params.get("detail") === "all" };
+}
+
+/** Kenney atlases keep a solid black band for a ground-shadow card. Drop those texels. */
+function dropBakedShadow(material: THREE.Material) {
+  const standard = material as THREE.MeshStandardMaterial;
+  if (!standard.isMeshStandardMaterial || !standard.map) return;
+  standard.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <map_fragment>",
+      `#include <map_fragment>
+       if (diffuseColor.r < 0.045 && diffuseColor.g < 0.045 && diffuseColor.b < 0.045) discard;`,
+    );
+  };
+  standard.customProgramCacheKey = () => "fe2vi-drop-baked-shadow";
+}
 
 /** glTFLoader strips "." from Object3D names. The authored name stays on userData. */
 function sourceName(node: THREE.Object3D): string {
@@ -320,6 +352,8 @@ function Kits({
         });
         mesh.material = Array.isArray(mesh.material) ? copies : copies[0];
       }
+      const finished = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
+      finished.forEach(dropBakedShadow);
     });
     return cloned;
   }, [gltf.scene]);
@@ -524,7 +558,7 @@ function tagLift(index: number, time: number, paused: boolean) {
     const pose = placeAgent(other, time, paused);
     const dx = here.x - pose.x;
     const dz = here.z - pose.z;
-    if (dx * dx + dz * dz < 2.4) lift += 0.42;
+    if (dx * dx + dz * dz < 2.4 * fit * fit) lift += 0.42 * fit;
   }
   return lift;
 }
@@ -602,6 +636,7 @@ function AgentMesh({
   lineup,
   poster,
   onFollow,
+  rim = true,
 }: {
   agent: CityAgent;
   index: number;
@@ -611,6 +646,7 @@ function AgentMesh({
   lineup: boolean;
   poster: string | null;
   onFollow: (index: number) => void;
+  rim?: boolean;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
   const group = useRef<THREE.Group>(null);
@@ -623,6 +659,10 @@ function AgentMesh({
     const cloned = SkeletonUtils.clone(gltf.scene);
     dress(cloned, paintFinish(skin.paint), screenColor(skin.screen));
     applyLook(cloned, skin, "trait");
+    cloned.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh) mesh.frustumCulled = true;
+    });
     return cloned;
   }, [gltf.scene, skin]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
@@ -736,7 +776,7 @@ function AgentMesh({
           if (dist < best && dist > 1) {
             best = dist;
             tx = there.x;
-            ty = 3.3;
+            ty = AGENT_HEAD * (3.3 / 3.4);
             tz = there.z;
           }
         }
@@ -746,7 +786,7 @@ function AgentMesh({
       const side = (tx - origin.x) * fz - (tz - origin.z) * fx;
       const ahead = (tx - origin.x) * fx + (tz - origin.z) * fz;
       const lookX = Math.max(-1, Math.min(1, side / (Math.abs(ahead) + 6) * 4 + saccade.current.x * 0.25));
-      const lookY = Math.max(-1, Math.min(1, (ty - (origin.y + 3.4)) / 6 + saccade.current.y * 0.2));
+      const lookY = Math.max(-1, Math.min(1, (ty - (origin.y + AGENT_HEAD)) / (6 * fit) + saccade.current.y * 0.2));
       const forced: FaceExpression[] = ["calm", "focused", "happy", "shocked"];
       const expression: FaceExpression = poster === "expressions" ? forced[index] ?? "calm" : poster === "eyes" ? "calm" : expressionForClip(clipName.current.replace("-hold", ""));
       face.time.value = now;
@@ -756,12 +796,16 @@ function AgentMesh({
 
   return (
     <group ref={group}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-        <circleGeometry args={[1.15, 24]} />
-        <meshBasicMaterial color="#05060a" transparent opacity={0.45} depthWrite={false} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <circleGeometry args={[1.15 * fit, 20]} />
+        <meshBasicMaterial color="#05060a" transparent opacity={0.38} depthWrite={false} />
       </mesh>
-      <pointLight position={[0, 3.6, -2.6]} color="#9eb4ee" intensity={3.2} distance={9} decay={2} />
-      {poster === "trails" || (!poster && !lineup) ? <ParticleTrail kind={skin.trail % 4} /> : null}
+      {rim ? <pointLight position={[0, 3.6 * fit, -2.6 * fit]} color="#9eb4ee" intensity={2.4} distance={9 * fit} decay={2} /> : null}
+      {poster === "trails" || (!poster && !lineup) ? (
+        <group scale={fit}>
+          <ParticleTrail kind={skin.trail % 4} />
+        </group>
+      ) : null}
       <primitive
         object={scene}
         scale={AGENT_SCALE}
@@ -951,28 +995,28 @@ function CameraDriver({
       applyFov(beat < 4 ? 64 : 32);
       drive = true;
     } else if (poster === "front6") {
-      eye.set(0, 3.42, 17);
-      aim.set(0, 3.32, 0);
+      eye.set(0, 3.42 * fit, 17);
+      aim.set(0, 3.32 * fit, 0);
       applyFov(56);
       drive = true;
     } else if (poster === "q34") {
-      eye.set(5.4, 3.55, 15.5);
-      aim.set(0, 3.2, 0);
+      eye.set(5.4, 3.55 * fit, 15.5);
+      aim.set(0, 3.2 * fit, 0);
       applyFov(54);
       drive = true;
     } else if (poster === "expressions") {
-      eye.set(0, 3.5, 16.5);
-      aim.set(0, 3.3, 0);
+      eye.set(0, 3.5 * fit, 16.5);
+      aim.set(0, 3.3 * fit, 0);
       applyFov(46);
       drive = true;
     } else if (poster === "eyes") {
-      eye.set(0, 7.2, 14);
-      aim.set(0, 2.6, -0.8);
+      eye.set(0, 7.2 * fit, 14);
+      aim.set(0, 2.6 * fit, -0.8);
       applyFov(42);
       drive = true;
     } else if (poster === "gear") {
-      eye.set(9, 4.4, 18);
-      aim.set(0, 2.2, 0);
+      eye.set(9, 4.4 * fit, 18);
+      aim.set(0, 2.2 * fit, 0);
       applyFov(42);
       drive = true;
     } else if (poster === "face") {
@@ -986,13 +1030,13 @@ function CameraDriver({
       applyFov(WALK_SHOT.fov ?? 42);
       drive = true;
     } else if (poster === "trails") {
-      eye.set(0, 3.5, 16);
-      aim.set(0, 2.3, 0);
+      eye.set(0, 3.5 * fit, 16);
+      aim.set(0, 2.3 * fit, 0);
       applyFov(42);
       drive = true;
     } else if (poster === "skins") {
-      eye.set(0, 16, 26);
-      aim.set(0, 2, 0);
+      eye.set(0, 16 * fit, 26);
+      aim.set(0, 2 * fit, 0);
       applyFov(48);
       drive = true;
     } else if (lineup) {
@@ -1010,8 +1054,8 @@ function CameraDriver({
       const pose = placeAgent(followIndex, state.clock.elapsedTime, paused);
       const aheadX = Math.sin(pose.rot);
       const aheadZ = Math.cos(pose.rot);
-      aim.set(pose.x, 2.4, pose.z);
-      eye.set(pose.x - aheadX * 9, 6.2, pose.z - aheadZ * 9);
+      aim.set(pose.x, 2.4 * fit, pose.z);
+      eye.set(pose.x - aheadX * 9, 6.2 * fit, pose.z - aheadZ * 9);
       drive = true;
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
@@ -1039,6 +1083,82 @@ function CameraDriver({
     }
     camera.lookAt(aim);
   });
+  return null;
+}
+
+function ImpostorCrowd({ count, skip, paused }: { count: number; skip: number; paused: boolean }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const camera = useThree((state) => state.camera);
+  const slots = Math.max(0, count - skip);
+  useLayoutEffect(() => {
+    const field = mesh.current;
+    if (!field) return;
+    for (let index = 0; index < slots; index += 1) {
+      impostorColor.set(PAINT_COLORS[(index + skip) % PAINT_COLORS.length]);
+      field.setColorAt(index, impostorColor);
+    }
+    if (field.instanceColor) field.instanceColor.needsUpdate = true;
+  }, [skip, slots]);
+  useFrame((state) => {
+    const field = mesh.current;
+    if (!field) return;
+    const t = state.clock.elapsedTime;
+    for (let index = skip; index < count; index += 1) {
+      const pose = placeAgent(index, t, paused);
+      const dx = pose.x - camera.position.x;
+      const dy = pose.y - camera.position.y;
+      const dz = pose.z - camera.position.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      projected.set(pose.x, AGENT_HEAD, pose.z).project(camera);
+      const outside = projected.z < 0 || projected.z > 1 || Math.abs(projected.x) > 1.15 || Math.abs(projected.y) > 1.15;
+      const hidden = dist > CULL_DISTANCE || (outside && dist > 18);
+      impostorDummy.position.set(pose.x, 0, pose.z);
+      impostorDummy.rotation.set(0, pose.rot, 0);
+      impostorDummy.scale.setScalar(hidden ? 0 : AGENT_SCALE);
+      impostorDummy.updateMatrix();
+      field.setMatrixAt(index - skip, impostorDummy.matrix);
+    }
+    field.instanceMatrix.needsUpdate = true;
+  });
+  if (slots === 0) return null;
+  return (
+    <instancedMesh ref={mesh} args={[undefined, undefined, slots]} frustumCulled={false} castShadow={false} receiveShadow>
+      <capsuleGeometry args={[0.16, 0.62, 2, 6]} />
+      <meshStandardMaterial roughness={0.55} metalness={0.15} />
+    </instancedMesh>
+  );
+}
+
+function FrameStats({ count }: { count: number }) {
+  const gl = useThree((state) => state.gl);
+  const bucket = useRef({ frames: 0, time: 0, calls: 0 });
+  useLayoutEffect(() => {
+    gl.info.autoReset = false;
+    const node = document.createElement("p");
+    node.id = "stress-readout";
+    node.className = "stress-readout";
+    node.textContent = `${count} agents`;
+    document.body.appendChild(node);
+    return () => {
+      gl.info.autoReset = true;
+      node.remove();
+    };
+  }, [count, gl]);
+  useFrame((_, delta) => {
+    const run = bucket.current;
+    run.calls = gl.info.render.calls;
+    gl.info.reset();
+    run.frames += 1;
+    run.time += delta;
+    if (run.time < 0.5) return;
+    const node = document.getElementById("stress-readout");
+    if (node) {
+      const fps = run.frames / run.time;
+      node.textContent = `${count} agents · ${fps.toFixed(1)} fps · ${run.calls} draws · dpr ${gl.getPixelRatio().toFixed(2)}`;
+    }
+    run.frames = 0;
+    run.time = 0;
+  }, 2);
   return null;
 }
 
@@ -1074,6 +1194,9 @@ export default function CityMap({
   onUnavailable: () => void;
 }) {
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
+  const [crowd] = useState(readCrowd);
+  const crowdOn = crowd.measure && !poster && !lineup && !street;
+  const fullSlots = crowdOn ? (crowd.full ? crowd.count : Math.min(crowd.count, FULL_CAP)) : 0;
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
 
@@ -1169,9 +1292,26 @@ export default function CityMap({
         </mesh>
       ) : null}
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
-      {(poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
-        <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
-      ))}
+      {crowdOn
+        ? Array.from({ length: fullSlots }, (_, index) => (
+            <AgentMesh
+              key={`crowd-${index}`}
+              agent={CITY_AGENTS[index % CITY_AGENTS.length]}
+              index={index}
+              paused={paused}
+              audit={audit}
+              focusId={focusId}
+              lineup={false}
+              poster={null}
+              onFollow={onFollow}
+              rim={crowd.count <= FULL_CAP}
+            />
+          ))
+        : (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
+            <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
+          ))}
+      {crowdOn && !crowd.full && crowd.count > FULL_CAP ? <ImpostorCrowd count={crowd.count} skip={FULL_CAP} paused={paused} /> : null}
+      {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />

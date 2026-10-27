@@ -103,8 +103,10 @@ const ROOM_XZ: Record<string, [number, number]> = {
 export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
 /** Six roles, shoulder to shoulder, facing the lawn camera. */
-/** World scale for the 1.0-unit ingot. About 1.3× the previous block body. */
-export const AGENT_SCALE = 5.3;
+/** World scale for the 1.0-unit ingot. The previous 5.3 body, divided by 1.5. */
+export const AGENT_SCALE = 5.3 / 1.5;
+/** Head height in world units, the same proportion as the 5.3 body. */
+export const AGENT_HEAD = 3.4 / 1.5;
 
 export const LINEUP_SPOTS: Array<[number, number]> = [
   [-11.25, 0],
@@ -115,14 +117,14 @@ export const LINEUP_SPOTS: Array<[number, number]> = [
   [11.25, 0],
 ];
 
-export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8, 18], aim: [0, 2.7, 0], fov: 50 };
+export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8 / 1.5, 18], aim: [0, 2.7 / 1.5, 0], fov: 50 };
 
-/** Eye height on the ring road, with the nearest agents a few meters ahead. */
-export const STREET_SHOT: CameraShot = { eye: [-18, 1.7, 14], aim: [-8, 2.2, 6], fov: 46 };
+/** Eye height on the ring road, close enough that the smaller faces still read. */
+export const STREET_SHOT: CameraShot = { eye: [-16.5, 1.65, 12.5], aim: [-12, AGENT_HEAD * 0.72, 8], fov: 46 };
 
-export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55, 3.4], aim: [0, 3.35, 0], fov: 28 };
+export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: [0, 3.35 / 1.5, 0], fov: 28 };
 
-export const WALK_SHOT: CameraShot = { eye: [0, 2.4, 14], aim: [0, 2.2, 0], fov: 42 };
+export const WALK_SHOT: CameraShot = { eye: [0, 2.4 / 1.5, 14 / 1.5], aim: [0, 2.2 / 1.5, 0], fov: 42 };
 
 /** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
 function acrossRoom(x: number, z: number): CameraShot {

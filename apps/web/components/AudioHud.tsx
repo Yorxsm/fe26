@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Volume1, Volume2, VolumeX } from "lucide-react";
 import { audio } from "@/lib/audio";
 
 export function AudioHud({ live = false }: { live?: boolean }) {
@@ -47,6 +48,7 @@ export function AudioHud({ live = false }: { live?: boolean }) {
           setMuted(true);
         }}
       >
+        {muted || !ready ? <Volume2 aria-hidden="true" strokeWidth={1.75} /> : <VolumeX aria-hidden="true" strokeWidth={1.75} />}
         {muted || !ready ? "Unmute" : "Mute"}
       </button>
       <label>
@@ -76,6 +78,7 @@ export function AudioHud({ live = false }: { live?: boolean }) {
           audio.setQuiet(next);
         }}
       >
+        <Volume1 aria-hidden="true" strokeWidth={1.75} />
         {quiet ? "Quiet on" : "Quiet"}
       </button>
     </div>

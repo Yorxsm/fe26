@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Clock, UserPlus } from "lucide-react";
 import { CITY_AGENTS } from "@/lib/city";
 
 const BOARDS: Record<string, string[]> = {
@@ -42,6 +43,7 @@ export default function VillagePage() {
       <div className="strip" aria-label="Board window">
         {Object.keys(BOARDS).map((name) => (
           <button key={name} type="button" className={name === board ? "" : "btn-quiet"} onClick={() => setBoard(name)}>
+            <Clock aria-hidden="true" strokeWidth={1.75} />
             {name}
           </button>
         ))}
@@ -68,7 +70,10 @@ export default function VillagePage() {
         <p className="meta">Local preview for {CITY_AGENTS[0]?.name}. Nothing is posted.</p>
         <label htmlFor="follow-target">Account</label>
         <input id="follow-target" value={target} onChange={(event) => setTarget(event.target.value)} />
-        <button type="button" onClick={addFollow}>Follow</button>
+        <button type="button" onClick={addFollow}>
+          <UserPlus aria-hidden="true" strokeWidth={1.75} />
+          Follow
+        </button>
         {error ? <p className="error">{error}</p> : null}
         <ul>
           {follows.map((account) => (

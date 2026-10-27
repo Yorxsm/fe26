@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 
 export function AgentLookup({ initial }: { initial: string }) {
   const router = useRouter();
@@ -18,7 +19,10 @@ export function AgentLookup({ initial }: { initial: string }) {
         Agent account
         <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="demo.registry.testnet" />
       </label>
-      <button type="submit">Look up</button>
+      <button type="submit">
+        <Search aria-hidden="true" strokeWidth={1.75} />
+        Look up
+      </button>
     </form>
   );
 }

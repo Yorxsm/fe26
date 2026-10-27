@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Eye, PenLine, ScrollText, Shield } from "lucide-react";
 import { SignPanel } from "@/components/SignPanel";
 import { canonicalRules, nearToYocto, sha256Hex, withinDefaultCaps, type Rules } from "@/lib/protocol";
 import { PLACEHOLDER_CONTRACTS } from "@/lib/wallet";
@@ -85,9 +86,14 @@ export function CreateForm() {
         }}
       >
         <ol className="steps">
-          {["Rules", "Caps", "Sign"].map((label, index) => (
+          {([
+            ["Rules", ScrollText],
+            ["Caps", Shield],
+            ["Sign", PenLine],
+          ] as const).map(([label, Icon], index) => (
             <li key={label}>
               <button type="button" className={step === index ? "on" : ""} onClick={() => setStep(index)}>
+                <Icon aria-hidden="true" strokeWidth={1.75} />
                 {index + 1}. {label}
               </button>
             </li>
@@ -121,7 +127,10 @@ export function CreateForm() {
           </p>
         )}
         {problem ? <p className="error">{problem}</p> : <p className="ok">Inside the default platform caps.</p>}
-        <button type="submit">{step < 2 ? "Next" : "Review stays on this page"}</button>
+        <button type="submit">
+          {step < 2 ? <ArrowRight aria-hidden="true" strokeWidth={1.75} /> : <Eye aria-hidden="true" strokeWidth={1.75} />}
+          {step < 2 ? "Next" : "Review stays on this page"}
+        </button>
       </form>
       <aside className="card">
         <h2>Pinned hash</h2>

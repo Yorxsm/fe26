@@ -1316,3 +1316,104 @@ input[type="range"]::-moz-range-thumb {
 @media (min-width: 768px) {
   .logo-hero { width: 280px; }
 }
+
+button svg,
+.btn svg,
+a.btn svg,
+.site-nav a svg,
+.hud-nav a svg,
+.pronounce svg,
+.chip svg,
+.skip svg {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+.site-nav, .hud-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.site-nav a, .hud-nav a, .skip { display: inline-flex; align-items: center; gap: 8px; }
+
+button.pronounce {
+  --face: transparent;
+  background: transparent;
+  color: #8b8a86;
+  box-shadow: none;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  gap: 8px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: var(--type-small);
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  transform: none;
+}
+button.pronounce:hover,
+button.pronounce:active,
+button.pronounce:focus-visible {
+  background: transparent;
+  color: #8b8a86;
+  box-shadow: none;
+  transform: none;
+}
+
+.live-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #141416;
+  color: var(--ink);
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--body);
+  font-size: var(--type-small);
+  line-height: 1.5;
+}
+.chip .num {
+  font-family: var(--mono);
+  font-size: var(--type-small);
+  color: var(--ink);
+}
+
+.stress-readout {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 30;
+  margin: 0;
+  background: #141416;
+  color: #d4d2cc;
+  font-family: var(--mono);
+  font-size: var(--type-small);
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.swatch-dot {
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+.vantage-grid button {
+  display: grid;
+  grid-template-columns: 1em 1fr;
+  column-gap: 8px;
+  align-items: start;
+}
+.vantage-grid button svg { grid-column: 1; grid-row: 1 / span 2; margin-top: 4px; }
+.vantage-grid button strong,
+.vantage-grid button span { grid-column: 2; }

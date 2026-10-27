@@ -8,6 +8,32 @@ import { Lobby } from "@/components/Lobby";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import { Logo } from "@/components/Logo";
+import {
+  Anvil,
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  Compass,
+  Copy,
+  DoorOpen,
+  Eye,
+  Gamepad2,
+  Hammer,
+  Home,
+  ListOrdered,
+  Lock,
+  MapPin,
+  Plus,
+  ScrollText,
+  Send,
+  ShieldAlert,
+  SkipForward,
+  Stamp,
+  Users,
+  Video,
+  Volume2,
+  X,
+} from "lucide-react";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
 import { fixtureEvents, fixtureGames, HEIST_PIN } from "@/lib/fixtures";
@@ -103,10 +129,10 @@ function webglAvailable() {
 }
 
 const HUD_LINKS = [
-  ["/village", "Village"],
-  ["/create", "Create"],
-  ["/forge", "Forge"],
-  ["/agents/demo.registry.testnet", "Agents"],
+  ["/village", "Village", Home],
+  ["/create", "Create", Plus],
+  ["/forge", "Forge", Anvil],
+  ["/agents/demo.registry.testnet", "Agents", Users],
 ] as const;
 
 export function CityGate() {
@@ -128,7 +154,6 @@ export function CityGate() {
   const [soundLive, setSoundLive] = useState(false);
   const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
-  const potNear = Math.round(fixtureGames.reduce((sum, game) => sum + Number(game.rules.pot_yocto) / 1e24, 0));
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -274,8 +299,9 @@ export function CityGate() {
                   <Logo variant="nav" />
                 </a>
                 <nav className="hud-nav" aria-label="Primary">
-                  {HUD_LINKS.map(([href, label]) => (
+                  {HUD_LINKS.map(([href, label, Icon]) => (
                     <a key={href} href={href} aria-current={href.startsWith("/agents") ? (path.startsWith("/agents") ? "page" : undefined) : path === href ? "page" : undefined}>
+                      <Icon aria-hidden="true" strokeWidth={1.75} />
                       {label}
                     </a>
                   ))}
@@ -322,20 +348,27 @@ export function CityGate() {
               {phase === "city" && (
                 <div className="hud-bc">
                   {focusId === "skin-forge" ? (
-                    <a className="btn btn-primary" href="/forge">Open the customizer</a>
+                    <a className="btn btn-primary" href="/forge">
+                      <Hammer aria-hidden="true" strokeWidth={1.75} />
+                      Open the customizer
+                    </a>
                   ) : DISTRICTS.find((district) => district.id === focusId)?.href ? (
                     <a className="btn btn-primary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                      <DoorOpen aria-hidden="true" strokeWidth={1.75} />
                       Enter the room
                     </a>
                   ) : (
                     <button type="button" className="btn btn-primary" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                      <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
                       Games
                     </button>
                   )}
                   <button type="button" className="btn btn-secondary" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
+                    <ShieldAlert aria-hidden="true" strokeWidth={1.75} />
                     {audit ? "End audit call" : "Audit call"}
                   </button>
                   <button type="button" className="btn btn-ghost" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
+                    <Lock aria-hidden="true" strokeWidth={1.75} />
                     {paused ? "Lift lockdown" : "Lockdown"}
                   </button>
                   {(focusId || followIndex !== null) && (
@@ -347,6 +380,7 @@ export function CityGate() {
                         setFollowIndex(null);
                       }}
                     >
+                      <Video aria-hidden="true" strokeWidth={1.75} />
                       Free camera
                     </button>
                   )}
@@ -393,22 +427,32 @@ export function CityGate() {
             {phase === "title" && (
               <div className="title-screen" data-screen="title">
                 <button type="button" className="btn btn-ghost skip-corner" onClick={() => enterCity(null)}>
+                  <SkipForward aria-hidden="true" strokeWidth={1.75} />
                   Skip
                 </button>
                 <div className="title-lockup ui-stagger">
                   <h1>
                     <Logo variant="hero" />
                   </h1>
-                  <p className="subtitle">pronounced iron 26</p>
-                  <p className="live-strip" aria-live="polite">
-                    <span>
-                      <Tick value={CITY_AGENTS.length} /> agents in the city
+                  <button type="button" className="pronounce" onClick={() => audio.pronounce()}>
+                    <Volume2 aria-hidden="true" strokeWidth={1.75} />
+                    iron 26
+                  </button>
+                  <p className="live-chips" aria-live="polite">
+                    <span className="chip">
+                      <Bot aria-hidden="true" strokeWidth={1.75} />
+                      <span className="num">
+                        <Tick value={CITY_AGENTS.length} />
+                      </span>
+                      agents
                     </span>
-                    <span>
-                      <Tick value={fixtureGames.length} /> live games
-                    </span>
-                    <span>
-                      <Tick value={potNear} /> NEAR pot
+                    <span className="chip">
+                      <span className="live-dot" aria-hidden="true" />
+                      <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
+                      <span className="num">
+                        <Tick value={fixtureGames.length} />
+                      </span>
+                      live games
                     </span>
                   </p>
                   <div className="title-actions">
@@ -421,9 +465,11 @@ export function CityGate() {
                         setPhase("cutscene");
                       }}
                     >
-                      ENTER AS SPECTATOR
+                      <Eye aria-hidden="true" strokeWidth={1.75} />
+                      Enter as spectator
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={() => setPhase("dispatch")}>
+                      <Send aria-hidden="true" strokeWidth={1.75} />
                       Send your agent in
                     </button>
                   </div>
@@ -433,6 +479,7 @@ export function CityGate() {
             {phase === "cutscene" && (
               <div className="cutscene letterbox" data-screen="cutscene">
                 <button type="button" className="btn btn-ghost skip-corner" onClick={() => setPhase("vantage")}>
+                  <SkipForward aria-hidden="true" strokeWidth={1.75} />
                   Skip
                 </button>
                 <article className="caption-card ui-in" key={beat}>
@@ -453,7 +500,17 @@ export function CityGate() {
                     className="btn btn-primary"
                     onClick={() => (beat + 1 >= CUTSCENE.length ? setPhase("vantage") : setBeat((value) => value + 1))}
                   >
-                    {beat + 1 >= CUTSCENE.length ? "Choose a vantage" : "Next"}
+                    {beat + 1 >= CUTSCENE.length ? (
+                      <>
+                        <Compass aria-hidden="true" strokeWidth={1.75} />
+                        Choose a vantage
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRight aria-hidden="true" strokeWidth={1.75} />
+                        Next
+                      </>
+                    )}
                   </button>
                 </article>
               </div>
@@ -465,12 +522,14 @@ export function CityGate() {
                 <div className="vantage-grid">
                   {vantages.map((district) => (
                     <button key={district.id} type="button" onClick={() => enterCity(district.id)}>
+                      <MapPin aria-hidden="true" strokeWidth={1.75} />
                       <strong>{district.name}</strong>
                       <span>{district.summary}</span>
                     </button>
                   ))}
                 </div>
                 <button type="button" className="btn-quiet" onClick={() => enterCity(null)}>
+                  <Eye aria-hidden="true" strokeWidth={1.75} />
                   Stay on the overview
                 </button>
               </div>
@@ -492,9 +551,11 @@ export function CityGate() {
                       );
                     }}
                   >
+                    <Copy aria-hidden="true" strokeWidth={1.75} />
                     {copied ? "Copied" : "Copy instruction"}
                   </button>
                   <button type="button" className="btn-quiet" onClick={() => setPhase("title")}>
+                    <ArrowLeft aria-hidden="true" strokeWidth={1.75} />
                     Back
                   </button>
                 </div>
@@ -530,6 +591,7 @@ export function CityGate() {
                     router.push("/village");
                   }}
                 >
+                  <ListOrdered aria-hidden="true" strokeWidth={1.75} />
                   Open the leaderboard
                 </button>
               )}
@@ -543,6 +605,7 @@ export function CityGate() {
                     ))}
                   </ul>
                   <button type="button" onClick={() => commit({ ...save, tutorial: 3 })}>
+                    <ScrollText aria-hidden="true" strokeWidth={1.75} />
                     Feed read
                   </button>
                 </>
@@ -553,10 +616,12 @@ export function CityGate() {
                   disabled={followIndex === null}
                   onClick={() => commit({ ...save, tutorial: 4 })}
                 >
+                  <Stamp aria-hidden="true" strokeWidth={1.75} />
                   Stamps noted
                 </button>
               )}
               <button type="button" className="btn-quiet" onClick={() => commit({ ...save, tutorial: TUTORIAL.length })}>
+                <X aria-hidden="true" strokeWidth={1.75} />
                 Dismiss hints
               </button>
             </div>
@@ -573,6 +638,7 @@ export function CityGate() {
                   }}
                   onClick={() => pick(district)}
                 >
+                  <MapPin aria-hidden="true" strokeWidth={1.75} />
                   {district.name}
                 </button>
               ))}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Dices, Hammer } from "lucide-react";
+import { Backpack, Badge, Check, Dices, Eye, Hammer, HardHat, Monitor, Palette, Shirt, Smile, Sparkles, type LucideIcon } from "lucide-react";
 import { SkinPreview } from "@/components/SkinPreview";
 import { Button, Panel } from "@/components/ui";
 import { audio } from "@/lib/audio";
@@ -40,16 +40,17 @@ const CATEGORIES: Array<{
   names: string[];
   count: number;
   colors?: string[];
+  icon: LucideIcon;
 }> = [
-  { key: "paint", label: "Paint", names: PAINT_NAMES, count: PAINTS, colors: PAINT_COLORS },
-  { key: "screen", label: "Screen", names: SCREEN_NAMES, count: SCREENS, colors: SCREEN_COLORS },
-  { key: "eyes", label: "Eyes", names: EYE_NAMES, count: EYE_STYLES },
-  { key: "headwear", label: "Headwear", names: HEADWEAR_NAMES, count: HEADWEAR },
-  { key: "face_item", label: "Face", names: FACE_ITEM_NAMES, count: FACE_ITEMS },
-  { key: "back_item", label: "Back", names: BACK_ITEM_NAMES, count: BACK_ITEMS },
-  { key: "emblem", label: "Emblem", names: EMBLEM_NAMES, count: EMBLEMS },
-  { key: "trail", label: "Trail", names: TRAIL_NAMES, count: TRAILS },
-  { key: "role", label: "Role", names: ROLE_NAMES, count: ROLE_OUTFITS },
+  { key: "paint", label: "Paint", names: PAINT_NAMES, count: PAINTS, colors: PAINT_COLORS, icon: Palette },
+  { key: "screen", label: "Screen", names: SCREEN_NAMES, count: SCREENS, colors: SCREEN_COLORS, icon: Monitor },
+  { key: "eyes", label: "Eyes", names: EYE_NAMES, count: EYE_STYLES, icon: Eye },
+  { key: "headwear", label: "Headwear", names: HEADWEAR_NAMES, count: HEADWEAR, icon: HardHat },
+  { key: "face_item", label: "Face", names: FACE_ITEM_NAMES, count: FACE_ITEMS, icon: Smile },
+  { key: "back_item", label: "Back", names: BACK_ITEM_NAMES, count: BACK_ITEMS, icon: Backpack },
+  { key: "emblem", label: "Emblem", names: EMBLEM_NAMES, count: EMBLEMS, icon: Badge },
+  { key: "trail", label: "Trail", names: TRAIL_NAMES, count: TRAILS, icon: Sparkles },
+  { key: "role", label: "Role", names: ROLE_NAMES, count: ROLE_OUTFITS, icon: Shirt },
 ];
 
 function mintCall(agent: string, traits: SkinTraits) {
@@ -95,11 +96,15 @@ export default function ForgePage() {
             {rarity(traits)} · {ROLE_NAMES[traits.role]}
           </p>
           <div className="forge-tabs" role="tablist" aria-label="Trait categories">
-            {CATEGORIES.map((entry) => (
-              <button key={entry.key} type="button" role="tab" aria-selected={active.key === entry.key} onClick={() => setCategory(entry)}>
-                {entry.label}
-              </button>
-            ))}
+            {CATEGORIES.map((entry) => {
+              const Icon = entry.icon;
+              return (
+                <button key={entry.key} type="button" role="tab" aria-selected={active.key === entry.key} onClick={() => setCategory(entry)}>
+                  <Icon aria-hidden="true" strokeWidth={1.75} />
+                  {entry.label}
+                </button>
+              );
+            })}
           </div>
           <div className="forge-swatches" role="listbox" aria-label={active.label}>
             {active.names.map((name, index) => (
@@ -110,6 +115,7 @@ export default function ForgePage() {
                 aria-selected={traits[active.key] === index}
                 onClick={() => set(active.key, index)}
               >
+                {traits[active.key] === index ? <Check aria-hidden="true" strokeWidth={1.75} /> : <span className="swatch-dot" aria-hidden="true" />}
                 {active.colors ? <span className="swatch" style={{ background: active.colors[index] }} /> : null}
                 {name}
               </button>

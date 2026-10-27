@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Chakra_Petch, Inter, JetBrains_Mono } from "next/font/google";
+import { SkipForward } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { SiteNav } from "@/components/SiteNav";
 import { UiSound } from "@/components/UiSound";
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <UiSound />
         <a className="skip" href="#content">
+          <SkipForward aria-hidden="true" strokeWidth={1.75} />
           Skip to content
         </a>
         <div className="shell">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hammer, Volume2 } from "lucide-react";
+import { Eye, Hammer, MessageSquare, MousePointer2, Sparkles, Volume2, X } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import {
   Button,
@@ -88,18 +88,40 @@ export default function StyleguidePage() {
       <section>
         <h2>Buttons</h2>
         <div className="row">
-          <Button>Primary</Button>
-          <Button variant="secondary">Secondary</Button>
-          <Button className="is-hover">Hover</Button>
-          <Button className="is-pressed">Pressed</Button>
-          <Button disabled>Disabled</Button>
-          <Button className="btn-sm">Small</Button>
           <Button>
-            <Hammer size={16} /> With icon
+            <Eye aria-hidden="true" strokeWidth={1.75} />
+            Primary
+          </Button>
+          <Button variant="secondary">
+            <MousePointer2 aria-hidden="true" strokeWidth={1.75} />
+            Secondary
+          </Button>
+          <Button className="is-hover">
+            <Sparkles aria-hidden="true" strokeWidth={1.75} />
+            Hover
+          </Button>
+          <Button className="is-pressed">
+            <Hammer aria-hidden="true" strokeWidth={1.75} />
+            Pressed
+          </Button>
+          <Button disabled>
+            <Hammer aria-hidden="true" strokeWidth={1.75} />
+            Disabled
+          </Button>
+          <Button className="btn-sm">
+            <Eye aria-hidden="true" strokeWidth={1.75} />
+            Small
+          </Button>
+          <Button>
+            <Hammer aria-hidden="true" strokeWidth={1.75} />
+            With icon
           </Button>
           <IconButton icon={Volume2} label="Sound" />
           <Tooltip tip="The lip is a solid darker shade.">
-            <Button variant="ghost">Hover tip</Button>
+            <Button variant="ghost">
+              <Eye aria-hidden="true" strokeWidth={1.75} />
+              Hover tip
+            </Button>
           </Tooltip>
         </div>
       </section>
@@ -141,11 +163,13 @@ export default function StyleguidePage() {
             <Toast>
               Caps hold.{" "}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setToast(false)}>
+                <X aria-hidden="true" strokeWidth={1.75} />
                 Dismiss
               </button>
             </Toast>
           ) : (
             <Button variant="secondary" onClick={() => setToast(true)}>
+              <MessageSquare aria-hidden="true" strokeWidth={1.75} />
               Show toast
             </Button>
           )}

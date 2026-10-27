@@ -2,11 +2,27 @@
 
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import {
+  Anvil,
+  Bot,
   Compass,
+  Dices,
+  Eye,
+  Gamepad2,
+  Hammer,
+  Home,
+  Lock,
+  Plus,
   Radio,
   ScrollText,
+  Send,
+  ShieldAlert,
+  SkipForward,
   Swords,
+  Users,
+  Volume1,
   Volume2,
+  VolumeX,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -222,9 +238,25 @@ export function Tick({ value }: { value: number }) {
 
 export function IconRow() {
   const icons = [
-    { icon: Volume2, label: "Sound" },
+    { icon: Eye, label: "Spectator" },
+    { icon: Send, label: "Send" },
+    { icon: SkipForward, label: "Skip" },
+    { icon: Volume2, label: "Unmute" },
+    { icon: VolumeX, label: "Mute" },
+    { icon: Volume1, label: "Quiet" },
+    { icon: Gamepad2, label: "Games" },
+    { icon: ShieldAlert, label: "Audit call" },
+    { icon: Lock, label: "Lockdown" },
+    { icon: Dices, label: "Randomise" },
+    { icon: Hammer, label: "Mint" },
+    { icon: Home, label: "Village" },
+    { icon: Plus, label: "Create" },
+    { icon: Anvil, label: "Forge" },
+    { icon: Users, label: "Agents" },
+    { icon: Bot, label: "Agent" },
+    { icon: X, label: "Dismiss" },
+    { icon: Swords, label: "Match" },
     { icon: ScrollText, label: "Quest log" },
-    { icon: Swords, label: "Games" },
     { icon: Radio, label: "Live" },
     { icon: Compass, label: "Districts" },
   ];
