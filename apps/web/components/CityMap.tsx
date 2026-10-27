@@ -1134,7 +1134,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
     if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
     camera.getWorldDirection(aim);
     const kind = shotKind.current;
-    gl.toneMappingExposure = kind === "interior" ? 0.85 : 1;
+    gl.toneMappingExposure = kind === "interior" ? 0.95 : 1;
     const focusDistance = kind === "interior" ? 5.4 : kind === "hero" ? 26 : 48;
     grade.dof.target.copy(camera.position).addScaledVector(aim, focusDistance);
     grade.dof.bokehScale = kind === "overview" ? 0.015 : 0;

@@ -233,7 +233,7 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
       <group position={room.position}>
         <RoomMesh key={room.url} url={room.url} />
         {LAMPS.map(([x, y, z], index) => (
-          <pointLight key={index} position={[x, y, z]} color="#e7b07a" intensity={14} distance={9} decay={2} />
+          <pointLight key={index} position={[x, y, z]} color="#e7b07a" intensity={22} distance={9} decay={2} />
         ))}
         <RoomBoards id={focusId} />
         {focusId === "cup-stadium" ? <SeatCrowd /> : null}
