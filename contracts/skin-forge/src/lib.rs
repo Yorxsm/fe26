@@ -11,7 +11,7 @@
 //! Function-call keys on the heist cannot attach this deposit. The registry
 //! checks the cap, then calls `mint_skin` with the price attached.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fe2vi_core::{
     default_skin as catalog_default, earned_progress, earned_trait, unknown_trait, EARNED_TRAITS,
@@ -70,6 +70,8 @@ pub struct SkinToken {
     pub creator: AccountId,
     /// Snapshotted at mint. The owner can change the contract default later.
     pub royalty_bps: u16,
+    /// Extra royalty accounts snapshotted at mint. Empty unless the owner sets a future split.
+    pub royalty_splits: Vec<(AccountId, u16)>,
     pub bound_agent: Option<AccountId>,
     pub stats: SkinRecord,
     /// Earned trait ids currently worn. One per slot.
@@ -147,6 +149,8 @@ pub struct SkinForge {
     mint_price: u128,
     /// Creator royalty for tokens minted from now on, in basis points. Cap is 10%.
     royalty_bps: u16,
+    /// Extra accounts for future mints. Empty. Counted inside the same 10% cap.
+    royalty_splits: Vec<(AccountId, u16)>,
     next_id: u64,
     tokens: LookupMap<String, SkinToken>,
     by_owner: LookupMap<AccountId, Vec<String>>,
@@ -168,6 +172,7 @@ impl SkinForge {
             prize_bps: 0,
             mint_price: MINT_PRICE_YOCTO,
             royalty_bps: DEFAULT_ROYALTY_BPS,
+            royalty_splits: Vec::new(),
             next_id: 1,
             tokens: LookupMap::new(b"t"),
             by_owner: LookupMap::new(b"o"),
@@ -227,12 +232,35 @@ impl SkinForge {
     /// No other royalty recipients are configured.
     pub fn set_royalty_bps(&mut self, royalty_bps: u16) {
         self.only_owner();
-        require!(royalty_bps <= MAX_ROYALTY_BPS, "royalty cap");
+        require!(
+            split_total(royalty_bps, &self.royalty_splits) <= u32::from(MAX_ROYALTY_BPS),
+            "royalty cap"
+        );
         self.royalty_bps = royalty_bps;
     }
 
     pub fn royalty_bps(&self) -> u16 {
         self.royalty_bps
+    }
+
+    /// Replace the extra royalty accounts used by later mints. The creator stays a separate entry.
+    /// The list is empty until the owner sets one. The creator rate plus these shares stay at or under 10%.
+    pub fn set_royalty_splits(&mut self, splits: Vec<(AccountId, u16)>) {
+        self.only_owner();
+        let mut seen = BTreeSet::new();
+        for (account, bps) in &splits {
+            require!(*bps > 0 && *bps <= MAX_ROYALTY_BPS, "royalty split");
+            require!(seen.insert(account.clone()), "royalty split");
+        }
+        require!(
+            split_total(self.royalty_bps, &splits) <= u32::from(MAX_ROYALTY_BPS),
+            "royalty cap"
+        );
+        self.royalty_splits = splits;
+    }
+
+    pub fn royalty_splits(&self) -> Vec<(AccountId, u16)> {
+        self.royalty_splits.clone()
     }
 
     /// Allow or remove a game or registry account that may call `record_result`.
@@ -272,6 +300,7 @@ impl SkinForge {
                 approvals: Vec::new(),
                 creator: agent.clone(),
                 royalty_bps: self.royalty_bps,
+                royalty_splits: self.royalty_splits.clone(),
                 bound_agent: None,
                 stats: SkinRecord::empty(),
                 equipped_traits: Vec::new(),
@@ -760,24 +789,47 @@ fn metadata_for(token: &SkinToken) -> TokenMetadata {
     }
 }
 
+fn split_total(creator_bps: u16, splits: &[(AccountId, u16)]) -> u32 {
+    u32::from(creator_bps) + splits.iter().map(|(_, bps)| u32::from(*bps)).sum::<u32>()
+}
+
 fn payout_map(token: SkinToken, balance: u128, max_len_payout: u32) -> BTreeMap<AccountId, U128> {
     require!(max_len_payout > 0, "payout exceeds max_len");
-    let royalty = balance.saturating_mul(u128::from(token.royalty_bps)) / 10_000;
-    let mut payout = BTreeMap::new();
-    if token.creator == token.owner_id || royalty == 0 {
-        payout.insert(token.owner_id, U128(balance));
+    let mut payout: BTreeMap<AccountId, u128> = BTreeMap::new();
+    let mut paid = 0u128;
+    let creator_cut = if token.creator == token.owner_id {
+        0
     } else {
-        let seller = balance - royalty;
-        payout.insert(token.creator, U128(royalty));
-        if seller > 0 {
-            payout.insert(token.owner_id, U128(seller));
+        balance.saturating_mul(u128::from(token.royalty_bps)) / 10_000
+    };
+    if creator_cut > 0 {
+        payout.insert(token.creator.clone(), creator_cut);
+        paid += creator_cut;
+    }
+    for (account, bps) in &token.royalty_splits {
+        if account == &token.owner_id {
+            continue;
         }
+        let cut = balance.saturating_mul(u128::from(*bps)) / 10_000;
+        if cut == 0 {
+            continue;
+        }
+        *payout.entry(account.clone()).or_insert(0) += cut;
+        paid += cut;
+    }
+    require!(paid <= balance, "royalty");
+    let seller = balance - paid;
+    if seller > 0 {
+        *payout.entry(token.owner_id).or_insert(0) += seller;
     }
     require!(
         payout.len() as u32 <= max_len_payout,
         "payout exceeds max_len"
     );
     payout
+        .into_iter()
+        .map(|(account, amount)| (account, U128(amount)))
+        .collect()
 }
 
 fn apply_outcome(stats: &mut SkinRecord, game: &str, outcome: &str, season: u32) {
@@ -1056,6 +1108,47 @@ mod tests {
         let ten = forge.nft_payout(second, U128(99), 2);
         assert_eq!(ten.payout.get(&agent).unwrap().0, 9);
         assert_eq!(ten.payout.get(&carol).unwrap().0, 90);
+    }
+
+    #[test]
+    fn royalty_splits_snapshot_and_stay_inside_the_cap() {
+        let (mut forge, first, agent) = minted();
+        assert!(forge.royalty_splits().is_empty());
+        let partner: AccountId = "partner.fe2vi.testnet".parse().unwrap();
+        context("alice.fe2vi.testnet", 0);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            forge.set_royalty_splits(vec![(partner.clone(), 200)]);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("owner"));
+
+        context("owner.fe2vi.testnet", 0);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            forge.set_royalty_splits(vec![(partner.clone(), 600)]);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("royalty cap"));
+        forge.set_royalty_splits(vec![(partner.clone(), 200)]);
+        let err = catch_unwind(AssertUnwindSafe(|| forge.set_royalty_bps(900))).unwrap_err();
+        assert!(panic_text(err).contains("royalty cap"));
+
+        let bob: AccountId = "bob.fe2vi.testnet".parse().unwrap();
+        context(agent.as_str(), 1);
+        forge.nft_transfer(bob.clone(), first.clone(), None, None);
+        let old = forge.nft_payout(first, U128(10_000), 3);
+        assert_eq!(old.payout.get(&partner), None);
+        assert_eq!(old.payout.get(&agent).unwrap().0, 500);
+        assert_eq!(old.payout.get(&bob).unwrap().0, 9_500);
+
+        context("registry.fe2vi.testnet", MINT_PRICE_YOCTO);
+        let second = forge.mint_skin(agent.clone(), sample());
+        context(agent.as_str(), 1);
+        forge.nft_transfer(bob.clone(), second.clone(), None, None);
+        let split = forge.nft_payout(second, U128(10_000), 3);
+        assert_eq!(split.payout.get(&agent).unwrap().0, 500);
+        assert_eq!(split.payout.get(&partner).unwrap().0, 200);
+        assert_eq!(split.payout.get(&bob).unwrap().0, 9_300);
+        assert_eq!(split.payout.values().map(|value| value.0).sum::<u128>(), 10_000);
     }
 
     #[test]

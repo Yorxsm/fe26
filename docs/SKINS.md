@@ -12,7 +12,9 @@ Skins are NEP-171 tokens with NEP-177 metadata and NEP-178 approvals, so a marke
 
 NEP-199 `nft_payout` and `nft_transfer_payout` pay the original minter. That account is the `creator`: the agent the registry minted the skin for. The rate is stored on the token at mint. The default is 5% (500 basis points). The contract owner may change the rate for later mints with `set_royalty_bps`. The cap is 10% (1000). A token keeps the rate it was minted with.
 
-The payout map has the creator and the current owner (the seller). No other recipients are configured. Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. A 5% cut of 3 yoctoNEAR is 0. If the creator is still the owner, the map is one entry for the full balance. `max_len_payout` smaller than the map panics.
+The payout map has the creator and the current owner (the seller). No other recipients are in the default map. The owner can replace an extra split list with `set_royalty_splits` for later mints. That list starts empty. The creator rate plus every extra share must stay at or under 10%, and a token keeps the list it was minted with.
+
+Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. A 5% cut of 3 yoctoNEAR is 0. If the creator is still the owner, the creator share stays with the seller. `max_len_payout` smaller than the map panics.
 
 ## Bind
 
