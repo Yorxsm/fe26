@@ -22,7 +22,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -920,14 +920,17 @@ function AgentMesh({
       pose = { x: spot[0], y: 0, z: spot[1], rot: 0 };
     }
     const scripted = mode === "cutscene" ? (CUTSCENE_CAST[beat] ?? []).find((entry) => entry.index === index) : undefined;
+    const roomCrew = frameMode === "in" && focusId ? INTERIOR_CAST[focusId] : undefined;
+    const stationed = scripted ? undefined : roomCrew?.find((entry) => entry.index === index);
     if (scripted) pose = { x: scripted.x, y: 0, z: scripted.z, rot: scripted.rot };
+    else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
       applyLook(scene, skin, nextMood);
     }
-    const speed = scripted ? scripted.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
-    const planted = !poster && speed < 0.4;
+    const speed = scripted ? scripted.speed : stationed ? stationed.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+    const planted = !poster && !stationed?.clip && speed < 0.4;
     const fading = clipFade.current;
     if (fading.length) {
       clipFade.current = fading.filter((action) => {
@@ -954,7 +957,7 @@ function AgentMesh({
       }
     } else {
       const holdStill = lineup || (poster !== null && poster !== "street") || (paused && poster !== "street");
-      const nextClip = holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
+      const nextClip = stationed?.clip ? stationed.clip : holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
       if (clipName.current !== nextClip) {
         const prev = clipAction.current;
         const clip = gltf.animations.find((entry) => entry.name === nextClip);
@@ -977,6 +980,7 @@ function AgentMesh({
     if (!paused || poster === "walk" || poster === "expressions" || poster === "street") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
       mode === "cutscene" ? Boolean(scripted)
+      : roomCrew ? Boolean(stationed)
       : poster === "face" ? index === 0
       : poster === "front6" || poster === "q34" ? index < 6
       : poster === "expressions" || poster === "walk" || poster === "trails" ? index < 4
@@ -993,7 +997,7 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = shown && !underChip && mode !== "cutscene" && frameMode !== "in" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
       const chip = tagEl.current;
       if (chip && group.current) {

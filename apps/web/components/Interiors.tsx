@@ -2,7 +2,7 @@
 
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { CHALLENGES, countdownSecs, formatCountdown, heistRows, mockQuotes } from "@/lib/schedule";
 
@@ -44,29 +44,38 @@ function RoomMesh({ url }: { url: string }) {
   return <primitive object={scene} />;
 }
 
-function paintBoard(lines: string[]) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 576;
+function quotedFamily(variable: string, fallback: string) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(variable);
+  const first = raw.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "");
+  return first || fallback;
+}
+
+function paintBoard(canvas: HTMLCanvasElement, lines: string[], compact: boolean) {
   const ctx = canvas.getContext("2d");
-  if (!ctx) return canvas;
-  const root = getComputedStyle(document.documentElement);
-  const display = root.getPropertyValue("--font-display").trim() || "sans-serif";
-  const mono = root.getPropertyValue("--font-mono").trim() || "monospace";
-  ctx.fillStyle = "#141416";
-  ctx.fillRect(0, 0, 1024, 576);
-  ctx.fillStyle = "#c94a1a";
-  ctx.fillRect(0, 0, 1024, 14);
-  ctx.textBaseline = "top";
+  if (!ctx) return;
+  const display = quotedFamily("--font-display", "sans-serif");
+  const mono = quotedFamily("--font-mono", "monospace");
+  const body = lines.slice(1, 6);
+  const titleSize = compact ? 150 : 88;
+  const bodySize = compact ? 140 : 68;
+  const titleY = compact ? 70 : 44;
+  const bodyTop = compact ? 320 : 164;
+  const bodyGap = compact ? 200 : 78;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#d4d2cc";
-  ctx.font = `700 84px ${display}`;
-  ctx.fillText(lines[0] ?? "", 48, 40);
-  ctx.font = `500 64px ${mono}`;
-  lines.slice(1, 6).forEach((line, index) => {
-    ctx.fillStyle = index === 0 ? "#2fb86a" : "#d4d2cc";
-    ctx.fillText(line, 48, 156 + index * 78);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#c94a1a";
+  ctx.fillRect(0, 0, canvas.width, compact ? 36 : 18);
+  ctx.fillStyle = "#1f8a4e";
+  ctx.fillRect(0, compact ? 36 : 18, compact ? 28 : 16, canvas.height);
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#141416";
+  ctx.font = `700 ${titleSize}px "${display}", sans-serif`;
+  ctx.fillText(lines[0] ?? "", 64, titleY);
+  ctx.font = `500 ${bodySize}px "${mono}", monospace`;
+  body.forEach((line, index) => {
+    ctx.fillText(line, 64, bodyTop + index * bodyGap);
   });
-  return canvas;
 }
 
 function Screen({
@@ -78,41 +87,51 @@ function Screen({
   lines: string[];
   size?: [number, number];
 }) {
-  const [map, setMap] = useState<THREE.CanvasTexture | null>(null);
   const key = lines.join("|");
-  useEffect(() => {
+  const [width, height] = size;
+  const compact = height < 1.2;
+  const map = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 576;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = true;
+    texture.anisotropy = 8;
+    texture.needsUpdate = true;
+    return texture;
+  }, []);
+  useLayoutEffect(() => {
     let dead = false;
-    const root = getComputedStyle(document.documentElement);
-    const display = root.getPropertyValue("--font-display").trim() || "sans-serif";
-    const mono = root.getPropertyValue("--font-mono").trim() || "monospace";
-    Promise.all([document.fonts.load(`700 84px ${display}`), document.fonts.load(`500 64px ${mono}`)]).then(() => {
-      if (dead) return;
-      const canvas = paintBoard(lines);
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 8;
-      texture.needsUpdate = true;
-      setMap((current) => {
-        current?.dispose();
-        return texture;
-      });
+    const draw = () => {
+      paintBoard(map.image as HTMLCanvasElement, lines, compact);
+      map.needsUpdate = true;
+    };
+    draw();
+    const display = quotedFamily("--font-display", "sans-serif");
+    const mono = quotedFamily("--font-mono", "monospace");
+    const fonts = Promise.all([
+      document.fonts.load(`700 ${compact ? 150 : 88}px "${display}"`),
+      document.fonts.load(`500 ${compact ? 140 : 68}px "${mono}"`),
+    ]).catch(() => undefined);
+    const raced = Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 400))]);
+    raced.then(() => {
+      if (!dead) draw();
     });
     return () => {
       dead = true;
     };
-    // key is the joined line text. The array identity changes every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  const [width, height] = size;
+    // key is the line text. Repaint when it changes, including after the font load.
+  }, [key, map, compact]);
   return (
     <group position={position}>
-      <mesh position={[0, 0, -0.05]} castShadow>
+      <mesh position={[0, 0, -0.06]} castShadow>
         <boxGeometry args={[width + 0.18, height + 0.18, 0.08]} />
         <meshStandardMaterial color="#2c2e32" metalness={0.78} roughness={0.38} />
       </mesh>
-      <mesh position={[0, 0, 0.01]}>
+      <mesh position={[0, 0, 0.02]} renderOrder={2}>
         <planeGeometry args={[width, height]} />
-        <meshBasicMaterial map={map ?? undefined} color={map ? "#ffffff" : "#141416"} toneMapped={false} />
+        <meshBasicMaterial map={map} color="#ffffff" toneMapped={false} />
       </mesh>
     </group>
   );
