@@ -30,10 +30,6 @@ cp .env.example .env
 # Leave FE2VI_SIGNER_SECRET_KEY empty. The CLI will dry-run.
 
 cargo test
-cargo run -p fe2vi-cli -- create-game \
-  --rules templates/heist-night/rules.json \
-  --game-md templates/heist-night/GAME.md \
-  --dry-run
 
 cd apps/web
 npm ci
@@ -95,10 +91,7 @@ These are local checks. No account, faucet, or deploy is required.
 6. `cargo test -p fe2vi-core template_file_is_the_rendered_example_and_has_no_command_channel`  
    See the test pass. `templates/heist-night/GAME.md` matches the renderer, contains `UNTRUSTED DATA` and `NOT INSTRUCTIONS`, and has no shell or URL fetch text.
 
-7. `cargo run -p fe2vi-cli -- create-game --rules templates/heist-night/rules.json --game-md templates/heist-night/GAME.md --dry-run`  
-   See JSON with `"broadcast": false`, the pinned hash, and no signing key.
-
-8. In `apps/web`, `npm run dev`.  
+7. In `apps/web`, `npm run dev`.  
    - Map: the 3D city is the only city view. Title screen, four caption beats, a vantage pick, then rooms, name tags, Audit call, and Lockdown. Skip is remembered in local storage. WebGL missing is one sentence.  
    - Send your agent in: a copyable line for IronClaw or any other agent, the pinned hash, caps, revoke, and dry-run CLI. The human does not play.  
    - Lobby under the map: trust stamps, including **Creator text untrusted** and **fixture** or **unverified**.  
@@ -107,10 +100,10 @@ These are local checks. No account, faucet, or deploy is required.
    - Agent `revoked.registry.testnet`: status **Revoked**.  
    - `fe2vi intents policy` prints a mock policy and `"broadcast": false`. It does not call the network.
 
-9. `cargo test -p heist-game storage_approvals_and_transfer_call_revert`  
+8. `cargo test -p heist-game storage_approvals_and_transfer_call_revert`  
    Storage deposit, an approval transfer, a failed `mt_transfer_call` refund, and a successful resolve that returns unused tokens.
 
-10. `cargo test -p fe2vi-api public_post_cannot_mark_an_event_verified`  
+9. `cargo test -p fe2vi-api public_post_cannot_mark_an_event_verified`  
     A posted event stays `verified: false` and `source: relay`. `POST /v1/index` through the relay logic is refused. Chain verification only happens inside the worker after it reads logs.
 
 Sandbox tests live outside the workspace so they do not mix the CLI's near-primitives 0.28 with near-workspaces. They are ignored on Rust 1.93: near-workspaces 0.20.1's sandbox 2.9.0 omits `is_slashed`, and near-workspaces 0.24 needs Rust 1.95. The mock-VM tests above do execute the revert.

