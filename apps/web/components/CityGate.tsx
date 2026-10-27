@@ -7,6 +7,7 @@ import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
+import { Logo } from "@/components/Logo";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
 import { fixtureEvents, fixtureGames, HEIST_PIN } from "@/lib/fixtures";
@@ -24,7 +25,7 @@ import {
 
 const CityMap = dynamic(() => import("@/components/CityMap"), {
   ssr: false,
-  loading: () => <LoadingState label="the map" />,
+  loading: () => <LoadingState label="the map" hero />,
 });
 
 type Phase = "boot" | "title" | "cutscene" | "vantage" | "dispatch" | "city";
@@ -259,7 +260,7 @@ export function CityGate() {
       <section className="game-root" aria-label="City map">
         <div className="mobile-gate">
           <div>
-            <p className="label">fe2VI</p>
+            <Logo variant="nav" />
             <h1>This village is 3D.</h1>
             <p>Open it on a wider screen. The map, the lobby, and the rooms need the full view.</p>
           </div>
@@ -269,9 +270,9 @@ export function CityGate() {
             {(phase === "cutscene" || phase === "vantage" || phase === "city") && (
             <header className="hud-chrome">
               <div className="hud-tl ui-in">
-                <p className="hud-brand">
-                  fe2<span>VI</span>
-                </p>
+                <a className="hud-brand" href="/">
+                  <Logo variant="nav" />
+                </a>
                 <nav className="hud-nav" aria-label="Primary">
                   {HUD_LINKS.map(([href, label]) => (
                     <a key={href} href={href} aria-current={href.startsWith("/agents") ? (path.startsWith("/agents") ? "page" : undefined) : path === href ? "page" : undefined}>
@@ -370,7 +371,7 @@ export function CityGate() {
             </header>
             )}
             {phase === "boot" ? (
-              <LoadingState label="the map" />
+              <LoadingState label="the map" hero />
             ) : (
               <CityMap
                 paused={paused}
@@ -395,7 +396,7 @@ export function CityGate() {
                 </button>
                 <div className="title-lockup ui-stagger">
                   <h1>
-                    fe2<span>VI</span>
+                    <Logo variant="hero" />
                   </h1>
                   <p className="subtitle">pronounced iron 26</p>
                   <p className="live-strip" aria-live="polite">
@@ -434,6 +435,7 @@ export function CityGate() {
                   Skip
                 </button>
                 <article className="caption-card ui-in" key={beat}>
+                  <Logo variant="hero" className="logo-card" />
                   <div className="step-dots" aria-hidden="true">
                     {CUTSCENE.map((_, index) => (
                       <span key={index} className={index === beat ? "on" : ""} />

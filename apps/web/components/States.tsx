@@ -1,8 +1,11 @@
-export function LoadingState({ label }: { label: string }) {
+import { Logo } from "@/components/Logo";
+
+export function LoadingState({ label, hero = false }: { label: string; hero?: boolean }) {
   return (
-    <p className="loading" role="status">
-      Loading {label}…
-    </p>
+    <div className="loading" role="status">
+      <Logo variant={hero ? "hero" : "nav"} />
+      <p>Loading {label}…</p>
+    </div>
   );
 }
 

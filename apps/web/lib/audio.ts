@@ -56,6 +56,25 @@ class CityAudio {
     return Boolean(this.ctx);
   }
 
+  /**
+   * Button press. Creates the context so the click is audible, and does not
+   * start the theme bed. Music stays on unlock(), which is Enter as spectator.
+   */
+  press() {
+    if (typeof window === "undefined") return;
+    this.prefs = loadPrefs();
+    if (!this.ctx) {
+      const Ctx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      this.ctx = new Ctx();
+      this.master = this.ctx.createGain();
+      this.master.connect(this.ctx.destination);
+      this.applyMaster();
+    }
+    void this.ctx.resume();
+    this.click();
+  }
+
   /** Call from a click. Skip does not call this. */
   unlock() {
     if (typeof window === "undefined") return;

@@ -24,15 +24,9 @@ export function AudioHud({ live = false }: { live?: boolean }) {
       last = node;
       audio.hover();
     };
-    const click = (event: MouseEvent) => {
-      const node = event.target instanceof Element ? event.target.closest("button, a") : null;
-      if (node) audio.click();
-    };
     document.addEventListener("pointerover", over);
-    document.addEventListener("click", click);
     return () => {
       document.removeEventListener("pointerover", over);
-      document.removeEventListener("click", click);
     };
   }, [live]);
 
