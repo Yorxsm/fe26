@@ -13,6 +13,12 @@ export type FaceRig = {
 };
 
 const SIZE = 512;
+const CX = 256;
+/** Eyes sit above the screen centre. The pair's outer edges span 55% of the opening. */
+const EYE_Y = 206;
+const EYE_DX = 78;
+const EYE_RX = 62;
+const MOUTH_Y = 338;
 
 function sourceOf(node: Object3D, read: (node: Object3D) => string) {
   return read(node);
@@ -49,23 +55,22 @@ function paintGlass(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = "#0a0a0b";
   ctx.fillRect(0, 0, SIZE, SIZE);
   for (let y = 0; y < SIZE; y += 4) {
-    ctx.fillStyle = y % 8 === 0 ? "rgba(255,255,255,0.045)" : "rgba(0,0,0,0.25)";
+    ctx.fillStyle = y % 8 === 0 ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.16)";
     ctx.fillRect(0, y, SIZE, 1);
   }
-  const gloss = ctx.createLinearGradient(40, 20, 280, 360);
-  gloss.addColorStop(0, "rgba(190, 210, 230, 0.22)");
-  gloss.addColorStop(0.28, "rgba(190, 210, 230, 0.05)");
-  gloss.addColorStop(0.55, "rgba(190, 210, 230, 0)");
-  ctx.fillStyle = gloss;
+  ctx.strokeStyle = "rgba(214, 226, 238, 0.55)";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.ellipse(150, 120, 120, 70, -0.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.moveTo(118, 78);
+  ctx.lineTo(168, 118);
+  ctx.stroke();
 }
 
 function eyeOpen(ctx: CanvasRenderingContext2D, style: number, cx: number, cy: number, lookX: number, lookY: number, blink: number, shocked: boolean) {
   const shut = Math.min(1, Math.max(0, blink));
-  const w = 86;
-  const h = 96 * (1 - shut * 0.92);
+  const w = EYE_RX * 2;
+  const h = 118 * (1 - shut * 0.92);
   if (h < 4) {
     roundRect(ctx, cx - w / 2, cy - 3, w, 6, 3);
     ctx.fill();
@@ -77,37 +82,38 @@ function eyeOpen(ctx: CanvasRenderingContext2D, style: number, cx: number, cy: n
     ctx.lineWidth = 14;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(-28, -28);
-    ctx.lineTo(28, 28);
-    ctx.moveTo(28, -28);
-    ctx.lineTo(-28, 28);
+    ctx.moveTo(-46, -46);
+    ctx.lineTo(46, 46);
+    ctx.moveTo(46, -46);
+    ctx.lineTo(-46, 46);
     ctx.stroke();
     ctx.restore();
     return;
   }
   ctx.beginPath();
   if (style === 1) {
-    roundRect(ctx, -54, -16, 108, 32, 16);
+    roundRect(ctx, -EYE_RX, -20, EYE_RX * 2, 40, 20);
   } else if (style === 3) {
     heart(ctx, 0, -h * 0.2, h * 0.85);
   } else if (style === 4) {
     ctx.ellipse(0, h * 0.08, w * 0.42, Math.max(6, h * 0.16), 0, 0, Math.PI * 2);
   } else if (style === 5) {
-    const cell = 16;
+    const cell = (EYE_RX * 2) / 4;
     const grid = [
       [0, 1, 1, 0],
       [1, 1, 1, 1],
       [1, 1, 1, 1],
       [0, 1, 1, 0],
     ];
+    const scaleY = h / 124;
     grid.forEach((row, iy) => {
       row.forEach((on, ix) => {
         if (!on) return;
-        ctx.rect(-32 + ix * cell, -32 * (h / 96) + iy * cell * (h / 96), cell - 2, cell * (h / 96) - 2);
+        ctx.rect(-EYE_RX + ix * cell, -EYE_RX * scaleY + iy * cell * scaleY, cell - 2, cell * scaleY - 2);
       });
     });
   } else {
-    ctx.ellipse(0, 0, w * 0.42, h * 0.46, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, EYE_RX, Math.max(20, h * 0.48), 0, 0, Math.PI * 2);
   }
   ctx.fill();
   if (style !== 5) {
@@ -132,26 +138,26 @@ function eyeOpen(ctx: CanvasRenderingContext2D, style: number, cx: number, cy: n
 }
 
 function brows(ctx: CanvasRenderingContext2D, expression: FaceExpression, blink: number) {
-  const lift = expression === "shocked" ? -28 : expression === "happy" ? -16 : expression === "focused" ? 4 : -6;
-  const tilt = expression === "focused" ? 0.35 : expression === "happy" ? -0.25 : expression === "shocked" ? -0.05 : -0.12;
-  const y = 168 + lift + blink * 18;
+  const lift = expression === "shocked" ? -18 : expression === "focused" ? 8 : 0;
+  const tilt = expression === "focused" ? 0.4 : expression === "shocked" ? -0.08 : -0.14;
+  const y = EYE_Y - 78 + lift + blink * 16;
   ctx.save();
-  ctx.translate(256 - 64, y);
+  ctx.translate(CX - EYE_DX, y);
   ctx.rotate(-tilt);
-  roundRect(ctx, -40, -6, 78, 14, 7);
+  roundRect(ctx, -46, -7, 92, 14, 7);
   ctx.fill();
   ctx.restore();
   ctx.save();
-  ctx.translate(256 + 64, y);
+  ctx.translate(CX + EYE_DX, y);
   ctx.rotate(tilt);
-  roundRect(ctx, -38, -6, 78, 14, 7);
+  roundRect(ctx, -46, -7, 92, 14, 7);
   ctx.fill();
   ctx.restore();
 }
 
 function mouth(ctx: CanvasRenderingContext2D, expression: FaceExpression) {
   ctx.save();
-  ctx.translate(256, 338);
+  ctx.translate(CX, MOUTH_Y);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   if (expression === "happy") {
@@ -183,16 +189,17 @@ function mouth(ctx: CanvasRenderingContext2D, expression: FaceExpression) {
 
 function carets(ctx: CanvasRenderingContext2D, lookX: number, blink: number) {
   const drop = blink * 22;
-  [-64, 64].forEach((side) => {
-    const cx = 256 + side + lookX * 6;
-    const top = 172 + drop;
+  [-EYE_DX, EYE_DX].forEach((side) => {
+    const cx = CX + side + lookX * 6;
+    const top = EYE_Y - 48 + drop;
     ctx.beginPath();
-    ctx.moveTo(cx - 48, 270);
+    const foot = EYE_Y + 42;
+    ctx.moveTo(cx - EYE_RX, foot);
     ctx.lineTo(cx, top);
-    ctx.lineTo(cx + 48, 270);
-    ctx.lineTo(cx + 22, 270);
-    ctx.lineTo(cx, top + 36);
-    ctx.lineTo(cx - 22, 270);
+    ctx.lineTo(cx + EYE_RX, foot);
+    ctx.lineTo(cx + 26, foot);
+    ctx.lineTo(cx, top + 42);
+    ctx.lineTo(cx - 26, foot);
     ctx.closePath();
     ctx.fill();
   });
@@ -215,36 +222,36 @@ export function redrawFace(
   if (expression === "happy") {
     carets(glow, options.lookX, options.blink);
   } else if (style === 2 && expression !== "shocked") {
-    const h = 34 * (1 - options.blink * 0.9);
+    const h = 46 * (1 - options.blink * 0.9);
     glow.fillStyle = ink;
-    roundRect(glow, 256 - 118, 236 - h / 2, 236, Math.max(6, h), 16);
+    roundRect(glow, CX - (EYE_DX + EYE_RX), EYE_Y - h / 2, (EYE_DX + EYE_RX) * 2, Math.max(8, h), 18);
     glow.fill();
     glow.fillStyle = "#0a0a0b";
     glow.beginPath();
-    glow.arc(256 - 52 + options.lookX * 14, 236 + options.lookY * 6, 8, 0, Math.PI * 2);
-    glow.arc(256 + 52 + options.lookX * 14, 236 + options.lookY * 6, 8, 0, Math.PI * 2);
+    glow.arc(CX - EYE_DX + options.lookX * 14, EYE_Y + options.lookY * 6, 10, 0, Math.PI * 2);
+    glow.arc(CX + EYE_DX + options.lookX * 14, EYE_Y + options.lookY * 6, 10, 0, Math.PI * 2);
     glow.fill();
     glow.fillStyle = "#ffffff";
     glow.beginPath();
-    glow.arc(256 - 70, 228, 4, 0, Math.PI * 2);
-    glow.arc(256 + 34, 228, 4, 0, Math.PI * 2);
+    glow.arc(CX - EYE_DX - 22, EYE_Y - 10, 5, 0, Math.PI * 2);
+    glow.arc(CX + EYE_DX - 22, EYE_Y - 10, 5, 0, Math.PI * 2);
     glow.fill();
   } else if (style === 3 && expression !== "shocked") {
     glow.fillStyle = ink;
-    [-64, 64].forEach((side) => {
-      heart(glow, 256 + side + options.lookX * 6, 200 + options.lookY * 4, 70 * (1 - options.blink * 0.7));
+    [-EYE_DX, EYE_DX].forEach((side) => {
+      heart(glow, CX + side + options.lookX * 6, EYE_Y - 40 + options.lookY * 4, 112 * (1 - options.blink * 0.7));
       glow.fill();
     });
     glow.fillStyle = "#ffffff";
     glow.beginPath();
-    glow.arc(256 - 78, 214, 5, 0, Math.PI * 2);
-    glow.arc(256 + 50, 214, 5, 0, Math.PI * 2);
+    glow.arc(CX - EYE_DX - 16, EYE_Y - 8, 6, 0, Math.PI * 2);
+    glow.arc(CX + EYE_DX - 16, EYE_Y - 8, 6, 0, Math.PI * 2);
     glow.fill();
   } else {
     glow.fillStyle = ink;
     glow.strokeStyle = ink;
-    eyeOpen(glow, style, 256 - 64, 236, options.lookX, options.lookY, options.blink, expression === "shocked");
-    eyeOpen(glow, style, 256 + 64, 236, options.lookX, options.lookY, options.blink, expression === "shocked");
+    eyeOpen(glow, style, CX - EYE_DX, EYE_Y, options.lookX, options.lookY, options.blink, expression === "shocked");
+    eyeOpen(glow, style, CX + EYE_DX, EYE_Y, options.lookX, options.lookY, options.blink, expression === "shocked");
   }
   glow.fillStyle = ink;
   glow.strokeStyle = ink;
@@ -273,6 +280,9 @@ export function mountFace(root: Object3D, read: (node: Object3D) => string): Fac
   if (colorCtx) paintGlass(colorCtx);
   const colorTex = new THREE.CanvasTexture(color);
   const glowTex = new THREE.CanvasTexture(glow);
+  // Canvas y grows downward. The plate's UV v grows upward, so leave the upload unflipped.
+  colorTex.flipY = false;
+  glowTex.flipY = false;
   colorTex.colorSpace = THREE.SRGBColorSpace;
   glowTex.colorSpace = THREE.SRGBColorSpace;
   colorTex.anisotropy = 4;
@@ -284,27 +294,18 @@ export function mountFace(root: Object3D, read: (node: Object3D) => string): Fac
     map: colorTex,
     emissive: "#ffffff",
     emissiveMap: glowTex,
-    emissiveIntensity: 5.5,
-    roughness: 0.16,
-    metalness: 0.42,
-    envMapIntensity: 0.2,
+    emissiveIntensity: 2.6,
+    roughness: 0.72,
+    metalness: 0.05,
+    envMapIntensity: 0.04,
     side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
   });
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = time;
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <emissivemap_fragment>",
-        `#include <emissivemap_fragment>
-         float scan = 0.9 + 0.1 * sin(vMapUv.y * 150.0);
-         diffuseColor.rgb *= scan;
-         vec2 glossUv = vMapUv - vec2(0.28 + 0.015 * sin(uTime), 0.78);
-         float gloss = pow(max(0.0, 1.0 - length(glossUv * vec2(1.7, 2.4))), 7.0);
-         totalEmissiveRadiance += vec3(0.45, 0.52, 0.62) * gloss;`,
-      )
-      .replace("#include <common>", "#include <common>\nuniform float uTime;");
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <emissivemap_fragment>",
+      `#include <emissivemap_fragment>
+       diffuseColor.rgb *= 0.92 + 0.08 * sin(vMapUv.y * 150.0);`,
+    );
   };
   plate.material = material;
   plate.visible = true;

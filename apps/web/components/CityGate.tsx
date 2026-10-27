@@ -140,7 +140,7 @@ export function CityGate() {
       setNote("The street, after sunset.");
       return;
     }
-    if (frame === "lineup" || frame === "face" || frame === "trails" || frame === "skins" || frame === "walk" || frame === "expressions" || frame === "eyes" || frame === "gear") {
+    if (frame === "lineup" || frame === "face" || frame === "trails" || frame === "skins" || frame === "walk" || frame === "expressions" || frame === "eyes" || frame === "gear" || frame === "front6" || frame === "q34") {
       if (frame === "lineup") setLineup(true);
       setPoster(frame);
       setPaused(true);

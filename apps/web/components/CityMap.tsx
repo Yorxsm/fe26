@@ -519,7 +519,7 @@ function tagLift(index: number, time: number, paused: boolean) {
 }
 
 function displaySkin(agent: CityAgent, index: number, poster: string | null): SkinTraits {
-  if (poster === "lineup" || poster === "face" || poster === "gear") return lineupSkin(index);
+  if (poster === "lineup" || poster === "face" || poster === "gear" || poster === "front6" || poster === "q34") return lineupSkin(index);
   if (poster === "expressions") {
     return { ...lineupSkin(0), eyes: 0, headwear: 5, face_item: 3, back_item: 1, screen: 0, paint: 0, role: 0 };
   }
@@ -625,7 +625,9 @@ function AgentMesh({
     if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
     else if ((poster === "lineup" || lineup) && index < LINEUP_SPOTS.length) {
       pose = { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 };
-    } else if (poster === "expressions") pose = { x: -6.3 + index * 4.2, y: 0, z: 0, rot: 0 };
+    } else if ((poster === "front6" || poster === "q34") && index < 6) {
+      pose = { x: -7.25 + index * 2.9, y: 0, z: 0, rot: poster === "q34" ? 0.7 : 0 };
+    } else if (poster === "expressions") pose = { x: -5.4 + index * 3.6, y: 0, z: 0, rot: 0 };
     else if (poster === "eyes") {
       const col = index % 3;
       const row = Math.floor(index / 3);
@@ -679,6 +681,7 @@ function AgentMesh({
     if (!paused || poster === "walk" || poster === "expressions") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
       poster === "face" ? index === 0
+      : poster === "front6" || poster === "q34" ? index < 6
       : poster === "expressions" || poster === "walk" || poster === "trails" ? index < 4
       : poster === "eyes" ? index < 6
       : poster === "skins" ? index < 12
@@ -690,7 +693,7 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes";
+      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
     }
     if (face && group.current?.visible) {
@@ -919,10 +922,20 @@ function CameraDriver({
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
       applyFov(beat < 4 ? 64 : 32);
       drive = true;
+    } else if (poster === "front6") {
+      eye.set(0, 3.42, 17);
+      aim.set(0, 3.32, 0);
+      applyFov(56);
+      drive = true;
+    } else if (poster === "q34") {
+      eye.set(5.4, 3.55, 15.5);
+      aim.set(0, 3.2, 0);
+      applyFov(54);
+      drive = true;
     } else if (poster === "expressions") {
-      eye.set(0, 3.9, 18);
-      aim.set(0, 3.15, 0);
-      applyFov(38);
+      eye.set(0, 3.5, 16.5);
+      aim.set(0, 3.3, 0);
+      applyFov(46);
       drive = true;
     } else if (poster === "eyes") {
       eye.set(0, 7.2, 14);

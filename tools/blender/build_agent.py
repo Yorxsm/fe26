@@ -7,6 +7,7 @@ when ROLE_MESHES is filled; the base body is the shared mesh.
 import math
 import os
 
+import bmesh
 import bpy
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -100,6 +101,72 @@ def plane(name, loc, size, mat, rot=(0, 0, 0)):
     ob.name = name
     ob.data.materials.append(mat)
     return finish(ob, bevel=0.0, subdiv=0)
+
+
+def _oct_verts(radius, y, z, twist):
+    return [
+        (math.cos(twist + i * math.pi / 4) * radius, y, z + math.sin(twist + i * math.pi / 4) * radius) for i in range(8)
+    ]
+
+
+def octagon_ring(name, lip_y, z, outer, inner, depth, mat, twist):
+    """Open octagonal bezel. lip_y is the front edge, toward the camera (-Y)."""
+    mesh = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+
+    def ring(y, radius):
+        return [bm.verts.new(co) for co in _oct_verts(radius, y, z, twist)]
+
+    front_y = lip_y
+    back_y = lip_y + depth
+    front_outer, front_inner = ring(front_y, outer), ring(front_y, inner)
+    back_outer, back_inner = ring(back_y, outer), ring(back_y, inner)
+    for i in range(8):
+        j = (i + 1) % 8
+        bm.faces.new((front_outer[i], front_outer[j], front_inner[j], front_inner[i]))
+        bm.faces.new((back_outer[i], back_inner[i], back_inner[j], back_outer[j]))
+        bm.faces.new((front_outer[i], back_outer[i], back_outer[j], front_outer[j]))
+        bm.faces.new((front_inner[i], front_inner[j], back_inner[j], back_inner[i]))
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    ob = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.data.materials.append(mat)
+    for poly in ob.data.polygons:
+        poly.use_smooth = False
+    return ob
+
+
+def octagon_disc(name, y, z, radius, mat, twist, depth=0.006):
+    """Thin octagonal glass. The depth keeps quantization from dropping the plate off the head."""
+    mesh = bpy.data.meshes.new(name)
+    front = _oct_verts(radius, y, z, twist)
+    back = _oct_verts(radius, y + depth, z, twist)
+    verts = front + back + [(0.0, y, z), (0.0, y + depth, z)]
+    faces = []
+    for i in range(8):
+        j = (i + 1) % 8
+        faces.append((i, j, 16))
+        faces.append((8 + i, 17, 8 + j))
+        faces.append((i, 8 + i, 8 + j, j))
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    if mesh.polygons[0].normal.y > 0:
+        mesh.flip_normals()
+        mesh.update()
+    half = max(max(abs(co[0]) for co in front), max(abs(co[2] - z) for co in front))
+    uv = mesh.uv_layers.new(name="UVMap")
+    for poly in mesh.polygons:
+        for loop_index in poly.loop_indices:
+            co = mesh.vertices[mesh.loops[loop_index].vertex_index].co
+            uv.data[loop_index].uv = (0.5 + co.x / (2 * half), 0.5 + (co.z - z) / (2 * half))
+    ob = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.data.materials.append(mat)
+    for poly in ob.data.polygons:
+        poly.use_smooth = False
+    return ob
 
 
 def build_armature():
@@ -283,7 +350,7 @@ def build_body(arm, parts, skinned):
     body = material("Body", (0.60, 0.63, 0.65), 0.3, 0.5)
     trim = material("Trim", (0.22, 0.22, 0.24), 0.45, 0.4)
     screen = material("Screen", (0.039, 0.039, 0.043), 0.62, 0.16, emission=0.0)
-    bezel = material("Bezel", (0.05, 0.05, 0.06), 0.6, 0.25)
+    bezel = material("Bezel", (0.78, 0.80, 0.82), 0.22, 0.38)
     eye = material("Eye", (0.02, 0.02, 0.025), 0.1, 0.3)
     bolt = material("Bolt", (0.55, 0.5, 0.42), 0.8, 0.35)
 
@@ -304,15 +371,19 @@ def build_body(arm, parts, skinned):
         parts.extend((arm_mesh, hand))
 
     front = min((torso.matrix_world @ vertex.co).y for vertex in torso.data.vertices)
-    bezel_mesh = cyl("body.bezel", (0, front - 0.012, 0.64), 0.25, 0.02, bezel, vertices=8, rot=(math.pi / 2, 0, math.pi / 8))
-    screen_mesh = cyl("body.screen", (0, front - 0.028, 0.64), 0.22, 0.015, screen, vertices=8, rot=(math.pi / 2, 0, math.pi / 8))
-    for ob in (bezel_mesh, screen_mesh):
+    twist = math.pi / 8
+    lip = front - 0.02
+    bezel_mesh = octagon_ring("body.bezel", lip, 0.64, 0.275, 0.222, 0.032, bezel, twist)
+    glass = material("Face", (0.039, 0.039, 0.043), 0.08, 0.72)
+    # Flush with the inner wall, 4mm behind the lip, so the octagon fills the opening.
+    plate = octagon_disc("body.faceplate", lip + 0.004, 0.64, 0.221, glass, twist)
+    if plate.data.polygons[0].normal.y > -0.5:
+        raise SystemExit(f"faceplate normal faces the wrong way: {plate.data.polygons[0].normal}")
+    center_uv = plate.data.uv_layers[0].data[plate.data.polygons[0].loop_indices[-1]].uv
+    print("face lip", round(lip, 4), "glass", round(lip + 0.004, 4), "normal", tuple(round(c, 3) for c in plate.data.polygons[0].normal), "center uv", tuple(round(c, 3) for c in center_uv))
+    for ob in (bezel_mesh, plate):
         skinned.append((ob, "bone.head"))
         parts.append(ob)
-    glass = material("Face", (0.039, 0.039, 0.043), 0.4, 0.2)
-    plate = plane("body.faceplate", (0, front - 0.046, 0.64), 0.4, glass, rot=(math.pi / 2, 0, 0))
-    skinned.append((plate, "bone.head"))
-    parts.append(plate)
 
     # Expressions are separate meshes so the runtime can show one set.
     def eyes(prefix, z_scale, rot_l, rot_r, z=0.68):
@@ -403,14 +474,14 @@ def build_roles(parts, skinned, front):
     for label, x in (("L", -0.2), ("R", 0.2)):
         wear(parts, skinned, cyl(f"role.trader.band.cup.{label}", (x, 0.0, 0.86), 0.055, 0.04, gold, vertices=16, rot=(0, math.pi / 2, 0)), "bone.head")
         wear(parts, skinned, cyl(f"role.trader.band.pad.{label}", (x, front * 0.15, 0.86), 0.04, 0.02, navy, vertices=16, rot=(0, math.pi / 2, 0)), "bone.head")
-    wear(parts, skinned, cyl("role.trader.band.boom", (0.12, front - 0.04, 0.72), 0.008, 0.22, gold, vertices=8, rot=(math.pi / 2.6, 0, 0.5)), "bone.head")
-    wear(parts, skinned, ball("role.trader.band.mic", (0.18, front - 0.08, 0.6), 0.028, gold), "bone.head")
+    wear(parts, skinned, cyl("role.trader.band.boom", (0.32, front - 0.02, 0.78), 0.008, 0.22, gold, vertices=8, rot=(math.pi / 2.6, 0, 0.5)), "bone.head")
+    wear(parts, skinned, ball("role.trader.band.mic", (0.36, front - 0.06, 0.66), 0.028, gold), "bone.head")
     wear(parts, skinned, cube("role.trader.pad.L", (-0.36, -0.02, 0.74), (0.16, 0.14, 0.07), gold, bevel=0.02, subdiv=1), "bone.spine")
     wear(parts, skinned, cube("role.trader.pad.R", (0.36, -0.02, 0.74), (0.16, 0.14, 0.07), gold, bevel=0.02, subdiv=1), "bone.spine")
 
     # Hood shell with side folds and drawstrings.
     wear(parts, skinned, ball("role.hacker.hood.shell", (0, 0.05, 0.92), 0.27, navy, scale=(1.18, 1.08, 0.9)), "bone.head")
-    wear(parts, skinned, ball("role.hacker.hood.brow", (0, front - 0.02, 0.84), 0.16, navy, scale=(1.5, 0.35, 0.28)), "bone.head")
+    wear(parts, skinned, ball("role.hacker.hood.brow", (0, front + 0.06, 0.98), 0.16, navy, scale=(1.5, 0.35, 0.28)), "bone.head")
     for index, x, tilt in ((0, -0.16, 0.5), (1, 0.0, 0.15), (2, 0.16, -0.5)):
         wear(
             parts,
@@ -420,12 +491,12 @@ def build_roles(parts, skinned, front):
         )
     wear(parts, skinned, cyl("role.hacker.string.L", (-0.08, front - 0.02, 0.58), 0.007, 0.24, navy, vertices=8), "bone.spine")
     wear(parts, skinned, cyl("role.hacker.string.R", (0.08, front - 0.02, 0.58), 0.007, 0.24, navy, vertices=8), "bone.spine")
-    wear(parts, skinned, cube("role.hacker.glyph", (0, front - 0.03, 0.5), (0.07, 0.012, 0.07), cyan, bevel=0.008, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("role.hacker.glyph", (0, front - 0.03, 0.34), (0.07, 0.012, 0.07), cyan, bevel=0.008, subdiv=0), "bone.spine")
 
     # Loupe on a strap, plus a rimmed shield.
     wear(parts, skinned, torus("role.auditor.strap", (0, 0.02, 0.9), 0.2, 0.01, gold, rot=(math.pi / 2.4, 0.4, 0)), "bone.head")
-    wear(parts, skinned, torus("role.auditor.rim", (0.1, front - 0.05, 0.7), 0.045, 0.01, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, cyl("role.auditor.glass", (0.1, front - 0.055, 0.7), 0.038, 0.012, lens, vertices=20, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, torus("role.auditor.rim", (0.34, front - 0.03, 0.7), 0.045, 0.01, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cyl("role.auditor.glass", (0.34, front - 0.04, 0.7), 0.038, 0.012, lens, vertices=20, rot=(math.pi / 2, 0, 0)), "bone.head")
     wear(parts, skinned, cyl("role.auditor.handle", (0.16, front - 0.02, 0.58), 0.01, 0.14, gold, vertices=8, rot=(0.4, 0, 0.3)), "bone.head")
     wear(parts, skinned, cyl("role.auditor.shield", (0.1, front - 0.02, 0.46), 0.055, 0.012, gold, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
     wear(parts, skinned, cyl("role.auditor.shield.rim", (0.1, front - 0.012, 0.46), 0.07, 0.008, ridge, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
@@ -438,10 +509,10 @@ def build_roles(parts, skinned, front):
 
     # Goggles, a strap, and the scout compass. The pack lives on back.0.
     for label, x in (("L", -0.08), ("R", 0.08)):
-        wear(parts, skinned, torus(f"role.scout.goggle.{label}", (x, front - 0.03, 0.78), 0.04, 0.01, lime, rot=(math.pi / 2, 0, 0)), "bone.head")
-        wear(parts, skinned, cyl(f"role.scout.goggle.{label}.lens", (x, front - 0.04, 0.78), 0.032, 0.01, lens, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, torus("role.scout.goggle.strap", (0, 0.02, 0.78), 0.2, 0.012, strap, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, cube("role.scout.goggle.bridge", (0, front - 0.03, 0.78), (0.06, 0.016, 0.016), lime, bevel=0.004, subdiv=0), "bone.head")
+        wear(parts, skinned, torus(f"role.scout.goggle.{label}", (x, front + 0.02, 0.98), 0.04, 0.01, lime, rot=(math.pi / 2, 0, 0)), "bone.head")
+        wear(parts, skinned, cyl(f"role.scout.goggle.{label}.lens", (x, front + 0.01, 0.98), 0.032, 0.01, lens, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, torus("role.scout.goggle.strap", (0, 0.04, 0.98), 0.2, 0.012, strap, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("role.scout.goggle.bridge", (0, front + 0.02, 0.98), (0.06, 0.016, 0.016), lime, bevel=0.004, subdiv=0), "bone.head")
     wear(parts, skinned, cyl("role.scout.compass", (0.16, front - 0.03, 0.5), 0.038, 0.012, lime, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.spine")
     wear(parts, skinned, cyl("role.scout.compass.ring", (0.16, front - 0.02, 0.5), 0.048, 0.008, gold, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.spine")
 
@@ -455,13 +526,13 @@ def build_roles(parts, skinned, front):
     wear(parts, skinned, cube("headwear.cap.button", (0, -0.02, 1.08), (0.04, 0.04, 0.02), ridge, bevel=0.004, subdiv=0), "bone.head")
 
     # Face items sit around the glass, not across the drawn eyes.
-    wear(parts, skinned, cube("faceitem.0.visor", (0, front - 0.03, 0.9), (0.32, 0.025, 0.028), gold, bevel=0.006, subdiv=0), "bone.head")
-    wear(parts, skinned, torus("faceitem.1.monocle", (0.11, front - 0.05, 0.66), 0.04, 0.008, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("faceitem.0.visor", (0, front - 0.01, 0.96), (0.32, 0.025, 0.028), gold, bevel=0.006, subdiv=0), "bone.head")
+    wear(parts, skinned, torus("faceitem.1.monocle", (0.34, front - 0.03, 0.7), 0.04, 0.008, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
     wear(parts, skinned, cyl("faceitem.1.chain", (0.16, 0.02, 0.78), 0.006, 0.16, gold, vertices=8, rot=(0.3, 0, 0.2)), "bone.head")
-    wear(parts, skinned, cube("faceitem.2.mask", (0, front - 0.035, 0.5), (0.24, 0.03, 0.1), navy, bevel=0.01, subdiv=0), "bone.head")
-    wear(parts, skinned, cube("faceitem.2.trim", (0, front - 0.05, 0.55), (0.26, 0.012, 0.016), gold, bevel=0.003, subdiv=0), "bone.head")
-    wear(parts, skinned, cyl("faceitem.3.mic", (-0.16, front - 0.02, 0.62), 0.01, 0.18, gold, vertices=8, rot=(math.pi / 2.5, 0, -0.45)), "bone.head")
-    wear(parts, skinned, ball("faceitem.3.head", (-0.2, front - 0.08, 0.52), 0.026, gold), "bone.head")
+    wear(parts, skinned, cube("faceitem.2.mask", (0, front - 0.02, 0.36), (0.24, 0.03, 0.08), navy, bevel=0.01, subdiv=0), "bone.head")
+    wear(parts, skinned, cube("faceitem.2.trim", (0, front - 0.03, 0.40), (0.26, 0.012, 0.016), gold, bevel=0.003, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("faceitem.3.mic", (-0.34, front - 0.02, 0.66), 0.01, 0.18, gold, vertices=8, rot=(math.pi / 2.5, 0, -0.45)), "bone.head")
+    wear(parts, skinned, ball("faceitem.3.head", (-0.38, front - 0.06, 0.56), 0.026, gold), "bone.head")
 
     # Back items: pack with straps and a pocket, tanks, a folded cape, an array.
     wear(parts, skinned, cube("back.0.pack", (0, 0.32, 0.58), (0.3, 0.14, 0.34), pack, bevel=0.03, subdiv=1), "bone.spine")
