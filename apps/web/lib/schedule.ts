@@ -60,15 +60,27 @@ export function countdownSecs(now: number) {
   return now >= slot.start ? 0 : slot.start - now;
 }
 
+/** LIVE counts down the open window. NEXT counts down to the following slot. */
+export function heistCountdown(now: number) {
+  const slot = nextHeist(now);
+  if (now >= slot.start && now < slot.end) return { live: true, secs: slot.end - now };
+  return { live: false, secs: Math.max(0, slot.start - now) };
+}
+
 export function heistLive(now: number) {
   const slot = nextHeist(now);
   return now >= slot.start && now < slot.end;
 }
 
 export function formatCountdown(secs: number) {
-  const hours = Math.floor(secs / 3600);
-  const minutes = Math.floor((secs % 3600) / 60);
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const whole = Math.max(0, Math.floor(secs));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const seconds = whole % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  if (hours > 0) return `${String(hours).padStart(2, "0")}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
 }
 
 export function localRange(start: number, end: number) {

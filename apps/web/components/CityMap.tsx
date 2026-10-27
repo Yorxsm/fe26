@@ -506,8 +506,26 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
       const lit = sources.map((material) => {
         const copy = material.clone();
         copy.color.set("#2c4a40");
-        copy.emissive = new THREE.Color("#1c342c");
-        copy.emissiveIntensity = 1.15;
+        copy.emissive = new THREE.Color("#24563e");
+        copy.emissiveIntensity = 1.45;
+        return copy;
+      });
+      mesh.material = Array.isArray(mesh.material) ? lit : lit[0];
+    }
+    if (label.endsWith(".pad") || label.endsWith(".field")) {
+      const lit = sources.map((material) => {
+        const copy = material.clone();
+        copy.emissive = new THREE.Color("#5a4836");
+        copy.emissiveIntensity = 0.7;
+        return copy;
+      });
+      mesh.material = Array.isArray(mesh.material) ? lit : lit[0];
+    }
+    if (label.startsWith("road.asphalt") || label.startsWith("road.walk") || label.startsWith("road.kerb")) {
+      const lit = sources.map((material) => {
+        const copy = material.clone();
+        copy.emissive = new THREE.Color(label.startsWith("road.asphalt") ? "#3a3024" : "#4a4338");
+        copy.emissiveIntensity = 1.05;
         return copy;
       });
       mesh.material = Array.isArray(mesh.material) ? lit : lit[0];
@@ -760,6 +778,38 @@ function Station({
   );
 }
 
+const tagSlots = new Map<number, { x: number; y: number; depth: number }>();
+const tagPoint = new THREE.Vector3();
+
+function stackNameTag(
+  index: number,
+  anchor: THREE.Object3D,
+  camera: THREE.Camera,
+  size: { width: number; height: number },
+  chip: HTMLDivElement,
+) {
+  anchor.getWorldPosition(tagPoint);
+  tagPoint.project(camera);
+  const sx = (tagPoint.x * 0.5 + 0.5) * size.width;
+  const sy = (1 - (tagPoint.y * 0.5 + 0.5)) * size.height;
+  let stack = 0;
+  let fade = false;
+  const placed = [...tagSlots.entries()].filter(([other]) => other !== index).map(([, slot]) => slot);
+  for (let step = 0; step < 3; step += 1) {
+    const y = sy - step * 30;
+    const hit = placed.find((slot) => Math.abs(slot.x - sx) < 112 && Math.abs(slot.y - y) < 26);
+    if (!hit) {
+      stack = step;
+      break;
+    }
+    stack = step;
+    if (step === 2 && tagPoint.z > hit.depth) fade = true;
+  }
+  tagSlots.set(index, { x: sx, y: sy - stack * 30, depth: tagPoint.z });
+  chip.style.transform = stack ? `translateY(${-stack * 30}px)` : "";
+  chip.style.opacity = fade ? "0.32" : "1";
+}
+
 function tagLift(index: number, time: number, paused: boolean) {
   const here = placeAgent(index, time, paused);
   let lift = 0;
@@ -998,14 +1048,17 @@ function AgentMesh({
     }
     if (tag.current) {
       tag.current.visible = shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
-      tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
+      tag.current.position.y = AGENT_SCALE * 1.05 + (stationed ? 0 : tagLift(index, state.clock.elapsedTime, paused));
       const chip = tagEl.current;
       if (chip && group.current) {
         const dist = state.camera.position.distanceTo(group.current.position);
         chip.classList.toggle("far", dist > 16);
         const rect = chip.getBoundingClientRect();
         const covered = cover.tags.some((hud) => rectsOverlap(rect, hud));
-        chip.style.visibility = covered || !tag.current.visible ? "hidden" : "visible";
+        const hidden = covered || !tag.current.visible;
+        chip.style.visibility = hidden ? "hidden" : "visible";
+        if (!hidden) stackNameTag(index, tag.current, state.camera, state.size, chip);
+        else tagSlots.delete(index);
       }
     }
     if (face && group.current?.visible) {
@@ -1802,9 +1855,9 @@ export default function CityMap({
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 2.4, 18]} intensity={12} color="#ffb060" distance={14} decay={2} />
       <pointLight position={[46, 2.4, 14]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[12, 2.4, 40]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[-38, 2.4, -24]} intensity={10} color="#ff6a1a" distance={14} decay={2} />
-      <pointLight position={[-8, 3.2, -30]} intensity={12} color="#ff9a4a" distance={20} decay={2} />
+      <pointLight position={[12, 3.2, 46]} intensity={22} color="#ffb070" distance={24} decay={2} />
+      <pointLight position={[-38, 3.2, -16]} intensity={22} color="#ffb070" distance={24} decay={2} />
+      <pointLight position={[-8, 3.6, -32]} intensity={24} color="#ffb070" distance={26} decay={2} />
       {lineup ? (
         <mesh position={[0, 4.2, -3.5]}>
           <planeGeometry args={[52, 16]} />

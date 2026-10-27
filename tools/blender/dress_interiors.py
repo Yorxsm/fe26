@@ -329,28 +329,134 @@ def lasers(room):
         room.box("laser", (0.1, height, -1.6), (4.2, 0.008, 0.008))
 
 
+def shell_box(room, wall, floor, ceiling, height):
+    """Footprint stays x ±7.2, z ±6.2 so the entry camera and the props still fit."""
+    room.box(floor, (0, 0.06, 0), (14.6, 0.12, 12.6))
+    room.box(wall, (0, height / 2, -6.15), (14.6, height, 0.28))
+    room.box(wall, (-7.15, height / 2, 0), (0.28, height, 12.4))
+    room.box(wall, (7.15, height / 2, 0), (0.28, height, 12.4))
+    room.box(wall, (-4.3, height / 2, 6.15), (5.7, height, 0.28))
+    room.box(wall, (4.3, height / 2, 6.15), (5.7, height, 0.28))
+    lintel = min(1.15, height * 0.28)
+    room.box(wall, (0, height - lintel / 2, 6.15), (2.9, lintel, 0.28))
+    room.box(ceiling, (0, height - 0.05, 0), (14.4, 0.1, 12.4))
+
+
+def shell_vault(room):
+    """Low steel and concrete strongroom. No pendants."""
+    room.mat("wall", (0.46, 0.49, 0.52), 0.78, 0.34)
+    room.mat("floor", (0.30, 0.30, 0.29), 0.04, 0.88)
+    room.mat("trim", (0.28, 0.30, 0.32), 0.64, 0.4)
+    room.mat("metal", (0.55, 0.58, 0.6), 0.9, 0.28)
+    room.mat("gold", (0.62, 0.46, 0.18), 0.92, 0.32)
+    room.mat("laser", (0.55, 0.02, 0.03), 0.0, 0.35, (0.85, 0.02, 0.03), 4.0)
+    room.mat("glow", (0.62, 0.66, 0.7), 0.2, 0.4, (0.75, 0.8, 0.84), 0.55)
+    height = 3.15
+    shell_box(room, "wall", "floor", "metal", height)
+    for x, z in ((-6.35, 4.7), (6.35, 4.7), (-6.35, 2.2), (6.35, 2.2)):
+        room.box("trim", (x, 1.45, z), (0.72, 2.9, 0.72))
+    room.box("metal", (0, 2.92, 0), (13.8, 0.18, 0.42))
+    room.box("metal", (0, 0.62, -5.92), (10.2, 1.15, 0.08))
+    for x, z in ((-3.4, -1.6), (3.4, -1.6), (0, 1.2), (-3.4, 1.8), (3.4, 1.8)):
+        room.box("trim", (x, 3.0, z), (1.05, 0.08, 0.22))
+        room.box("glow", (x, 2.94, z), (0.78, 0.02, 0.08))
+    vault_door(room)
+    lasers(room)
+
+
+def shell_market(room):
+    """Tall open office. Cool ceiling grid, no pendant lamps."""
+    room.mat("wall", (0.40, 0.43, 0.46), 0.12, 0.62)
+    room.mat("floor", (0.24, 0.26, 0.28), 0.08, 0.5)
+    room.mat("trim", (0.52, 0.56, 0.6), 0.35, 0.4)
+    room.mat("metal", (0.62, 0.66, 0.7), 0.7, 0.32)
+    room.mat("glow", (0.7, 0.74, 0.78), 0.05, 0.45, (0.78, 0.82, 0.86), 0.4)
+    height = 6.4
+    shell_box(room, "wall", "floor", "trim", height)
+    for z in (-4.2, -1.4, 1.6, 4.0):
+        room.box("trim", (0, 6.15, z), (13.2, 0.08, 0.08))
+    for x in (-4.4, -1.4, 1.6, 4.6):
+        room.box("trim", (x, 6.15, 0), (0.08, 0.08, 11.2))
+    room.box("metal", (0, 4.55, -5.88), (12.6, 0.86, 0.1))
+    for x, z in ((-6.4, -5.4), (6.4, -5.4)):
+        room.cyl("metal", (x, 3.1, z), 0.1, 6.0, axis="y", segments=8)
+    for x, z in ((-2.2, -2.4), (2.2, -2.4), (0, 0.8), (-2.2, 2.6), (2.2, 2.6)):
+        room.box("glow", (x, 6.22, z), (1.3, 0.02, 0.35))
+
+
+def shell_war(room):
+    """Dark room. The screens and the holo table are the lights."""
+    room.mat("wall", (0.07, 0.07, 0.08), 0.2, 0.7)
+    room.mat("floor", (0.05, 0.05, 0.06), 0.15, 0.55)
+    room.mat("trim", (0.12, 0.12, 0.13), 0.45, 0.45)
+    room.mat("metal", (0.16, 0.17, 0.18), 0.8, 0.35)
+    room.mat("glow", (0.55, 0.28, 0.1), 0.0, 0.4, (0.79, 0.29, 0.1), 0.45)
+    height = 3.7
+    shell_box(room, "wall", "floor", "metal", height)
+    for z in (-2.4, 0.6, 3.2):
+        room.box("trim", (0, 3.48, z), (12.8, 0.08, 0.16))
+    room.box("glow", (0, 0.84, -0.4), (1.45, 0.03, 1.45))
+    room.box("metal", (0, 0.78, -0.4), (1.7, 0.06, 1.7))
+
+
+def shell_lobby(room):
+    """Double-height hall. Columns and a ceiling ring, not the pendant trio."""
+    room.mat("wall", (0.50, 0.46, 0.40), 0.04, 0.72)
+    room.mat("floor", (0.28, 0.24, 0.2), 0.06, 0.62)
+    room.mat("trim", (0.62, 0.56, 0.46), 0.2, 0.42)
+    room.mat("metal", (0.42, 0.38, 0.32), 0.55, 0.38)
+    room.mat("glow", (0.7, 0.5, 0.28), 0.0, 0.4, (0.79, 0.5, 0.22), 0.35)
+    height = 7.0
+    shell_box(room, "wall", "floor", "trim", height)
+    for x, z in ((-4.4, -2.6), (4.4, -2.6), (-4.4, 2.0), (4.4, 2.0)):
+        room.cyl("trim", (x, 3.4, z), 0.32, 6.6, axis="y", segments=12)
+        room.box("trim", (x, 0.16, z), (0.9, 0.16, 0.9))
+        room.box("trim", (x, 6.72, z), (0.85, 0.14, 0.85))
+    room.box("trim", (0, 3.55, -6.0), (14.2, 0.16, 0.2))
+    room.box("trim", (0, 3.55, 5.9), (14.2, 0.16, 0.2))
+    room.cyl("metal", (0, 6.72, -0.6), 1.55, 0.08, axis="y", segments=20)
+    room.cyl("glow", (0, 6.62, -0.6), 1.25, 0.04, axis="y", segments=16)
+
+
+def shell_stadium(room):
+    """Bowl around a stage. Beams hang over the floor, not a hall of benches."""
+    room.mat("wall", (0.16, 0.16, 0.17), 0.25, 0.6)
+    room.mat("floor", (0.1, 0.1, 0.11), 0.2, 0.45)
+    room.mat("trim", (0.24, 0.24, 0.25), 0.35, 0.48)
+    room.mat("metal", (0.34, 0.35, 0.37), 0.82, 0.32)
+    room.mat("glow", (0.7, 0.48, 0.22), 0.0, 0.35, (0.85, 0.55, 0.22), 0.5)
+    room.mat("beam", (0.55, 0.38, 0.18), 0.0, 0.5, (0.9, 0.62, 0.28), 0.85)
+    height = 6.2
+    shell_box(room, "wall", "floor", "metal", height)
+    room.box("trim", (0, 0.2, -1.25), (4.8, 0.22, 3.6))
+    room.box("metal", (0, 0.34, -1.25), (5.0, 0.05, 3.8))
+    for index, z in enumerate((-3.55, -4.4, -5.2)):
+        rise = 0.32 + index * 0.4
+        room.box("trim", (0, rise / 2, z), (8.8, rise, 0.9))
+    for index, x in enumerate((4.55, 5.5)):
+        rise = 0.38 + index * 0.42
+        room.box("trim", (x, rise / 2, -0.2), (0.85, rise, 6.2))
+        room.box("trim", (-x, rise / 2, -0.2), (0.85, rise, 6.2))
+    room.box("metal", (0, 5.7, -1.1), (0.12, 2.2, 0.12))
+    room.box("metal", (0, 4.55, -1.1), (4.8, 0.12, 0.12))
+    room.box("metal", (0, 4.55, -1.1), (0.12, 0.12, 1.6))
+    for x, z in ((-1.7, -2.5), (1.7, -2.5), (0, 0.55)):
+        room.cone("metal", (x, 5.55, z), 0.08, 0.28, 0.42, axis="y", segments=8)
+        room.cone("beam", (x, 3.15, z), 0.85, 0.06, 4.6, axis="y", segments=8)
+
+
 def shell_for(kind):
     room = bi.Room()
-    for name, (color, metal, rough) in PALETTE.items():
-        emission = None
-        strength = 0.0
-        if name == "laser":
-            emission, strength = (0.85, 0.02, 0.03), 4.0
-        elif name == "glow":
-            emission, strength = (0.79, 0.29, 0.1), 0.35
-        room.mat(name, color, metal, rough, emission, strength)
-    ceiling = "metal" if kind in {"war", "stadium"} else "trim"
-    bi.shell(room, "wall", "floor", "trim", ceiling)
-    bi.dress(room)
     if kind == "vault":
-        vault_door(room)
-        lasers(room)
-    if kind == "war":
-        room.box("glow", (0, 0.82, -0.4), (1.35, 0.03, 1.35))
-    if kind == "stadium":
-        for x in (-3.4, 3.4):
-            room.cone("metal", (x, 3.55, -1.4), 0.32, 0.08, 0.55, axis="y", segments=10)
-            room.ball("glow", (x, 3.22, -1.4), 0.07, segments=6)
+        shell_vault(room)
+    elif kind == "market":
+        shell_market(room)
+    elif kind == "war":
+        shell_war(room)
+    elif kind == "lobby":
+        shell_lobby(room)
+    else:
+        shell_stadium(room)
     return room
 
 
@@ -447,20 +553,25 @@ def build():
         spawn(plant, -5.8, 0, -4.6)
         spawn(plant, 6.0, 0, 4.2)
         spawn(rug, 0.2, 0, 0.6)
-        for x, z in ((-6.2, -4.8), (6.2, -4.8), (-6.2, 4.0)):
-            spawn(camera, x, 3.35, z, yaw=0.6 if x < 0 else -0.6)
+        for x, z in ((-6.2, -4.6), (6.2, -4.6), (0.2, -5.2)):
+            spawn(camera, x, 2.72, z, yaw=0.6 if x < 0 else -0.6)
         for height in (0.9, 1.35, 1.8):
             spawn(speaker, -2.35, height, -1.6, yaw=math.pi / 2)
             spawn(speaker, 2.35, height, -1.6, yaw=-math.pi / 2)
 
     def room_market():
-        for index, x in enumerate((-3.8, 0.0, 3.6)):
-            spawn(desk, x, 0, -2.7, yaw=math.pi)
-            spawn(chair, x, 0, -1.7)
-            spawn(screen, x - 0.28, 0.78, -2.95, yaw=math.pi)
-            spawn(screen, x + 0.32, 0.78, -2.95, yaw=math.pi)
-            spawn(keys, x, 0.78, -2.5)
-            spawn(mouse, x + 0.34, 0.78, -2.45)
+        for x in (-3.8, 0.0, 3.6):
+            spawn(desk, x, 0, -2.5, yaw=math.pi)
+            spawn(chair, x, 0, -1.55)
+            spawn(screen, x - 0.28, 0.78, -2.75, yaw=math.pi)
+            spawn(screen, x + 0.32, 0.78, -2.75, yaw=math.pi)
+            spawn(keys, x, 0.78, -2.3)
+            spawn(mouse, x + 0.34, 0.78, -2.25)
+        for x in (-3.2, 0.4, 3.2):
+            spawn(desk, x, 0, -4.35, yaw=math.pi)
+            spawn(chair, x, 0, -3.45)
+            spawn(screen, x, 0.78, -4.55, yaw=math.pi)
+            spawn(keys, x + 0.2, 0.78, -4.15)
         spawn(bar, -5.3, 0, 3.2, yaw=math.pi / 2)
         spawn(coffee, -5.3, 1.02, 3.0)
         spawn(stool, -4.2, 0, 2.6)
@@ -508,31 +619,31 @@ def build():
         spawn(q_plant, -4.6, 0, -2.4)
         spawn(plant, 2.0, 0, 1.6)
         spawn(q_case, 5.3, 0, -4.5, yaw=-math.pi / 2)
-        for z in (-4.05, -3.2, -2.35):
-            spawn(side, 3.7, 0, z)
-            spawn(mannequin, 3.7, 0.52, z, yaw=-0.4)
+        for z in (-4.3, -3.35, -2.4):
+            spawn(side, 2.85, 0, z)
+            spawn(mannequin, 2.85, 0.52, z, yaw=-0.5)
         for x in (-4.7, -1.6, 1.6, 4.7):
             spawn(door, x, 0, -5.75)
         spawn(lamp, -5.2, 0, -3.6)
         spawn(books, 0.25, 0.78, 1.45)
 
     def room_stadium():
-        spawn(side, 0, 0, -3.4)
-        spawn(trophy, 0, 0.55, -3.4)
-        for x in (-1.6, 1.6):
-            spawn(barrier, x, 0, -2.2, yaw=math.pi / 2)
-        spawn(barrier, 0, 0, -1.7)
-        for row, z in enumerate((0.4, 1.15, 1.9)):
-            for seat in range(8):
-                spawn(bench, -2.8 + seat * 0.8, 0, z, yaw=math.pi)
-        spawn(lamp, -5.8, 0, -4.2)
-        spawn(lamp, 5.8, 0, -4.2)
-        spawn(flag, -2.2, 0, -4.4)
-        spawn(flag, 2.2, 0, -4.4)
-        spawn(q_plant, -6.1, 0, 4.2)
-        spawn(plant, 6.1, 0, 4.2)
-        spawn(barrier, -5.6, 0, 1.2, yaw=math.pi / 2)
-        spawn(barrier, 5.6, 0, 1.2, yaw=math.pi / 2)
+        spawn(side, 0, 0.32, -1.25)
+        spawn(trophy, 0, 0.9, -1.25)
+        for x in (-2.15, 2.15):
+            spawn(barrier, x, 0.32, -1.25, yaw=math.pi / 2)
+        spawn(barrier, 0, 0.32, 0.45)
+        for index, (z, y) in enumerate(((-3.55, 0.32), (-4.4, 0.72), (-5.2, 1.12))):
+            for seat in range(7):
+                spawn(bench, -2.55 + seat * 0.85, y, z, yaw=0)
+        for index, (x, y) in enumerate(((4.55, 0.38), (5.5, 0.8))):
+            for z in (-2.2, -1.3, -0.4, 0.5, 1.4):
+                spawn(bench, x, y, z, yaw=-math.pi / 2)
+                spawn(bench, -x, y, z, yaw=math.pi / 2)
+        spawn(flag, -1.7, 0.32, -2.7)
+        spawn(flag, 1.7, 0.32, -2.7)
+        spawn(q_plant, -6.2, 0, 4.4)
+        spawn(plant, 6.2, 0, 4.4)
 
     rooms = {
         "vault": ("interior-vault.glb", room_vault),

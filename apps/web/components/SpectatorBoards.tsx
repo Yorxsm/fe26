@@ -5,10 +5,9 @@ import { useEffect, useState } from "react";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
-  countdownSecs,
   exampleEventLive,
   formatCountdown,
-  heistLive,
+  heistCountdown,
   heistRows,
   localRange,
   mockQuotes,
@@ -19,7 +18,7 @@ import {
 function useNow() {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 30000);
+    const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => window.clearInterval(id);
   }, []);
   return now;
@@ -28,8 +27,8 @@ function useNow() {
 export function CountdownChip({ compact = false }: { compact?: boolean }) {
   const now = useNow();
   const slot = nextHeist(now);
-  const live = heistLive(now);
-  const label = live ? "Heist live" : `Next heist in ${formatCountdown(countdownSecs(now))}`;
+  const clock = heistCountdown(now);
+  const label = clock.live ? `LIVE ${formatCountdown(clock.secs)}` : `Next heist in ${formatCountdown(clock.secs)}`;
   return (
     <span className="chip">
       <Clock size={14} aria-hidden="true" />

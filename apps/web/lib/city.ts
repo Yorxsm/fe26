@@ -214,30 +214,31 @@ export const CUTSCENE_CAST: CastPose[][] = [
 
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
+  // Local offsets from each room origin, kept 3 m from the entry camera and out of the boards.
   "vault-quarter": [
-    { index: 0, x: -43.8, z: 17.2, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 1, x: -40.2, z: 18.6, rot: Math.PI / 2, speed: 1.3, clip: "walk" },
-    { index: 9, x: -42.2, z: 15.4, rot: 0.4, speed: 0, clip: "celebrate" },
+    { index: 0, x: -43.3, z: 13.85, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: -40.5, z: 14.5, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 9, x: -41.8, z: 15.5, rot: 0.2, speed: 0, clip: "celebrate" },
   ],
   "trading-village": [
-    { index: 2, x: 44.6, z: 14.6, rot: 0.5, speed: 1.2, clip: "walk" },
-    { index: 5, x: 48.4, z: 12.8, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 8, x: 46.2, z: 12.2, rot: -0.4, speed: 0, clip: "celebrate" },
+    { index: 2, x: 42.2, z: 12.45, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 5, x: 46.1, z: 12.4, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 8, x: 49.2, z: 12.5, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "war-room": [
-    { index: 3, x: 10.4, z: 39.6, rot: 1.1, speed: 1.1, clip: "walk" },
-    { index: 5, x: 8.8, z: 37.6, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: 13.8, z: 38.2, rot: 0.5, speed: 0, clip: "celebrate" },
+    { index: 3, x: 9.6, z: 40.6, rot: 0.8, speed: 1.0, clip: "walk" },
+    { index: 5, x: 13.6, z: 38.8, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 7, x: 14.2, z: 41.3, rot: -0.7, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -37.4, z: -25.4, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -34.6, z: -26.2, rot: -0.4, speed: 1.2, clip: "walk" },
-    { index: 6, x: -41.2, z: -25.8, rot: 0.5, speed: 0, clip: "celebrate" },
+    { index: 4, x: -37.6, z: -23.7, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 7, x: -37.8, z: -27.2, rot: 0.1, speed: 1.1, clip: "walk" },
+    { index: 6, x: -40.6, z: -24.4, rot: 0.4, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
-    { index: 2, x: -10.2, z: -44.6, rot: 0.6, speed: 0, clip: "idle" },
-    { index: 6, x: -6.6, z: -42.6, rot: Math.PI, speed: 1.2, clip: "walk" },
-    { index: 8, x: -5.4, z: -44.8, rot: -0.5, speed: 0, clip: "celebrate" },
+    { index: 2, x: -9.1, z: -44.0, rot: 0.15, speed: 0, clip: "idle" },
+    { index: 6, x: -6.7, z: -43.2, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 8, x: -7.9, z: -44.8, rot: 0.3, speed: 0, clip: "celebrate" },
   ],
 };
 

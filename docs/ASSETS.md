@@ -20,11 +20,11 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 | `apps/web/public/models/agent.glb` | 382064 | Six original ingot bodies (Safecracker, Trader, Hacker, Auditor, Builder, Scout) on one rig with idle, walk, and celebrate. Not a downloaded character. |
 | `apps/web/public/models/nature.glb` | 86592 | Kenney round and detailed trees, plus Quaternius bushes, flowers, rocks, grass, and a plant. Instanced. Cone trees in `station.glb` stay hidden. |
 | `apps/web/public/models/kits.glb` | 1679132 | Kenney building shells plus stands, floodlights, flags, string lights, fences, scaffolding, cones, a chimney, a roof dish, and a Poly Haven crane. WebP textures, meshopt. The block shells in `station.glb` are hidden. |
-| `apps/web/public/models/interior-vault.glb` | 221660 | Vault: original door and lasers, instanced gold bars on pallets, deposit boxes, security desk, cameras, cart, crates. Loaded only while that interior camera is active. |
-| `apps/web/public/models/interior-market.glb` | 196600 | Trading floor: desks, monitors, chairs, racks, coffee bar, plants. |
-| `apps/web/public/models/interior-war.glb` | 228960 | War room: racks, consoles, holo table, cables, flag pedestals. |
-| `apps/web/public/models/interior-forge.glb` | 88724 | Lobby: reception, sofas, benches, planters, door frames, mannequin alcove. |
-| `apps/web/public/models/interior-stadium.glb` | 66392 | Stadium: instanced benches, barriers, podium, trophy, spotlights, flags. |
+| `apps/web/public/models/interior-vault.glb` | 215960 | Vault: low steel and concrete shell, original door and lasers, instanced gold, deposit boxes, desk, cameras. Loaded only while that interior camera is active. |
+| `apps/web/public/models/interior-market.glb` | 193600 | Trading floor: tall office shell, two rows of desks, racks, coffee bar. |
+| `apps/web/public/models/interior-war.glb` | 221664 | War room: dark shell, racks, consoles, holo table, cables, flag pedestals. |
+| `apps/web/public/models/interior-forge.glb` | 85388 | Lobby: double-height hall, columns, reception, sofas, door frames, mannequin alcove. |
+| `apps/web/public/models/interior-stadium.glb` | 58252 | Stadium: tiered bowl, stage, instanced seats, hanging board frame, spotlight beams. |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 
 Both GLBs use `EXT_meshopt_compression` (plus `KHR_mesh_quantization` and `KHR_materials_emissive_strength`). Draco is not used: this Blender build has no Draco encoder, and a CDN decoder is the wrong trade. The scene loads them with three's `MeshoptDecoder`.
