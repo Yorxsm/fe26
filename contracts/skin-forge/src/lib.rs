@@ -11,6 +11,8 @@
 //! Function-call keys on the heist cannot attach this deposit. The registry
 //! checks the cap, then calls `mint_skin` with the price attached.
 
+mod media;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use fe2vi_core::{
@@ -28,6 +30,8 @@ use near_sdk::{
 const DEFAULT_CREATOR_BPS: u16 = 200;
 const DEFAULT_PLATFORM_BPS: u16 = 300;
 const MAX_ROYALTY_BPS: u16 = 1_000;
+/// Placeholder gateway. The owner replaces it before any public listing. Not a live host.
+const DEFAULT_BASE_URI: &str = "https://assets.fe2vi.testnet/skins/";
 const TROPHY_CAP: usize = 64;
 
 #[derive(Clone, BorshSerialize, BorshDeserialize, Serialize)]
@@ -169,6 +173,8 @@ pub struct SkinForge {
     platform: AccountId,
     /// Extra accounts for future mints. Empty. Counted inside the same 10% cap.
     royalty_splits: Vec<(AccountId, u16)>,
+    /// Prefix for `media` and `reference`. Includes the trailing slash.
+    base_uri: String,
     next_id: u64,
     tokens: LookupMap<String, SkinToken>,
     by_owner: LookupMap<AccountId, Vec<String>>,
@@ -194,6 +200,7 @@ impl SkinForge {
             platform_bps: DEFAULT_PLATFORM_BPS,
             platform,
             royalty_splits: Vec::new(),
+            base_uri: DEFAULT_BASE_URI.into(),
             next_id: 1,
             tokens: LookupMap::new(b"t"),
             by_owner: LookupMap::new(b"o"),
@@ -207,9 +214,9 @@ impl SkinForge {
         NftContractMetadata {
             spec: "nft-1.0.0".into(),
             name: "fe2VI Skins".into(),
-            symbol: "IRONSKIN".into(),
-            icon: None,
-            base_uri: None,
+            symbol: "FE2VI".into(),
+            icon: Some(media::collection_icon()),
+            base_uri: Some(self.base_uri.clone()),
             reference: None,
             reference_hash: None,
         }
@@ -294,6 +301,29 @@ impl SkinForge {
 
     pub fn platform_account(&self) -> AccountId {
         self.platform.clone()
+    }
+
+    /// Gateway for `{token_id}.png` and `{token_id}.json`. Must be `https://` and end in `/`.
+    pub fn set_base_uri(&mut self, base_uri: String) {
+        self.only_owner();
+        require!(valid_base_uri(&base_uri), "base uri");
+        self.base_uri = base_uri;
+    }
+
+    pub fn base_uri(&self) -> String {
+        self.base_uri.clone()
+    }
+
+    /// Canonical preview bytes. Host this file at `{base_uri}{token_id}.png`.
+    pub fn token_media(&self, token_id: String) -> near_sdk::json_types::Base64VecU8 {
+        let token = self.token_or_panic(&token_id);
+        Base64VecU8(media::preview_png(&token.traits))
+    }
+
+    /// Canonical reference document. Host this file at `{base_uri}{token_id}.json`.
+    pub fn token_reference(&self, token_id: String) -> String {
+        let token = self.token_or_panic(&token_id);
+        reference_json(&token_id, &token)
     }
 
     /// Replace the extra royalty accounts used by later mints.
@@ -566,10 +596,13 @@ impl SkinForge {
     }
 
     pub fn nft_token(&self, token_id: String) -> Option<JsonToken> {
-        self.tokens.get(&token_id).map(|token| JsonToken {
-            token_id,
-            owner_id: token.owner_id.clone(),
-            metadata: metadata_for(token),
+        self.tokens.get(&token_id).map(|token| {
+            let metadata = self.metadata_for(&token_id, token);
+            JsonToken {
+                token_id,
+                owner_id: token.owner_id.clone(),
+                metadata,
+            }
         })
     }
 
@@ -696,11 +729,19 @@ impl SkinForge {
         false
     }
 
+    /// NEP-178. A `msg` is forwarded to `nft_on_approve` on `account_id`.
+    /// Paras and near.cooking list a sale with
+    /// `{"market_type":"sale","ft_token_id":"near","price":"<yocto>"}`.
     #[payable]
-    pub fn nft_approve(&mut self, token_id: String, account_id: AccountId, msg: Option<String>) {
-        require!(env::attached_deposit().as_yoctonear() >= 1, "1 yocto");
-        let _ = msg;
+    pub fn nft_approve(
+        &mut self,
+        token_id: String,
+        account_id: AccountId,
+        msg: Option<String>,
+    ) -> Option<Promise> {
+        let deposit = env::attached_deposit().as_yoctonear();
         let owner = env::predecessor_account_id();
+        let before = env::storage_usage();
         let mut token = self
             .tokens
             .get(&token_id)
@@ -712,10 +753,28 @@ impl SkinForge {
         token.approvals.retain(|(id, _)| id != &account_id);
         token.approvals.push((account_id.clone(), approval_id));
         self.tokens.insert(token_id.clone(), token);
+        let after = env::storage_usage();
+        let cost = if after > before {
+            u128::from(after - before) * env::storage_byte_cost().as_yoctonear()
+        } else {
+            0
+        };
+        let keep = cost.max(1);
+        require!(deposit >= keep, "storage");
+        let refund = deposit - keep;
+        if refund > 0 {
+            Promise::new(owner.clone()).transfer(NearToken::from_yoctonear(refund));
+        }
         env::log_str(&nft_event(
             "nft_approve",
             &near_sdk::serde_json::json!({ "token_id": token_id, "account_id": account_id, "approval_id": approval_id }),
         ));
+        msg.map(|msg| {
+            let forward = env::prepaid_gas().saturating_sub(Gas::from_tgas(25));
+            ext_approval_receiver::ext(account_id)
+                .with_static_gas(forward)
+                .nft_on_approve(token_id, owner, approval_id, msg)
+        })
     }
 
     #[payable]
@@ -860,21 +919,75 @@ impl SkinForge {
     }
 }
 
-fn metadata_for(token: &SkinToken) -> TokenMetadata {
-    let extra = near_sdk::serde_json::to_string(&token.traits).unwrap_or_else(|_| "{}".into());
-    TokenMetadata {
-        title: Some("fe2VI skin".into()),
-        description: Some("Cosmetic only. No gameplay effect.".into()),
-        media: Some("models/agent.glb".into()),
-        media_hash: None,
-        copies: Some(1),
-        issued_at: None,
-        expires_at: None,
-        starts_at: None,
-        updated_at: None,
-        extra: Some(extra),
-        reference: None,
-        reference_hash: None,
+fn valid_base_uri(uri: &str) -> bool {
+    (12..=160).contains(&uri.len())
+        && uri.starts_with("https://")
+        && uri.ends_with('/')
+        && !uri.contains(' ')
+}
+
+fn reference_json(token_id: &str, token: &SkinToken) -> String {
+    let mut attributes = Vec::new();
+    for (trait_type, value) in media::trait_rows(&token.traits) {
+        attributes.push(near_sdk::serde_json::json!({ "trait_type": trait_type, "value": value }));
+    }
+    let stats = &token.stats;
+    for (trait_type, value) in [
+        ("Wins", stats.wins),
+        ("Heists cracked", stats.heists_cracked),
+        ("Times caught", stats.times_caught),
+        ("Seasons played", stats.seasons_played),
+        ("Season titles", stats.titled_seasons.len() as u32),
+    ] {
+        attributes.push(
+            near_sdk::serde_json::json!({ "trait_type": trait_type, "value": value.to_string() }),
+        );
+    }
+    let trophies: Vec<_> = stats
+        .trophies
+        .iter()
+        .map(|trophy| {
+            near_sdk::serde_json::json!({
+                "game": trophy.game,
+                "outcome": trophy.outcome,
+                "season": trophy.season,
+            })
+        })
+        .collect();
+    near_sdk::serde_json::to_string(&near_sdk::serde_json::json!({
+        "name": format!("fe2VI skin {token_id}"),
+        "attributes": attributes,
+        "equipped": token.equipped_traits,
+        "stats": {
+            "wins": stats.wins,
+            "heists_cracked": stats.heists_cracked,
+            "times_caught": stats.times_caught,
+            "seasons_played": stats.seasons_played,
+            "season_titles": stats.titled_seasons.len() as u32,
+        },
+        "trophies": trophies,
+    }))
+    .unwrap_or_else(|_| "{}".into())
+}
+
+impl SkinForge {
+    fn metadata_for(&self, token_id: &str, token: &SkinToken) -> TokenMetadata {
+        let document = reference_json(token_id, token);
+        let png = media::preview_png(&token.traits);
+        TokenMetadata {
+            title: Some(format!("fe2VI skin {token_id}")),
+            description: Some("Cosmetic only. No gameplay effect.".into()),
+            media: Some(format!("{token_id}.png")),
+            media_hash: Some(Base64VecU8(env::sha256(&png))),
+            copies: Some(1),
+            issued_at: None,
+            expires_at: None,
+            starts_at: None,
+            updated_at: None,
+            extra: Some(document.clone()),
+            reference: Some(format!("{token_id}.json")),
+            reference_hash: Some(Base64VecU8(env::sha256(document.as_bytes()))),
+        }
     }
 }
 
@@ -979,6 +1092,18 @@ fn nft_event(event: &str, data: &near_sdk::serde_json::Value) -> String {
             "data": [data],
         })
     )
+}
+
+#[allow(dead_code)]
+#[ext_contract(ext_approval_receiver)]
+trait NonFungibleTokenApprovalsReceiver {
+    fn nft_on_approve(
+        &mut self,
+        token_id: String,
+        owner_id: AccountId,
+        approval_id: u64,
+        msg: String,
+    );
 }
 
 #[allow(dead_code)]
@@ -1154,7 +1279,7 @@ mod tests {
     fn approve_then_transfer_clears_approval() {
         let (mut forge, id, agent) = minted();
         let market: AccountId = "market.fe2vi.testnet".parse().unwrap();
-        context(agent.as_str(), 1);
+        context(agent.as_str(), ONE_NEAR);
         forge.nft_approve(id.clone(), market.clone(), None);
         assert!(forge.nft_is_approved(id.clone(), market.clone(), Some(1)));
         let buyer: AccountId = "buyer.fe2vi.testnet".parse().unwrap();
@@ -1310,11 +1435,34 @@ mod tests {
         let meta = forge.nft_metadata();
         assert_eq!(meta.spec, "nft-1.0.0");
         assert_eq!(meta.name, "fe2VI Skins");
-        assert_eq!(meta.symbol, "IRONSKIN");
-        assert!(meta.icon.is_none());
+        assert_eq!(meta.symbol, "FE2VI");
+        assert!(meta
+            .icon
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("data:image/png;base64,"));
+        assert_eq!(meta.base_uri.as_deref(), Some(DEFAULT_BASE_URI));
         assert!(meta.reference.is_none());
         assert!(meta.reference_hash.is_none());
-        let json = near_sdk::serde_json::to_value(forge.nft_token(id).unwrap().metadata).unwrap();
+        let token = forge.nft_token(id.clone()).unwrap();
+        let png = forge.token_media(id.clone()).0;
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(
+            token.metadata.media_hash.clone().unwrap().0,
+            near_sdk::env::sha256(&png)
+        );
+        let document = forge.token_reference(id);
+        assert_eq!(token.metadata.extra.as_deref(), Some(document.as_str()));
+        assert!(document.contains("\"trait_type\":\"Paint\""));
+        assert!(document.contains("\"trait_type\":\"Wins\""));
+        assert!(document.contains("\"trophies\":[]"));
+        assert_eq!(
+            token.metadata.reference_hash.clone().unwrap().0,
+            near_sdk::env::sha256(document.as_bytes())
+        );
+        assert_eq!(token.metadata.media.as_deref(), Some("1.png"));
+        assert_eq!(token.metadata.reference.as_deref(), Some("1.json"));
+        let json = near_sdk::serde_json::to_value(token.metadata).unwrap();
         for key in [
             "title",
             "description",
@@ -1331,9 +1479,33 @@ mod tests {
         ] {
             assert!(json.get(key).is_some(), "{key}");
         }
-        assert_eq!(json["title"], "fe2VI skin");
-        assert!(json["media_hash"].is_null());
-        assert!(json["reference"].is_null());
+        assert_eq!(json["title"], "fe2VI skin 1");
+        assert!(json["media_hash"].is_string());
+        assert_eq!(json["reference"], "1.json");
+    }
+
+    #[test]
+    fn approve_forwards_the_paras_sale_msg() {
+        let (mut forge, id, agent) = minted();
+        let market: AccountId = "market.joespano.testnet".parse().unwrap();
+        let msg = "{\"market_type\":\"sale\",\"ft_token_id\":\"near\",\"price\":\"1000000000000000000000000\"}";
+        context(agent.as_str(), ONE_NEAR);
+        forge.nft_approve(id.clone(), market.clone(), Some(msg.into()));
+        assert!(forge.nft_is_approved(id, market.clone(), Some(1)));
+        let forwarded = get_created_receipts().into_iter().any(|receipt| {
+            receipt.receiver_id == market
+                && receipt.actions.iter().any(|action| match action {
+                    near_sdk::mock::MockAction::FunctionCallWeight {
+                        method_name, args, ..
+                    } => {
+                        method_name == b"nft_on_approve"
+                            && String::from_utf8_lossy(args).contains("market_type")
+                            && String::from_utf8_lossy(args).contains("sale")
+                    }
+                    _ => false,
+                })
+        });
+        assert!(forwarded, "nft_on_approve was not scheduled");
     }
 
     #[test]

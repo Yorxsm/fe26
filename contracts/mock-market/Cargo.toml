@@ -1,0 +1,19 @@
+[package]
+name = "mock-market"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Paras-style market used only by the sandbox test. Not deployed."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+borsh.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+near-sdk = { version = "=5.7.0", features = ["unit-testing"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+near-sdk = { version = "=5.7.0" }

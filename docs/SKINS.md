@@ -16,7 +16,7 @@ NEP-199 `nft_payout` and `nft_transfer_payout` pay two shares, snapshotted on th
 
 Shares use integer division, `balance * bps / 10000`, and the seller keeps the remainder, so the map sums to `balance`. 2% of 40 yoctoNEAR is 0 and 3% of 40 is 1. Both shares of 3 are 0. If the creator is still the owner, the creator share stays with the seller and the platform is still paid. `max_len_payout` smaller than the map panics. A resale with three distinct accounts needs room for three entries.
 
-The collection record is `nft_metadata`: spec `nft-1.0.0`, name `fe2VI Skins`, symbol `IRONSKIN`. Each token's metadata is the NEP-177 field set. There is no marketplace in this repo, and no launchpad hook. A public media URL and its content hash wait until that choice is settled.
+The collection record is `nft_metadata`: spec `nft-1.0.0`, name `fe2VI Skins`, symbol `FE2VI`. Listing on a Paras-style market is described in `docs/MARKETPLACE.md`. This repo does not run a marketplace.
 
 ## Bind
 

@@ -28,3 +28,8 @@ required-features = ["sandbox"]
 name = "skins"
 path = "tests/skins.rs"
 required-features = ["sandbox"]
+
+[[test]]
+name = "marketplace"
+path = "tests/marketplace.rs"
+required-features = ["sandbox"]
