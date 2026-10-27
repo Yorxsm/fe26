@@ -1,11 +1,10 @@
 "use client";
 
-import { Text, useGLTF } from "@react-three/drei";
+import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DISPLAY_FONT } from "@/lib/fonts";
-import { tapeLines } from "@/lib/tape";
+import { CHALLENGES, countdownSecs, formatCountdown, heistRows, mockQuotes } from "@/lib/schedule";
 
 const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
   "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18] },
@@ -15,11 +14,10 @@ const ROOMS: Record<string, { url: string; position: [number, number, number] }>
   "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -42] },
 };
 
-const LAMPS: Array<[number, number, number, string]> = [
-  [0, 3.15, -1.2, "#ff9a3c"],
-  [-3.4, 2.5, 0.8, "#ffb15a"],
-  [3.2, 2.3, -0.4, "#ff8a32"],
-  [0.4, 2.1, 2.6, "#ffc48a"],
+const LAMPS: Array<[number, number, number]> = [
+  [-2.2, 3.2, -1.4],
+  [2.2, 3.2, -1.4],
+  [0, 3.15, 1.6],
 ];
 
 function RoomMesh({ url }: { url: string }) {
@@ -35,7 +33,10 @@ function RoomMesh({ url }: { url: string }) {
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       materials.forEach((material) => {
         const standard = material as THREE.MeshStandardMaterial;
-        if (standard.emissiveIntensity > 1.05) standard.emissiveIntensity = 1.05;
+        const name = mesh.name.toLowerCase();
+        if (name.includes("laser")) standard.emissiveIntensity = 2.1;
+        else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
+        else standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.05);
       });
     });
     return cloned;
@@ -43,32 +44,144 @@ function RoomMesh({ url }: { url: string }) {
   return <primitive object={scene} />;
 }
 
-function Tape({ position }: { position: [number, number, number] }) {
-  const [lines, setLines] = useState(() => tapeLines());
-  const minute = useRef(Math.floor(Date.now() / 60000));
-  useFrame(() => {
-    const next = Math.floor(Date.now() / 60000);
-    if (next === minute.current) return;
-    minute.current = next;
-    setLines(tapeLines());
+function paintBoard(lines: string[]) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 576;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  const root = getComputedStyle(document.documentElement);
+  const display = root.getPropertyValue("--font-display").trim() || "sans-serif";
+  const mono = root.getPropertyValue("--font-mono").trim() || "monospace";
+  ctx.fillStyle = "#141416";
+  ctx.fillRect(0, 0, 1024, 576);
+  ctx.fillStyle = "#c94a1a";
+  ctx.fillRect(0, 0, 1024, 14);
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#d4d2cc";
+  ctx.font = `700 84px ${display}`;
+  ctx.fillText(lines[0] ?? "", 48, 40);
+  ctx.font = `500 64px ${mono}`;
+  lines.slice(1, 6).forEach((line, index) => {
+    ctx.fillStyle = index === 0 ? "#2fb86a" : "#d4d2cc";
+    ctx.fillText(line, 48, 156 + index * 78);
   });
+  return canvas;
+}
+
+function Screen({
+  position,
+  lines,
+  size = [3.4, 1.92],
+}: {
+  position: [number, number, number];
+  lines: string[];
+  size?: [number, number];
+}) {
+  const [map, setMap] = useState<THREE.CanvasTexture | null>(null);
+  const key = lines.join("|");
+  useEffect(() => {
+    let dead = false;
+    const root = getComputedStyle(document.documentElement);
+    const display = root.getPropertyValue("--font-display").trim() || "sans-serif";
+    const mono = root.getPropertyValue("--font-mono").trim() || "monospace";
+    Promise.all([document.fonts.load(`700 84px ${display}`), document.fonts.load(`500 64px ${mono}`)]).then(() => {
+      if (dead) return;
+      const canvas = paintBoard(lines);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
+      texture.needsUpdate = true;
+      setMap((current) => {
+        current?.dispose();
+        return texture;
+      });
+    });
+    return () => {
+      dead = true;
+    };
+    // key is the joined line text. The array identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const [width, height] = size;
   return (
     <group position={position}>
-      {lines.map((line, index) => (
-        <Text
-          key={line}
-          position={[0, 0.42 - index * 0.38, 0.08]}
-          font={DISPLAY_FONT}
-          fontSize={0.22}
-          color="#2fb86a"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {line}
-        </Text>
-      ))}
+      <mesh position={[0, 0, -0.05]} castShadow>
+        <boxGeometry args={[width + 0.18, height + 0.18, 0.08]} />
+        <meshStandardMaterial color="#2c2e32" metalness={0.78} roughness={0.38} />
+      </mesh>
+      <mesh position={[0, 0, 0.01]}>
+        <planeGeometry args={[width, height]} />
+        <meshBasicMaterial map={map ?? undefined} color={map ? "#ffffff" : "#141416"} toneMapped={false} />
+      </mesh>
     </group>
   );
+}
+
+function useClock() {
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const last = useRef(now);
+  useFrame(() => {
+    const next = Math.floor(Date.now() / 1000);
+    if (next - last.current < 15) return;
+    last.current = next;
+    setNow(next);
+  });
+  return now;
+}
+
+function RoomBoards({ id }: { id: string }) {
+  const now = useClock();
+  const countdown = formatCountdown(countdownSecs(now));
+  const ranks = heistRows("season", now).slice(0, 5);
+  const rankLines = ["SEASON", ...ranks.map((row, index) => `${index + 1}  ${row.name.toUpperCase()}  ${row.points}`)];
+  const quotes = mockQuotes(now);
+  if (id === "vault-quarter") {
+    return (
+      <>
+        <Screen position={[-4.35, 2.2, -5.86]} lines={["SCHEDULE", `NEXT  ${countdown}`, "DAILY  18:00Z", "WEEK  MON", "SEASON 1"]} />
+        <Screen position={[4.35, 2.2, -5.86]} lines={rankLines} />
+      </>
+    );
+  }
+  if (id === "trading-village") {
+    return (
+      <>
+        <Screen
+          position={[-3.3, 2.25, -5.82]}
+          size={[5.2, 2.2]}
+          lines={[
+            "PERPS",
+            ...quotes.map((row) => `${row.symbol}  ${(row.mark / 1_000_000).toFixed(2)}`),
+          ]}
+        />
+        <Screen
+          position={[4.15, 2.15, -5.82]}
+          size={[3.2, 2.0]}
+          lines={["PNL", ...quotes.map((row) => `${row.fundingBps} BPS  ${(row.pnlMicros / 1_000_000).toFixed(2)}`)]}
+        />
+      </>
+    );
+  }
+  if (id === "war-room") {
+    return (
+      <>
+        <Screen position={[-4.4, 1.15, -3.4]} size={[2.2, 0.7]} lines={["CONTRACT", `${CHALLENGES[0]?.points ?? 0}`]} />
+        <Screen position={[0, 1.15, -3.4]} size={[2.2, 0.7]} lines={["WEB", `${CHALLENGES[1]?.points ?? 0}`]} />
+        <Screen position={[4.4, 1.15, -3.4]} size={[2.2, 0.7]} lines={["CRYPTO", `${CHALLENGES[2]?.points ?? 0}`]} />
+        <Screen position={[0, 3.15, -5.84]} size={[6.4, 1.5]} lines={["SCORE", "CONTRACT  100", "WEB  150", "CRYPTO  80"]} />
+      </>
+    );
+  }
+  if (id === "skin-forge") {
+    return (
+      <>
+        <Screen position={[-3.5, 2.35, -5.84]} size={[4.6, 2.3]} lines={["HALL", `NEXT  ${countdown}`, "VAULT  HEIST", "FLOOR  PERPS", "WAR  SANDBOX"]} />
+        <Screen position={[3.6, 2.25, -5.84]} size={[4.2, 2.1]} lines={rankLines} />
+      </>
+    );
+  }
+  return <Screen position={[0, 2.55, -5.78]} size={[6.6, 2.3]} lines={["CUP", "MASON  2", "SCOUT  1", "TAPE  WATCH"]} />;
 }
 
 function SeatCrowd() {
@@ -112,96 +225,6 @@ function SeatCrowd() {
   );
 }
 
-function RoomCopy({ id }: { id: string }) {
-  if (id === "vault-quarter") {
-    return (
-      <>
-        <Text position={[0, 0.16, 5.15]} rotation={[-Math.PI / 2, 0, 0]} font={DISPLAY_FONT} fontSize={0.22} color="#ffb15a" anchorX="center">
-          ENTRY
-        </Text>
-        <Text position={[5.35, 0.7, -1.2]} font={DISPLAY_FONT} fontSize={0.18} color="#ff5a4a" anchorX="center">
-          EXIT
-        </Text>
-        <Text position={[-2.2, 2.75, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          NEXT 18:00Z
-        </Text>
-        <Text position={[-2.2, 2.35, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          MASON 12
-        </Text>
-      </>
-    );
-  }
-  if (id === "trading-village") {
-    return (
-      <>
-        <Tape position={[0, 2.35, -5.72]} />
-        <Text position={[-2.6, 2.55, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
-          1 TAPE
-        </Text>
-        <Text position={[-2.6, 2.15, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
-          2 MASON
-        </Text>
-        <Text position={[-2.6, 1.75, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
-          3 SCOUT
-        </Text>
-        <Text position={[3.6, 2.05, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#d4d2cc" anchorX="center">
-          PERP NEAR
-        </Text>
-        <Text position={[3.6, 1.7, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#d4d2cc" anchorX="center">
-          STK IRON
-        </Text>
-        <Text position={[3.6, 1.35, -5.6]} font={DISPLAY_FONT} fontSize={0.12} color="#2fb86a" anchorX="center">
-          PNL
-        </Text>
-      </>
-    );
-  }
-  if (id === "war-room") {
-    return (
-      <>
-        <Text position={[-4.2, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          CONTRACT
-        </Text>
-        <Text position={[0, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          WEB
-        </Text>
-        <Text position={[4.2, 2.5, -5.5]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          CRYPTO
-        </Text>
-      </>
-    );
-  }
-  if (id === "skin-forge") {
-    return (
-      <>
-        <Text position={[0, 2.7, -5.55]} font={DISPLAY_FONT} fontSize={0.18} color="#d4d2cc" anchorX="center">
-          SCHEDULE
-        </Text>
-        <Text position={[0, 2.25, -5.55]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          MASON
-        </Text>
-        <Text position={[-6.15, 2.1, -2.4]} rotation={[0, Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          VAULT
-        </Text>
-        <Text position={[-6.15, 2.1, 1.6]} rotation={[0, Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          FLOOR
-        </Text>
-        <Text position={[6.15, 2.1, -0.6]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.16} color="#d4d2cc" anchorX="center">
-          WAR
-        </Text>
-        <Text position={[3.4, 2.35, -5.58]} font={DISPLAY_FONT} fontSize={0.14} color="#e2b340" anchorX="center">
-          SKINS
-        </Text>
-      </>
-    );
-  }
-  return (
-    <Text position={[0, 2.7, -5.68]} font={DISPLAY_FONT} fontSize={0.34} color="#2fb86a" anchorX="center">
-      CUP  2-1
-    </Text>
-  );
-}
-
 export function Interiors({ focusId, frameMode }: { focusId: string | null; frameMode: "in" | "out" }) {
   if (frameMode !== "in" || !focusId || !ROOMS[focusId]) return null;
   const room = ROOMS[focusId];
@@ -209,14 +232,14 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
     <Suspense fallback={null}>
       <group position={room.position}>
         <RoomMesh key={room.url} url={room.url} />
-        {LAMPS.map(([x, y, z, color], index) => (
-          <pointLight key={index} position={[x, y, z]} color={color} intensity={110} distance={12} decay={2} />
+        {LAMPS.map(([x, y, z], index) => (
+          <pointLight key={index} position={[x, y, z]} color="#e7b07a" intensity={14} distance={9} decay={2} />
         ))}
-        <RoomCopy id={focusId} />
+        <RoomBoards id={focusId} />
         {focusId === "cup-stadium" ? <SeatCrowd /> : null}
       </group>
     </Suspense>
   );
 }
 
-for (const room of Object.values(ROOMS)) useGLTF.preload(room.url, false, true);
+for (const room of Object.values(ROOMS)) useGLTF.preload(room.url);
