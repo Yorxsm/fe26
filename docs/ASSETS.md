@@ -16,7 +16,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 
 | File | Bytes | What it is |
 | --- | ---: | --- |
-| `apps/web/public/models/station.glb` | 606780 | Village with bank, market, stadium, war room, forge, and construction plots |
+| `apps/web/public/models/station.glb` | 3930396 | Village with textured buildings, asphalt roads, plazas, and full-size trees |
 | `apps/web/public/models/agent.glb` | 62692 | Ingot with arms, blinking eyes, stubby legs, a hexagonal core, and the catalog parts below |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 
@@ -27,6 +27,15 @@ The world is lit by a CC0 HDRI for reflections only. The sky is a gradient in th
 | File | Source | License |
 | --- | --- | --- |
 | `apps/web/public/textures/kiara_1_dawn_1k.hdr` | [kiara_1_dawn](https://polyhaven.com/a/kiara_1_dawn), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `grass-cc0.jpg` | [leafy_grass](https://polyhaven.com/a/leafy_grass), Poly Haven. Graded greener in this repo so the lawn stays saturated. | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `asphalt-albedo.jpg` | [asphalt_02](https://polyhaven.com/a/asphalt_02), Poly Haven. Darkened in this repo. | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `paving-albedo.jpg` | [rectangular_paving](https://polyhaven.com/a/rectangular_paving), Poly Haven. Shifted to grey stone in this repo. | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `stone-albedo.jpg` | [stone_brick_wall_001](https://polyhaven.com/a/stone_brick_wall_001), Poly Haven. Cooled in this repo. | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `brick-albedo.jpg` | [brick_wall_001](https://polyhaven.com/a/brick_wall_001), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `wood-albedo.jpg` | [wood_floor](https://polyhaven.com/a/wood_floor), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `concrete-albedo.jpg` | [concrete_wall_001](https://polyhaven.com/a/concrete_wall_001), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `roof-albedo.jpg` | [clay_roof_tiles](https://polyhaven.com/a/clay_roof_tiles), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `marble-albedo.jpg` | [marble_01](https://polyhaven.com/a/marble_01), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `steel-albedo.png`, `steel-roughness.png`, `grate-albedo.png`, `cloud.png` | `tools/blender/make_textures.py` | original, same repo |
 
 The agent clips are `idle`, `walk`, and `celebrate` on `bone.root`, `bone.body`, `bone.leg.L`, and `bone.leg.R`. The walk swing is bone-local. Confirm the axis when the city plays the clip.

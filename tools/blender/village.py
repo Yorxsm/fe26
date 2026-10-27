@@ -77,9 +77,20 @@ def build_terrain(kit, mats):
         ((-78, 20, 1.4), (70, -55, 1.1), (-60, -70, 0.8), (82, 30, 1.6), (40, 78, 0.9), (-20, 84, 1.2))
     ):
         kit.ico(f"terrain.rock.{index}", (x, y, terrain_height(x, y) + scale * 0.35), scale, mats["rock"])
+    plazas = {
+        "vault": (30, 22),
+        "stadium": (34, 26),
+        "market": (30, 22),
+        "war": (28, 22),
+        "forge": (24, 20),
+        "pier": (18, 14),
+        "club": (18, 14),
+        "oracle": (18, 14),
+    }
     for _district, _name, prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)
-        kit.cylinder(f"{prefix}.pad", (cx, cy, 0.04), 11, 0.08, mats["dirt"], vertices=20)
+        sx, sy = plazas[prefix]
+        box(kit, f"{prefix}.pad", (cx, cy, 0.02), (sx, sy, 0.05), mats["paving"], 0)
 
 
 def box(kit, name, loc, size, mat, rot_z=0.0):
@@ -113,9 +124,12 @@ def build_roads(kit, mats):
         ux, uy = dx / length, dy / length
         px, py = -uy, ux
         mid = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
-        box(kit, f"road.asphalt.{index}", (mid[0], mid[1], 0.06), (length, 6.0, 0.08), mats["asphalt"], angle)
-        box(kit, f"road.kerb.L.{index}", (mid[0] + px * 3.15, mid[1] + py * 3.15, 0.12), (length, 0.28, 0.12), mats["kerb"], angle)
-        box(kit, f"road.kerb.R.{index}", (mid[0] - px * 3.15, mid[1] - py * 3.15, 0.12), (length, 0.28, 0.12), mats["kerb"], angle)
+        box(kit, f"road.asphalt.{index}", (mid[0], mid[1], 0.07), (length, 5.2, 0.08), mats["asphalt"], angle)
+        box(kit, f"road.kerb.L.{index}", (mid[0] + px * 2.75, mid[1] + py * 2.75, 0.16), (length, 0.22, 0.16), mats["kerb"], angle)
+        box(kit, f"road.kerb.R.{index}", (mid[0] - px * 2.75, mid[1] - py * 2.75, 0.16), (length, 0.22, 0.16), mats["kerb"], angle)
+        box(kit, f"road.walk.L.{index}", (mid[0] + px * 4.15, mid[1] + py * 4.15, 0.1), (length, 1.8, 0.08), mats["paving"], angle)
+        box(kit, f"road.walk.R.{index}", (mid[0] - px * 4.15, mid[1] - py * 4.15, 0.1), (length, 1.8, 0.08), mats["paving"], angle)
+        box(kit, f"road.center.{index}", (mid[0], mid[1], 0.13), (length * 0.92, 0.1, 0.02), mats["hazard"], angle)
         dashes = int(length // 4)
         for dash in range(dashes):
             dist = 2 + dash * 4
@@ -160,33 +174,77 @@ def blocked(x, y, points):
     return False
 
 
+def near_building(x, y, radius):
+    for _district, _name, _prefix, tx, tz in SITES:
+        cx, cy = blender_xy(tx, tz)
+        if math.hypot(x - cx, y - cy) < radius:
+            return True
+    return False
+
+
+def plant_tree(kit, mats, placed, x, y):
+    kind = ("pine", "oak", "birch")[placed % 3]
+    height = 14.0 + (placed % 5) * 1.6
+    z = terrain_height(x, y)
+    trunk_h = height * 0.38
+    kit.cylinder(
+        f"tree.{kind}.trunk.{placed}",
+        (x, y, z + trunk_h * 0.5),
+        0.55 if kind == "oak" else 0.34,
+        trunk_h,
+        mats["birch"] if kind == "birch" else mats["bark"],
+        vertices=6,
+    )
+    if kind == "pine":
+        kit.cone(f"tree.pine.crown.{placed}", (x, y, z + trunk_h + height * 0.22), height * 0.42, height * 0.78, mats["needle"])
+    elif kind == "oak":
+        kit.ico(f"tree.oak.crown.{placed}", (x, y, z + trunk_h + 1.6), height * 0.46, mats["leaf"])
+    else:
+        kit.ico(f"tree.birch.crown.{placed}", (x, y, z + trunk_h + 1.2), height * 0.34, mats["leaf"])
+
+
 def build_trees(kit, mats):
     points = road_points()
-    kinds = ("pine", "oak", "birch")
     placed = 0
-    for n in range(240):
-        if placed >= 42:
-            break
-        angle = n * 2.399
-        radius = 28 + (n * 3) % 55
-        x, y = math.cos(angle) * radius, math.sin(angle) * radius
-        if abs(x) > 95 or abs(y) > 95 or blocked(x, y, points):
+    for index, start in enumerate(points):
+        end = points[(index + 1) % len(points)]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length < 1:
             continue
-        kind = kinds[placed % 3]
-        z = terrain_height(x, y)
-        kit.cylinder(f"tree.{kind}.trunk.{placed}", (x, y, z + 0.8), 0.12 if kind != "oak" else 0.18, 1.6, mats["birch"] if kind == "birch" else mats["bark"], vertices=6)
-        if kind == "pine":
-            kit.cone(f"tree.pine.crown.{placed}", (x, y, z + 2.4), 1.1, 2.4, mats["needle"])
-        elif kind == "oak":
-            kit.ico(f"tree.oak.crown.{placed}", (x, y, z + 2.3), 1.15, mats["leaf"])
-        else:
-            kit.ico(f"tree.birch.crown.{placed}", (x, y, z + 2.1), 0.75, mats["leaf"])
-        placed += 1
-    for index in range(10):
-        angle = index * 0.9
-        x, y = 22 + math.cos(angle) * 6, -18 + math.sin(angle) * 4
-        kit.ico(f"tree.bush.{index}", (x, y, 0.35), 0.45, mats["leaf"])
-        kit.cone(f"tree.flower.{index}", (x + 1.2, y + 0.4, 0.15), 0.12, 0.2, mats["flower"])
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        dist = 7.0
+        while dist < length - 6 and placed < 140:
+            for side in (-1, 1):
+                if placed >= 140:
+                    break
+                x = start[0] + ux * dist + px * side * 9.0
+                y = start[1] + uy * dist + py * side * 9.0
+                if abs(x) > 100 or abs(y) > 100 or near_building(x, y, 13):
+                    continue
+                plant_tree(kit, mats, placed, x, y)
+                placed += 1
+                kit.ico(f"tree.bush.{placed}", (x + px * side * 2.4, y + py * side * 2.4, 0.7), 1.15, mats["leaf"])
+            dist += 10.0
+    grove = 0
+    n = 0
+    while grove < 72 and n < 420:
+        angle = n * 2.399
+        radius = 34 + (n * 7) % 60
+        x, y = math.cos(angle) * radius, math.sin(angle) * radius
+        n += 1
+        if abs(x) > 98 or abs(y) > 98 or near_building(x, y, 14) or blocked(x, y, points):
+            continue
+        plant_tree(kit, mats, 200 + grove, x, y)
+        grove += 1
+    for n in range(16):
+        angle = n * 0.9
+        x, y = 22 + math.cos(angle) * 8, -18 + math.sin(angle) * 6
+        if near_building(x, y, 14):
+            continue
+        kit.ico(f"tree.bush.pond.{n}", (x, y, 0.5), 0.7, mats["leaf"])
+        kit.cone(f"tree.flower.{n}", (x + 1.1, y + 0.3, 0.2), 0.16, 0.28, mats["flower"])
 
 
 def disc(kit, name, loc, radius, depth, mat, rot, verts=20):
@@ -196,6 +254,38 @@ def disc(kit, name, loc, radius, depth, mat, rot, verts=20):
     ob.data.materials.append(mat)
     core.shade_flat(ob)
     return kit.keep(ob)
+
+
+def slab(kit, name, loc, size, mat, rot):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc, rotation=rot)
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.scale = size
+    core.apply_xform(ob)
+    ob.data.materials.append(mat)
+    core.shade_flat(ob)
+    return kit.keep(ob)
+
+
+def gable(kit, prefix, cx, cy, sx, sy, height, mat):
+    rise = 2.6
+    slope = math.atan2(rise, sy * 0.5)
+    slab(kit, f"{prefix}.roof.n", (cx, cy + sy * 0.2, height + rise * 0.45), (sx + 1.4, sy * 0.68, 0.28), mat, (slope, 0, 0))
+    slab(kit, f"{prefix}.roof.s", (cx, cy - sy * 0.2, height + rise * 0.45), (sx + 1.4, sy * 0.68, 0.28), mat, (-slope, 0, 0))
+
+
+def windows(kit, mats, prefix, cx, cy, sx, sy, height):
+    rows = [z for z in (2.15, 4.35) if z < height - 1.5]
+    xs = [cx + (i - 1) * sx * 0.28 for i in range(3)]
+    for row, z in enumerate(rows):
+        for i, x in enumerate(xs):
+            if abs(x - cx) < 2.2:
+                continue
+            box(kit, f"{prefix}.win.s.{row}.{i}", (x, cy - sy / 2 - 0.16, z), (1.35, 0.1, 1.25), mats["glass"], 0)
+            box(kit, f"{prefix}.win.n.{row}.{i}", (x, cy + sy / 2 + 0.16, z), (1.35, 0.1, 1.25), mats["glass"], 0)
+        for j, y in enumerate((cy - sy * 0.25, cy + sy * 0.25)):
+            box(kit, f"{prefix}.win.e.{row}.{j}", (cx + sx / 2 + 0.16, y, z), (0.1, 1.35, 1.25), mats["glass"], 0)
+            box(kit, f"{prefix}.win.w.{row}.{j}", (cx - sx / 2 - 0.16, y, z), (0.1, 1.35, 1.25), mats["glass"], 0)
 
 
 def build_vault_bank(kit, mats):
@@ -273,6 +363,8 @@ def build_vault_bank(kit, mats):
     for bulb in range(6):
         angle = bulb * math.tau / 6
         kit.ico(f"vault.bulb.{bulb}", (cx + math.cos(angle) * 0.7, cy - 1 + math.sin(angle) * 0.7, 6.35), 0.12, mats["amber"])
+    kit.ico("vault.dome", (cx, cy, height + 2.4), 3.4, mats["stone"])
+    windows(kit, mats, "vault", cx, cy, sx, sy, height)
 
 
 def front_shell(kit, mats, prefix, cx, cy, sx, sy, height, wall, floor, roof, trim):
@@ -289,6 +381,7 @@ def front_shell(kit, mats, prefix, cx, cy, sx, sy, height, wall, floor, roof, tr
     box(kit, f"{prefix}.jamb.R", (cx + door / 2 + jamb / 2, front_y, wall_z), (jamb, thick, height), wall, 0)
     box(kit, f"{prefix}.lintel", (cx, front_y, 0.2 + height - 1.1), (door, thick, 2.2), wall, 0)
     box(kit, f"{prefix}.roof", (cx, cy, 0.2 + height), (sx + 0.6, sy + 0.6, 0.28), roof, 0)
+    box(kit, f"{prefix}.door", (cx, front_y + 0.2, 1.7), (2.4, 0.16, 3.0), mats["wood"], 0)
     box(kit, f"{prefix}.sign", (cx, front_y - 0.35, height - 0.55), (7.2, 0.16, 0.9), trim, 0)
     return front_y
 
@@ -296,7 +389,7 @@ def front_shell(kit, mats, prefix, cx, cy, sx, sy, height, wall, floor, roof, tr
 def build_market(kit, mats):
     cx, cy = blender_xy(46.0, 14.0)
     sx, sy, height = 24.0, 16.0, 7.0
-    front_y = front_shell(kit, mats, "market", cx, cy, sx, sy, height, mats["timber"], mats["stone"], mats["timber"], mats["awning.0"])
+    front_y = front_shell(kit, mats, "market", cx, cy, sx, sy, height, mats["wood"], mats["paving"], mats["roof"], mats["awning.0"])
     for post, x in enumerate((-9, -3, 3, 9)):
         kit.cylinder(f"market.post.{post}", (cx + x, front_y - 0.8, height / 2), 0.22, height, mats["wood"], vertices=6)
     box(kit, "market.screen", (cx, cy + sy / 2 - 0.5, 2.4), (6.4, 0.12, 3.2), mats["screen"], 0)
@@ -313,6 +406,8 @@ def build_market(kit, mats):
         box(kit, f"market.crate.{index}", (cx + ox + 0.8, cy + oy - 0.6, 0.35), (0.55, 0.45, 0.45), mats["crate"], 0.2)
     for light in range(8):
         kit.ico(f"market.string.{light}", (cx - 9 + light * 2.5, cy, 5.6), 0.1, mats["amber"])
+    gable(kit, "market", cx, cy, sx, sy, height, mats["roof"])
+    windows(kit, mats, "market", cx, cy, sx, sy, height)
 
 
 def build_stadium(kit, mats):
@@ -335,12 +430,14 @@ def build_stadium(kit, mats):
         kit.cylinder(f"stadium.flood.{index}", (cx + ox * 0.72, cy + oy * 0.72, 7.2), 0.28, 0.16, mats["cloth"], vertices=8)
     for step in range(3):
         box(kit, f"stadium.step.{step}", (cx, cy - sy / 2 - 1.2 - step * 0.7, 0.1 + step * 0.06), (6.0, 0.65, 0.12), mats["kerb"], 0)
+    box(kit, "stadium.wall.n", (cx, cy + sy / 2, 3.4), (sx, 0.45, 6.4), mats["concrete"], 0)
+    gable(kit, "stadium", cx, cy + sy * 0.28, sx, sy * 0.45, 5.2, mats["roof"])
 
 
 def build_war_room(kit, mats):
     cx, cy = blender_xy(12.0, 40.0)
     sx, sy, height = 22.0, 16.0, 8.0
-    front_shell(kit, mats, "war", cx, cy, sx, sy, height, mats["concrete"], mats["trim"], mats["concrete"], mats["cyan"])
+    front_shell(kit, mats, "war", cx, cy, sx, sy, height, mats["concrete"], mats["paving"], mats["concrete"], mats["cyan"])
     for pane, x in enumerate((-6, 0, 6)):
         box(kit, f"war.glass.{pane}", (cx + x, cy - sy / 2 - 0.05, 2.6), (3.2, 0.08, 3.4), mats["glass"], 0)
     box(kit, "war.map", (cx, cy + sy / 2 - 0.45, 2.6), (8.0, 0.08, 3.2), mats["cyan"], 0)
@@ -361,12 +458,13 @@ def build_war_room(kit, mats):
         kit.cone(f"war.plant.{plant}", (cx - 8 + plant * 8, cy + 5, 0.7), 0.35, 0.7, mats["leaf"])
     for cable in range(4):
         box(kit, f"war.cable.{cable}", (cx - 4 + cable * 2.2, cy + 3.5, 0.08), (0.06, 3.5, 0.04), mats["iron"], 0.4)
+    windows(kit, mats, "war", cx, cy, sx, sy, height)
 
 
 def build_forge(kit, mats):
     cx, cy = blender_xy(-38.0, -24.0)
     sx, sy, height = 18.0, 14.0, 6.5
-    front_shell(kit, mats, "forge", cx, cy, sx, sy, height, mats["brick"], mats["stone"], mats["brick"], mats["molten"])
+    front_shell(kit, mats, "forge", cx, cy, sx, sy, height, mats["brick"], mats["paving"], mats["roof"], mats["molten"])
     kit.cylinder("forge.chimney", (cx + 5, cy + 4, height + 2.2), 0.55, 4.4, mats["brick"], vertices=8)
     for puff, z in enumerate((0.6, 1.3, 2.0)):
         kit.ico(f"forge.smoke.{puff}", (cx + 5.3, cy + 4.2, height + 4.2 + z), 0.45 + puff * 0.15, mats["smoke"])
@@ -378,6 +476,8 @@ def build_forge(kit, mats):
     for index, height_z in enumerate((1.4, 1.8, 2.2, 2.5)):
         box(kit, f"forge.tool.{index}", (cx - 6, cy - 1 + index * 0.35, height_z), (0.08, 0.08, 0.7), mats["iron"], 0.3)
     box(kit, "forge.rack", (cx - 6.2, cy - 0.4, 1.3), (0.12, 1.8, 2.2), mats["wood"], 0)
+    gable(kit, "forge", cx, cy, sx, sy, height, mats["roof"])
+    windows(kit, mats, "forge", cx, cy, sx, sy, height)
 
 
 def build_plot(kit, mats, prefix, tx, tz):
@@ -403,30 +503,31 @@ def build_village():
     core.reset_scene()
     kit = core.Kit()
     mats = {
-        "grass": textured("grass", os.path.join(TEX, "grass-albedo.png"), 0.0, 0.92, 0.18, "#5f9a4e"),
-        "dirt": core.material("dirt", "#8a6a42", metallic=0.0, roughness=0.95),
-        "water": core.material("water", "#7eb6c9", "#cfe7ef", 0.15, 0.05, 0.08),
-        "rock": core.material("rock", "#8d8680", metallic=0.05, roughness=0.86),
-        "asphalt": core.material("asphalt", "#3a3e44", metallic=0.05, roughness=0.82),
-        "kerb": core.material("kerb", "#c8c2b4", metallic=0.0, roughness=0.7),
+        "grass": textured("grass", os.path.join(TEX, "grass-cc0.jpg"), 0.0, 0.94, 0.45, "#ffffff"),
+        "dirt": core.material("dirt", "#6e5340", metallic=0.0, roughness=0.95),
+        "water": core.material("water", "#3e8ea8", "#d5f2f8", 0.2, 0.02, 0.12),
+        "rock": core.material("rock", "#6e6862", metallic=0.05, roughness=0.9),
+        "asphalt": textured("asphalt", os.path.join(TEX, "asphalt-albedo.jpg"), 0.02, 0.88, 0.22, "#ffffff"),
+        "kerb": core.material("kerb", "#b7b1a6", metallic=0.0, roughness=0.72),
+        "paving": textured("paving", os.path.join(TEX, "paving-albedo.jpg"), 0.02, 0.78, 0.35, "#ffffff"),
         "paint": core.material("paint", "#f3e6c8", metallic=0.0, roughness=0.5),
         "iron": core.material("iron", "#6e757c", metallic=0.7, roughness=0.4),
         "amber": core.material("amber", "#ffb347", "#ffb347", 3.0, 0.05, 0.4),
-        "wood": core.material("wood", "#8a5a32", metallic=0.02, roughness=0.72),
-        "glass": core.material("glass", "#2f4f6a", "#9fd0ff", 0.4, 0.2, 0.15),
+        "wood": textured("wood", os.path.join(TEX, "wood-albedo.jpg"), 0.0, 0.72, 0.4, "#ffffff"),
+        "glass": core.material("glass", "#16384f", "#c5e8ff", 0.25, 0.04, 0.06),
         "bark": core.material("bark", "#5c4030", metallic=0.0, roughness=0.9),
         "birch": core.material("birch", "#efe8dc", metallic=0.0, roughness=0.7),
-        "needle": core.material("needle", "#2f6a38", metallic=0.0, roughness=0.85),
-        "leaf": core.material("leaf", "#3e8a44", metallic=0.0, roughness=0.8),
+        "needle": core.material("needle", "#1c5c28", metallic=0.0, roughness=0.88),
+        "leaf": core.material("leaf", "#217a32", metallic=0.0, roughness=0.82),
         "flower": core.material("flower", "#e07a9a", "#ffd0dc", 0.2, 0.0, 0.5),
-        "stone": core.material("stone", "#d7d1c6", metallic=0.05, roughness=0.62),
-        "marble": core.material("marble", "#efeae2", metallic=0.08, roughness=0.32),
+        "stone": textured("stone", os.path.join(TEX, "stone-albedo.jpg"), 0.02, 0.7, 0.4, "#ffffff"),
+        "marble": textured("marble", os.path.join(TEX, "marble-albedo.jpg"), 0.04, 0.35, 0.28, "#ffffff"),
         "vaultsteel": core.material("vaultsteel", "#4a515a", metallic=0.88, roughness=0.32),
         "gold": core.material("gold", "#f2b227", "#fff1a8", 0.35, 0.92, 0.22),
         "goldhi": core.material("goldhi", "#fff1a8", "#fff6c8", 0.45, 0.8, 0.18),
         "velvet": core.material("velvet", "#7a1f33", metallic=0.0, roughness=0.8),
         "alarm": core.material("alarm", "#ff3355", "#ff3355", 3.2, 0.05, 0.25),
-        "timber": core.material("timber", "#c4a574", metallic=0.02, roughness=0.7),
+        "timber": textured("timber", os.path.join(TEX, "wood-albedo.jpg"), 0.0, 0.7, 0.35, "#ffffff"),
         "screen": core.material("screen", "#101418", "#7dffe0", 0.4, 0.1, 0.35),
         "cloth": core.material("cloth", "#f3e6c8", metallic=0.0, roughness=0.8),
         "crate": core.material("crate", "#a56b3c", metallic=0.0, roughness=0.8),
@@ -436,12 +537,13 @@ def build_village():
         "awning.3": core.material("awning.3", "#f4a261", metallic=0.0, roughness=0.65),
         "awning.4": core.material("awning.4", "#8ecae6", metallic=0.0, roughness=0.65),
         "awning.5": core.material("awning.5", "#e07a9a", metallic=0.0, roughness=0.65),
-        "pitch": core.material("pitch", "#3f8f45", metallic=0.0, roughness=0.85),
+        "pitch": textured("pitch", os.path.join(TEX, "grass-cc0.jpg"), 0.0, 0.9, 0.7, "#ffffff"),
         "seat": core.material("seat", "#d8692a", metallic=0.05, roughness=0.55),
         "trim": core.material("trim", "#2a2e33", metallic=0.4, roughness=0.45),
-        "concrete": core.material("concrete", "#c9c3b8", metallic=0.04, roughness=0.72),
+        "concrete": textured("concrete", os.path.join(TEX, "concrete-albedo.jpg"), 0.02, 0.8, 0.3, "#ffffff"),
+        "roof": textured("roof", os.path.join(TEX, "roof-albedo.jpg"), 0.02, 0.66, 0.4, "#ffffff"),
         "cyan": core.material("cyan", "#12343a", "#7dfff0", 1.4, 0.15, 0.28),
-        "brick": core.material("brick", "#8c4a3a", metallic=0.02, roughness=0.78),
+        "brick": textured("brick", os.path.join(TEX, "brick-albedo.jpg"), 0.0, 0.78, 0.45, "#ffffff"),
         "molten": core.material("molten", "#ff6a1a", "#ffb347", 2.4, 0.2, 0.35),
         "smoke": core.material("smoke", "#d9d3cc", metallic=0.0, roughness=0.9),
         "hazard": core.material("hazard", "#f2b227", metallic=0.05, roughness=0.5),
