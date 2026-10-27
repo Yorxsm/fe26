@@ -91,7 +91,12 @@ pub fn earned_trait(id: &str) -> Option<&'static EarnedTrait> {
 }
 
 /// `(progress, goal, unlocked)`. Progress is clamped to the goal.
-pub fn earned_progress(spec: &EarnedTrait, wins: u32, heists: u32, season_titles: u32) -> (u32, u32, bool) {
+pub fn earned_progress(
+    spec: &EarnedTrait,
+    wins: u32,
+    heists: u32,
+    season_titles: u32,
+) -> (u32, u32, bool) {
     if spec.season_title {
         let progress = u32::from(season_titles > 0);
         return (progress, 1, season_titles > 0);
@@ -99,7 +104,11 @@ pub fn earned_progress(spec: &EarnedTrait, wins: u32, heists: u32, season_titles
     if spec.heists > 0 {
         return (heists.min(spec.heists), spec.heists, heists >= spec.heists);
     }
-    (wins.min(spec.wins), spec.wins, spec.wins > 0 && wins >= spec.wins)
+    (
+        wins.min(spec.wins),
+        spec.wins,
+        spec.wins > 0 && wins >= spec.wins,
+    )
 }
 
 /// `None` when every index is in the catalog.
@@ -183,17 +192,23 @@ mod tests {
     fn earned_traits_are_outside_the_mint_catalog() {
         assert!(earned_trait("gold-leaf").is_some());
         assert!(earned_trait("nope").is_none());
-        let (progress, goal, unlocked) = earned_progress(earned_trait("gold-leaf").unwrap(), 7, 0, 0);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("gold-leaf").unwrap(), 7, 0, 0);
         assert_eq!((progress, goal, unlocked), (7, 10, false));
-        let (progress, goal, unlocked) = earned_progress(earned_trait("gold-leaf").unwrap(), 10, 0, 0);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("gold-leaf").unwrap(), 10, 0, 0);
         assert_eq!((progress, goal, unlocked), (10, 10, true));
-        let (progress, goal, unlocked) = earned_progress(earned_trait("cracked-vault").unwrap(), 99, 4, 0);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("cracked-vault").unwrap(), 99, 4, 0);
         assert_eq!((progress, goal, unlocked), (4, 5, false));
-        let (progress, goal, unlocked) = earned_progress(earned_trait("season-crown").unwrap(), 100, 100, 0);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("season-crown").unwrap(), 100, 100, 0);
         assert_eq!((progress, goal, unlocked), (0, 1, false));
-        let (progress, goal, unlocked) = earned_progress(earned_trait("season-crown").unwrap(), 0, 0, 1);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("season-crown").unwrap(), 0, 0, 1);
         assert_eq!((progress, goal, unlocked), (1, 1, true));
-        let (progress, goal, unlocked) = earned_progress(earned_trait("molten-trail").unwrap(), 25, 0, 0);
+        let (progress, goal, unlocked) =
+            earned_progress(earned_trait("molten-trail").unwrap(), 25, 0, 0);
         assert_eq!((progress, goal, unlocked), (25, 25, true));
     }
 
