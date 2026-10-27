@@ -28,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/">Map</a>
               <a href="/village">Village</a>
               <a href="/create">Create</a>
+              <a href="/forge">Forge</a>
               <a href="/agents/demo.registry.testnet">Agents</a>
             </nav>
           </header>

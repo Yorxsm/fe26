@@ -224,7 +224,8 @@ export function CityGate() {
               )}
             </div>
             <p className="meta" role="status">
-              {note}
+              {note}{" "}
+              {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
             </p>
           </div>
         )}

@@ -6,6 +6,7 @@ import { AgentLookup } from "@/components/AgentLookup";
 import { SignPanel } from "@/components/SignPanel";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
+import { defaultSkin } from "@/lib/skin";
 import { yoctoToNear, type AgentCard } from "@/lib/protocol";
 import { PLACEHOLDER_CONTRACTS } from "@/lib/wallet";
 
@@ -52,6 +53,13 @@ export default function AgentPage() {
             Pot cap {yoctoToNear(agent.platform_caps.max_pot_yocto)} NEAR · {agent.platform_caps.max_players} players
           </p>
           <p>{agent.note}</p>
+          <h3>Skin</h3>
+          <p>
+            Default look, free, from the account id. Body {defaultSkin(agent.account_id).body}, face {defaultSkin(agent.account_id).face}, role{" "}
+            {defaultSkin(agent.account_id).role}, hat {defaultSkin(agent.account_id).hat}, accessory {defaultSkin(agent.account_id).accessory}, trail{" "}
+            {defaultSkin(agent.account_id).trail}.
+          </p>
+          <p className="meta">No minted skin is read here. A mint would be cosmetic only and would show beside this default.</p>
         </article>
       )}
       <SignPanel

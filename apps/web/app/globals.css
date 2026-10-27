@@ -267,6 +267,13 @@ pre {
 .audio-hud { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; }
 .audio-hud label { display: flex; align-items: center; gap: var(--space-xs); font-size: 0.85rem; }
 .audio-hud input[type="range"] { width: 7rem; }
+.forge-layout { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1.2fr); gap: var(--space-md); align-items: start; }
+.forge-canvas { width: 100%; height: 28rem; display: block; background: var(--background); border: 1px solid var(--line); }
+.trait-row { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.trait-row button[aria-pressed="true"] { outline: 2px solid var(--focus); }
+@media (max-width: 800px) {
+  .forge-layout { grid-template-columns: 1fr; }
+}
 .title-screen, .cutscene, .vantage, .dispatch {
   position: absolute;
   inset: 0;

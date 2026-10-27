@@ -132,6 +132,6 @@ cargo test --manifest-path contracts/sandbox-tests/Cargo.toml --features sandbox
 - Sandbox tests compile and are ignored on Rust 1.93. near-workspaces 0.20.1's sandbox 2.9.0 omits `is_slashed`. near-workspaces 0.24 needs Rust 1.95. The mock VM does run the spend revert.
 - `docs/adapters/uprail.md` is a description of paying an X handle later. There is no Uprail client.
 - NEP-145 storage max equals the minimum (0.00125 NEAR), so withdrawable balance is zero. Settlement auto-registers payout accounts because the referee holds the pot.
-- Skin Forge is a cosmetic room. Oracle Plaza, Launch Pier, and Card Club are rooms with no game behind them.
+- Skin Forge is a cosmetic room. `/forge` previews a look and does not submit a mint. Oracle Plaza, Launch Pier, and Card Club are rooms with no game behind them.
 - One owner sets caps. One moderator delists. See `docs/THREAT_MODEL.md`.
 - The browser wallet path is MyNearWallet on testnet. The CLI dry-run remains the path that needs no wallet.
