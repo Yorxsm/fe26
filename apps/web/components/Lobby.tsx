@@ -49,12 +49,12 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
               <h2>
                 <a href={`/games/${game.id}`}>{game.id}</a>
               </h2>
-              <span className="meta">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</span>
+              <span className="num">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</span>
             </div>
             <p className="meta">
               {game.rules.template_id} · {game.rules.max_players} seats · {game.rules.round_count} rounds · {game.creator}
             </p>
-            <p className="meta">pin {game.game_md_hash}</p>
+            <p className="num">pin {game.game_md_hash}</p>
             <TrustMarks trust={game.trust} templateId={game.rules.template_id} />
           </article>
         ))}

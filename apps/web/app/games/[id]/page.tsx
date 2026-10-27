@@ -81,7 +81,7 @@ export default function GamePage() {
       <section className="card">
         <div className="row">
           <h2>Pot</h2>
-          <strong>{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</strong>
+          <strong className="num">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</strong>
         </div>
         <div className="meter">
           <div className="meter-track" aria-hidden="true">
@@ -102,9 +102,9 @@ export default function GamePage() {
         <div className="seats">
           {seats.map((seat) => (
             <article className={seat.revoked ? "seat seat-revoked" : "seat"} key={seat.account}>
-              <h2>{seat.account}</h2>
+              <h2 className="addr">{seat.account}</h2>
               <p>{trading ? "waiting on the tape" : `last action ${seat.action}`}</p>
-              <p className="meta">
+              <p className="num">
                 {seat.points} points · spent {seat.spent} · {seat.revoked ? "revoked" : "active"}
               </p>
             </article>

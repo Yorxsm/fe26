@@ -16,8 +16,9 @@
   --ok-surface: #123028;
   --ok-ink: #b6f0d2;
   --line: #3a424d;
-  --display: "Fraunces", "Times New Roman", serif;
-  --body: "IBM Plex Mono", ui-monospace, monospace;
+  --display: var(--font-display), "Arial Narrow", sans-serif;
+  --body: var(--font-body), "Segoe UI", sans-serif;
+  --mono: var(--font-mono), ui-monospace, monospace;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
@@ -93,11 +94,16 @@ a:hover { color: var(--ink); }
 nav { display: flex; gap: var(--space-md); flex-wrap: wrap; }
 nav a { color: var(--ink-secondary); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
 
-h1, h2 {
+h1, h2, h3 {
   font-family: var(--display);
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.15;
   margin: 0 0 var(--space-sm);
+}
+
+.num, .addr, .leaderboard, .cine-board, code, input:not([type="range"]) {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 h1 { font-size: 2.4rem; }

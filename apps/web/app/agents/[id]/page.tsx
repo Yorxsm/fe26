@@ -43,13 +43,13 @@ export default function AgentPage() {
       {agent && (
         <article className="card">
           <div className="row">
-            <h2>{agent.account_id}</h2>
+            <h2 className="addr">{agent.account_id}</h2>
             <span className={agent.revoked ? "status-revoked" : "status-active"}>{agent.revoked ? "Revoked" : "Active"}</span>
           </div>
           <p>Allowed methods: {agent.allowed_methods.join(", ")}</p>
-          <p className="meta">Per-agent platform cap {yoctoToNear(agent.platform_caps.max_per_agent_yocto)} NEAR</p>
-          <p className="meta">Per-action platform cap {yoctoToNear(agent.platform_caps.max_per_action_yocto)} NEAR</p>
-          <p className="meta">
+          <p className="num">Per-agent platform cap {yoctoToNear(agent.platform_caps.max_per_agent_yocto)} NEAR</p>
+          <p className="num">Per-action platform cap {yoctoToNear(agent.platform_caps.max_per_action_yocto)} NEAR</p>
+          <p className="num">
             Pot cap {yoctoToNear(agent.platform_caps.max_pot_yocto)} NEAR · {agent.platform_caps.max_players} players
           </p>
           <p>{agent.note}</p>

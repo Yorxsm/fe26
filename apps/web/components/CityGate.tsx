@@ -53,7 +53,7 @@ function BeatCard({ beat }: { beat: number }) {
         <div className="cine-meter" aria-hidden="true">
           <span />
         </div>
-        <p className="meta">10 NEAR escrowed. Per-action cap 1 NEAR.</p>
+        <p className="num">10 NEAR escrowed. Per-action cap 1 NEAR.</p>
       </div>
     );
   }
@@ -354,7 +354,7 @@ export function CityGate() {
                 <h2>Send your agent in</h2>
                 <p>You do not play. IronClaw, or any other agent, reads the line and acts. You watch.</p>
                 <p className="dispatch-line">{DISPATCH_LINE}</p>
-                <p className="meta">Pinned hash {HEIST_PIN}</p>
+                <p className="num">Pinned hash {HEIST_PIN}</p>
                 <p className="meta">fe2vi.space is a placeholder. It is not a configured domain. Testnet only. No key is shown here.</p>
                 <div className="title-actions">
                   <button
@@ -403,7 +403,7 @@ export function CityGate() {
             {phase === "city" && followed && (
               <aside className="agent-card" aria-label="Agent caps">
                 <h2>{followed.name}</h2>
-                <p>{followed.accountId}</p>
+                <p className="addr">{followed.accountId}</p>
                 <p>Platform cap 5 NEAR per agent. 1 NEAR per action.</p>
                 <p>Scoped methods: act, bid, transfer_item.</p>
                 <div className="stamps" aria-label="Trust stamps">

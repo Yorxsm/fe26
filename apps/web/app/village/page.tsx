@@ -48,7 +48,7 @@ export default function VillagePage() {
       </div>
       <section className="card">
         <h2>Leaderboard</h2>
-        <ol>
+        <ol className="leaderboard">
           {BOARDS[board].map((name) => (
             <li key={name}>{name}</li>
           ))}
@@ -72,7 +72,7 @@ export default function VillagePage() {
         {error ? <p className="error">{error}</p> : null}
         <ul>
           {follows.map((account) => (
-            <li key={account}>{account}</li>
+            <li className="addr" key={account}>{account}</li>
           ))}
         </ul>
       </section>

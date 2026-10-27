@@ -1,6 +1,7 @@
 "use client";
 
-import { Html, OrbitControls, PerformanceMonitor, useGLTF } from "@react-three/drei";
+import { Billboard, Html, OrbitControls, PerformanceMonitor, Text, useGLTF } from "@react-three/drei";
+import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { BloomEffect, EffectComposer, EffectPass, RenderPass } from "postprocessing";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -184,17 +185,22 @@ function Station({
         }}
       />
       {DISTRICTS.map((district) => (
-        <Html
-          key={district.id}
-          center
-          sprite
-          distanceFactor={16}
-          position={[district.x, 2.8, district.z]}
-          zIndexRange={[4, 0]}
-          style={{ pointerEvents: "none" }}
-        >
-          <div className="station-tag">{district.station}</div>
-        </Html>
+        <Billboard key={district.id} position={[district.x, 2.85, district.z]}>
+          <mesh position={[0, 0, -0.04]}>
+            <planeGeometry args={[Math.max(1.4, district.station.length * 0.28), 0.5]} />
+            <meshStandardMaterial color="#2a241c" roughness={0.85} />
+          </mesh>
+          <Text
+            font={DISPLAY_FONT}
+            fontSize={0.24}
+            color="#f3e6c8"
+            anchorX="center"
+            anchorY="middle"
+            letterSpacing={0.04}
+          >
+            {district.station.toUpperCase()}
+          </Text>
+        </Billboard>
       ))}
     </group>
   );

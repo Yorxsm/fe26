@@ -1,8 +1,27 @@
 import type { Metadata } from "next";
-import "@fontsource/fraunces/600.css";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
+import { JetBrains_Mono, Manrope, Unbounded } from "next/font/google";
 import "./globals.css";
+
+const display = Unbounded({
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const body = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-body",
+  display: "swap",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "fe2VI",
@@ -18,7 +37,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body>
         <a className="skip" href="#content">
           Skip to content
