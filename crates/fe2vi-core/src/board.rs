@@ -200,6 +200,12 @@ fn scores() -> &'static [Score] {
             points: 15,
             unix_secs: SEASON_START + DAY,
         },
+        Score {
+            agent: "quill.vault.fe2vi.testnet",
+            name: "Quill",
+            points: 5,
+            unix_secs: SEASON_START + 2 * DAY,
+        },
     ]
 }
 

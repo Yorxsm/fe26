@@ -181,7 +181,7 @@ export const CUTSCENE_SHOTS: CameraShot[] = [
   INTERIOR_SHOTS["trading-village"],
   INTERIOR_SHOTS["war-room"],
   INTERIOR_SHOTS["cup-stadium"],
-  INTERIOR_SHOTS["skin-forge"],
+  { eye: [-38.1, 1.85, -19.35], aim: [-38, 1.55, -28.2], fov: 44 },
 ];
 
 export type CastPose = { index: number; x: number; z: number; rot: number; speed: number };
@@ -198,17 +198,17 @@ export const CUTSCENE_CAST: CastPose[][] = [
     { index: 0, x: -41.0, z: 18.4, rot: Math.PI, speed: 0 },
   ],
   [
-    { index: 2, x: 44.2, z: 13.6, rot: Math.PI, speed: 0 },
-    { index: 4, x: 47.4, z: 16.2, rot: Math.PI, speed: 0.5 },
+    { index: 2, x: 44.2, z: 12.2, rot: Math.PI, speed: 0 },
+    { index: 4, x: 49.2, z: 11.4, rot: Math.PI, speed: 0.5 },
   ],
   [
     { index: 3, x: 12.0, z: 38.4, rot: Math.PI, speed: 0.4 },
     { index: 5, x: 13.5, z: 41.0, rot: Math.PI, speed: 0 },
   ],
-  [{ index: 2, x: -8, z: -41.6, rot: 0, speed: 0 }],
+  [{ index: 2, x: -11.4, z: -45.2, rot: 0.2, speed: 0 }],
   [
-    { index: 6, x: -36.4, z: -22.6, rot: 0, speed: 0 },
-    { index: 7, x: -39.4, z: -21.2, rot: 0.6, speed: 0 },
+    { index: 6, x: -41.8, z: -26.6, rot: 0.35, speed: 0 },
+    { index: 7, x: -34.4, z: -27.0, rot: -0.35, speed: 0 },
   ],
 ];
 

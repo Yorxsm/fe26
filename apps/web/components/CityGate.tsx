@@ -248,13 +248,13 @@ export function CityGate() {
         </div>
         <div className="city-stage">
           <div className="city-frame">
-            {phase === "cutscene" && (
+            {phase === "cutscene" && beat === 0 && (
               <div className="cine-sound">
                 <AudioHud live={soundLive} />
               </div>
             )}
             {(phase === "vantage" || phase === "city") && (
-            <header className="hud-chrome">
+            <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
               <div className="hud-tl ui-in">
                 <a className="hud-brand" href="/">
                   <Logo variant="nav" />
@@ -269,8 +269,8 @@ export function CityGate() {
                 </nav>
               </div>
               <div className="hud-tr ui-in">
-                <CountdownChip />
-                <EventBanner room="map" />
+                <CountdownChip compact={frameMode === "in" && Boolean(focusId)} />
+                <EventBanner room="map" compact={frameMode === "in" && Boolean(focusId)} />
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
                   <QuestLog

@@ -25,7 +25,7 @@ function useNow() {
   return now;
 }
 
-export function CountdownChip() {
+export function CountdownChip({ compact = false }: { compact?: boolean }) {
   const now = useNow();
   const slot = nextHeist(now);
   const live = heistLive(now);
@@ -33,15 +33,23 @@ export function CountdownChip() {
   return (
     <span className="chip">
       <Clock size={14} aria-hidden="true" />
-      {label} · {slot.kind} · {localRange(slot.start, slot.end)}
+      {compact ? label : `${label} · ${slot.kind} · ${localRange(slot.start, slot.end)}`}
     </span>
   );
 }
 
-export function EventBanner({ room }: { room?: string }) {
+export function EventBanner({ room, compact = false }: { room?: string; compact?: boolean }) {
   const now = useNow();
   if (!exampleEventLive(now)) return null;
   if (room && room !== EXAMPLE_EVENT.room && room !== "map") return null;
+  if (compact) {
+    return (
+      <span className="chip">
+        <Trophy size={14} aria-hidden="true" />
+        Event live
+      </span>
+    );
+  }
   return (
     <p className="banner">
       Event live · {EXAMPLE_EVENT.partner} · example only · {EXAMPLE_EVENT.roomLabel} · {EXAMPLE_EVENT.prize}

@@ -1495,3 +1495,13 @@ button.pronounce:focus-visible {
   .game-root:has(.vantage) .mobile-gate,
   .game-root:has(.dispatch) .mobile-gate { display: none; }
 }
+
+.room-frame .quest-log,
+.room-frame .audio-hud,
+.room-frame .banner,
+.room-frame .hud-note,
+.room-frame .hud-bc,
+.room-frame .hud-br,
+.room-frame .hud-bl,
+.room-frame .hud-nav { display: none; }
+.room-frame .hud-tr { width: auto; }

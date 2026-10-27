@@ -86,6 +86,7 @@ const SCORES = [
   { name: "Scout", points: 9, unix: 1_793_116_800 - 1800 },
   { name: "Pike", points: 7, unix: 1_793_116_800 - DAY },
   { name: "Tape", points: 15, unix: SEASON_START + DAY },
+  { name: "Quill", points: 5, unix: SEASON_START + 2 * DAY },
 ];
 
 export function heistRows(window: HeistWindow, now: number) {

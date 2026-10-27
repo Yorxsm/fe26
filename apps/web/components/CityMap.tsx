@@ -1111,7 +1111,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.22, luminanceThreshold: 0.48, luminanceSmoothing: 0.2, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.07, luminanceThreshold: 0.86, luminanceSmoothing: 0.18, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -1134,6 +1134,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
     if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
     camera.getWorldDirection(aim);
     const kind = shotKind.current;
+    gl.toneMappingExposure = kind === "interior" ? 0.85 : 1;
     const focusDistance = kind === "interior" ? 5.4 : kind === "hero" ? 26 : 48;
     grade.dof.target.copy(camera.position).addScaledVector(aim, focusDistance);
     grade.dof.bokehScale = kind === "overview" ? 0.015 : 0;
@@ -1783,23 +1784,23 @@ export default function CityMap({
       ))}
       <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
-        <pointLight key={`${district.id}-window`} position={[district.x, 5.4, district.z + 12.4]} color="#ff7a28" intensity={70} distance={18} decay={2} />
+        <pointLight key={`${district.id}-window`} position={[district.x, 5.4, district.z + 12.4]} color="#ff7a28" intensity={22} distance={18} decay={2} />
       ))}
       <mesh position={[12, 16.2, 40]}>
         <sphereGeometry args={[0.32, 10, 8]} />
-        <meshStandardMaterial color="#ff3030" emissive="#ff2020" emissiveIntensity={3.2} />
+        <meshStandardMaterial color="#8a3030" emissive="#c43030" emissiveIntensity={0.45} />
       </mesh>
       <pointLight position={[12, 15.4, 40]} color="#ff4040" intensity={5} distance={16} decay={2} />
       <mesh position={[-36.2, 3.4, -16.5]}>
         <boxGeometry args={[1.6, 1.2, 0.18]} />
-        <meshStandardMaterial color="#ff6a1a" emissive="#ff5a12" emissiveIntensity={2.4} />
+        <meshStandardMaterial color="#a85a32" emissive="#c94a1a" emissiveIntensity={0.2} />
       </mesh>
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <pointLight position={[-42, 2.4, 18]} intensity={80} color="#ffb060" distance={14} decay={2} />
-      <pointLight position={[46, 2.4, 14]} intensity={70} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[12, 2.4, 40]} intensity={80} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[-38, 2.4, -24]} intensity={70} color="#ff6a1a" distance={14} decay={2} />
-      <pointLight position={[-8, 3.2, -30]} intensity={90} color="#ff9a4a" distance={20} decay={2} />
+      <pointLight position={[-42, 2.4, 18]} intensity={12} color="#ffb060" distance={14} decay={2} />
+      <pointLight position={[46, 2.4, 14]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
+      <pointLight position={[12, 2.4, 40]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
+      <pointLight position={[-38, 2.4, -24]} intensity={10} color="#ff6a1a" distance={14} decay={2} />
+      <pointLight position={[-8, 3.2, -30]} intensity={12} color="#ff9a4a" distance={20} decay={2} />
       {lineup ? (
         <mesh position={[0, 4.2, -3.5]}>
           <planeGeometry args={[52, 16]} />
