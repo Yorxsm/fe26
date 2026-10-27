@@ -94,13 +94,12 @@ function CloudSea() {
     });
   });
   const puffs = [
-    [-40, -3.2, -20, 46, 18],
-    [-10, -4.4, 10, 54, 20],
-    [24, -2.6, -30, 40, 16],
-    [50, -5.5, 6, 60, 22],
-    [-55, -6.2, 24, 50, 18],
-    [8, -7.4, 36, 70, 24],
-    [-28, -3.8, 40, 36, 14],
+    [-80, 55, -30, 90, 28],
+    [-20, 70, 20, 110, 32],
+    [40, 48, -50, 80, 24],
+    [90, 62, 10, 100, 30],
+    [-90, 40, 40, 70, 22],
+    [10, 80, 70, 120, 34],
   ] as const;
   return (
     <group ref={group}>
@@ -114,24 +113,33 @@ function CloudSea() {
   );
 }
 
-function Islands() {
-  const islands = [
-    [-70, 6, -40, 10, 16],
-    [80, 2, -55, 8, 12],
-    [-90, 10, 30, 7, 18],
-    [60, 14, 70, 6, 14],
-    [-40, 4, 95, 9, 11],
-    [100, 8, 10, 5, 20],
-  ] as const;
+function GrassBlades() {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const blade = mesh.current;
+    if (!blade) return;
+    const dummy = new THREE.Object3D();
+    for (let index = 0; index < 700; index += 1) {
+      const angle = index * 2.399;
+      const radius = 4 + (index % 28);
+      dummy.position.set(Math.cos(angle) * radius, 0.25, Math.sin(angle) * radius);
+      dummy.rotation.y = angle;
+      dummy.scale.set(0.12, 0.35 + (index % 5) * 0.08, 0.12);
+      dummy.updateMatrix();
+      blade.setMatrixAt(index, dummy.matrix);
+    }
+    blade.instanceMatrix.needsUpdate = true;
+  }, []);
+  useFrame(({ clock }) => {
+    const blade = mesh.current;
+    if (!blade) return;
+    blade.rotation.z = Math.sin(clock.elapsedTime * 0.6) * 0.04;
+  });
   return (
-    <group>
-      {islands.map(([x, y, z, radius, height], index) => (
-        <mesh key={index} position={[x, y, z]} castShadow>
-          <cylinderGeometry args={[radius * 0.45, radius, height, 6]} />
-          <meshStandardMaterial color={index % 2 === 0 ? "#c7b4dc" : "#f0c7a4"} roughness={0.85} metalness={0.05} />
-        </mesh>
-      ))}
-    </group>
+    <instancedMesh ref={mesh} args={[undefined, undefined, 700]}>
+      <coneGeometry args={[0.08, 0.7, 3]} />
+      <meshStandardMaterial color="#3f7a38" roughness={0.9} />
+    </instancedMesh>
   );
 }
 
@@ -167,26 +175,26 @@ export function World() {
       <Sky />
       <EnvironmentLight />
       <CloudSea />
-      <Islands />
+      <GrassBlades />
       <SunBeams />
       <hemisphereLight args={["#ffe0c4", "#b9a3e8", 0.32]} />
       <ambientLight intensity={0.16} />
       <directionalLight
-        position={[28, 42, 14]}
-        intensity={1.7}
+        position={[60, 80, 30]}
+        intensity={1.8}
         color="#ffd2a8"
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.04}
-        shadow-camera-near={2}
-        shadow-camera-far={90}
-        shadow-camera-left={-36}
-        shadow-camera-right={36}
-        shadow-camera-top={36}
-        shadow-camera-bottom={-36}
+        shadow-bias={-0.0008}
+        shadow-normalBias={0.08}
+        shadow-camera-near={10}
+        shadow-camera-far={280}
+        shadow-camera-left={-90}
+        shadow-camera-right={90}
+        shadow-camera-top={90}
+        shadow-camera-bottom={-90}
       />
-      <fog attach="fog" args={["#f3c7a4", 95, 260]} />
+      <fog attach="fog" args={["#f6d7b8", 120, 420]} />
     </>
   );
 }

@@ -20,7 +20,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Heist Night. Timed vault rounds inside platform caps.",
     status: "live",
     href: "/games/heist-night-template",
-    station: "Vault Room",
+    station: "Vault Bank",
     color: "#ff6b4a",
   },
   {
@@ -29,7 +29,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Trading Cup. A short public tape.",
     status: "live",
     href: "/games/trading-cup-template",
-    station: "Stadium Room",
+    station: "Trading Cup Stadium",
     color: "#ffd166",
   },
   {
@@ -38,7 +38,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Open tape, rolling boards, and follow.",
     status: "live",
     href: "/village",
-    station: "Trading Market 24/7 Open",
+    station: "Trading Market 24/7",
     color: "#2ec4b6",
   },
   {
@@ -90,14 +90,14 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
 const ROOM_XZ: Record<string, [number, number]> = {
-  "vault-quarter": [-12, 8],
-  "cup-stadium": [-8, -12],
-  "trading-village": [12, -8],
-  "war-room": [8, 12],
-  "skin-forge": [0, 0],
-  "launch-pier": [1.6, -18.4],
-  "card-club": [-1.6, 18.4],
-  "oracle-plaza": [-18.4, -1.6],
+  "vault-quarter": [-42, 18],
+  "cup-stadium": [-8, -42],
+  "trading-village": [46, 14],
+  "war-room": [12, 40],
+  "skin-forge": [-38, -24],
+  "launch-pier": [50, -28],
+  "card-club": [-54, -2],
+  "oracle-plaza": [20, -10],
 };
 
 export const DISTRICTS: District[] = LAYOUT.map((district) => {

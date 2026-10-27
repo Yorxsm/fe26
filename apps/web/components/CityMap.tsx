@@ -38,7 +38,7 @@ const ROOM_PREFIX: Record<string, string> = {
 
 const OVERVIEW_PITCH = (50 * Math.PI) / 180;
 const OVERVIEW_YAW = Math.PI / 4;
-const OVERVIEW_DIST = 118;
+const OVERVIEW_DIST = 200;
 const overviewEye = new THREE.Vector3(
   Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
   Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
@@ -47,11 +47,11 @@ const overviewEye = new THREE.Vector3(
 const overviewAim = new THREE.Vector3(0, 1.2, 0);
 
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: [-6, 5.2, 14], target: [-12, 1.2, 8] },
-  { position: [18, 5.4, -2], target: [12, 1.2, -8] },
-  { position: [14, 5.2, 18], target: [8, 1.2, 12] },
-  { position: [7, 8, 9], target: [0, 1.2, 0] },
-  { position: [-2, 7, -18], target: [-8, 1.3, -12] },
+  { position: [-32, 10, 28], target: [-42, 2, 18] },
+  { position: [56, 10, 24], target: [46, 2, 14] },
+  { position: [22, 12, 52], target: [12, 2, 40] },
+  { position: [-28, 14, -12], target: [-38, 2, -24] },
+  { position: [4, 16, -28], target: [-8, 3, -42] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
@@ -235,7 +235,7 @@ function Station({ onPick }: { onPick: (district: District) => void }) {
         }}
       />
       {DISTRICTS.map((district) => (
-        <Billboard key={district.id} position={[district.x, 3.15, district.z]}>
+        <Billboard key={district.id} position={[district.x, 6, district.z]}>
           <mesh position={[0, 0, -0.05]}>
             <planeGeometry args={[Math.max(1.8, district.station.length * 0.2), 0.46]} />
             <meshStandardMaterial color="#2a241c" roughness={0.8} />
@@ -519,7 +519,7 @@ export default function CityMap({
       className="city-canvas"
       dpr={dpr}
       shadows
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 25, near: 0.1, far: 700 }}
+      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 32, near: 0.1, far: 900 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -540,11 +540,6 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <pointLight position={[-12, 3.4, 8]} intensity={18} color="#ffb060" distance={16} decay={2} />
-      <pointLight position={[12, 3.2, -8]} intensity={14} color="#ff7ad9" distance={16} decay={2} />
-      <spotLight position={[-8, 7.5, -12]} angle={0.6} penumbra={0.5} intensity={30} color="#fff1c9" distance={18} decay={2} />
-      <pointLight position={[8, 3.1, 12]} intensity={16} color="#2fe6e6" distance={16} decay={2} />
-      <pointLight position={[0, 2.6, 0]} intensity={12} color="#ff6a1a" distance={12} decay={2} />
       <Station onPick={onPick} />
       {CITY_AGENTS.map((agent, index) => (
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
@@ -559,7 +554,7 @@ export default function CityMap({
         minPolarAngle={0.35}
         maxPolarAngle={1.15}
         minDistance={8}
-        maxDistance={180}
+        maxDistance={360}
         target={[0, 1.2, 0]}
       />
     </Canvas>

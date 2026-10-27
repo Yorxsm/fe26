@@ -38,6 +38,16 @@ def grate():
     image.save(os.path.join(OUT, "grate-albedo.png"))
 
 
+def grass():
+    image = Image.new("RGB", (512, 512), (78, 128, 62))
+    pixels = image.load()
+    for y in range(512):
+        for x in range(512):
+            n = ((x * 17 + y * 31) ^ (x * y)) & 255
+            pixels[x, y] = (58 + n // 8, 112 + (n % 40), 48 + (n % 24))
+    image.save(os.path.join(OUT, "grass-albedo.png"))
+
+
 def cloud():
     image = Image.new("RGBA", (768, 384), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -59,5 +69,6 @@ if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     steel()
     grate()
+    grass()
     cloud()
     print(OUT)

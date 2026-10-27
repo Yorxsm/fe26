@@ -1,117 +1,117 @@
 {
   "units": "gltf-y-up-meters",
-  "artStep": 5,
+  "artStep": 2,
   "rooms": [
     {
       "id": "vault-quarter",
-      "name": "Vault",
+      "name": "Vault Bank",
       "position": [
-        -12.0,
+        -42.0,
         0,
-        8.0
+        18.0
       ],
       "size": [
-        11.2,
-        2.45,
-        11.2
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "cup-stadium",
-      "name": "Stadium",
+      "name": "Trading Cup Stadium",
       "position": [
         -8.0,
         0,
-        -12.0
+        -42.0
       ],
       "size": [
-        11.2,
-        2.45,
-        11.2
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "trading-village",
       "name": "Trading Market",
       "position": [
-        12.0,
+        46.0,
         0,
-        -8.0
+        14.0
       ],
       "size": [
-        11.2,
-        2.45,
-        11.2
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "war-room",
-      "name": "War Room",
+      "name": "Hacker War Room",
       "position": [
-        8.0,
+        12.0,
         0,
-        12.0
+        40.0
       ],
       "size": [
-        11.2,
-        2.45,
-        11.2
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "skin-forge",
       "name": "Skin Forge",
       "position": [
-        0.0,
+        -38.0,
         0,
-        0.0
+        -24.0
       ],
       "size": [
-        8.0,
-        2.45,
-        8.0
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "launch-pier",
-      "name": "Launch Pier",
+      "name": "Coming Soon",
       "position": [
-        1.6,
+        50.0,
         0,
-        -18.4
+        -28.0
       ],
       "size": [
-        7.4,
-        2.45,
-        7.4
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "card-club",
-      "name": "Card Club",
+      "name": "Coming Soon",
       "position": [
-        -1.6,
+        -54.0,
         0,
-        18.4
+        -2.0
       ],
       "size": [
-        7.4,
-        2.45,
-        7.4
+        22,
+        0.2,
+        22
       ]
     },
     {
       "id": "oracle-plaza",
-      "name": "Oracle Plaza",
+      "name": "Coming Soon",
       "position": [
-        -18.4,
+        20.0,
         0,
-        -1.6
+        -10.0
       ],
       "size": [
-        7.4,
-        2.45,
-        7.4
+        22,
+        0.2,
+        22
       ]
     }
   ]
