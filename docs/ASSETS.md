@@ -19,6 +19,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 | `apps/web/public/models/station.glb` | 3930396 | Village with textured buildings, asphalt roads, plazas, and full-size trees |
 | `apps/web/public/models/agent.glb` | 62692 | Ingot with arms, blinking eyes, stubby legs, a hexagonal core, and the catalog parts below |
 | `apps/web/public/models/nature.glb` | 230712 | Quaternius pines, common trees, birches, bushes, flowers, rocks, grass, and a plant. Instanced in the village. Cone trees in `station.glb` are hidden. |
+| `apps/web/public/models/kits.glb` | 214796 | Kenney City Kit (Commercial) 2.1 buildings and awnings, placed on the arena pads. The block shells in `station.glb` are hidden. |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 
 Both GLBs use `EXT_meshopt_compression` (plus `KHR_mesh_quantization` and `KHR_materials_emissive_strength`). Draco is not used: this Blender build has no Draco encoder, and a CDN decoder is the wrong trade. The scene loads them with three's `MeshoptDecoder`.
@@ -60,7 +61,9 @@ The hip kit is a side satchel. The body stays a boxy ingot.
 
 Sound is synthesized in `apps/web/lib/audio.ts`. There is no sample file. A district bed is noise plus a sine, placed on a panner at that room, so the room near the camera is louder. The title theme is a short sine line. Clicks, hovers, and the heist, breach, trade, rank, quest, and forge stings are oscillators. Playback starts from ENTER AS SPECTATOR, or from Unmute if the spectator skipped. Mute, volume, and Quiet are stored in `localStorage` under `fe2vi.audio.v1`. Quiet and reduced motion duck the stings.
 
-Kenney's CC0 kits stay vendored and unused as characters, so the silhouette stays the ingot.
+`kits.glb` is assembled by `tools/blender/import_kits.py` from [City Kit (Commercial)](https://kenney.nl/assets/city-kit-commercial) 2.1 by Kenney, [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Pieces: building-j (bank), building-n and detail-awning (market), building-skyscraper-d (war room), building-e (forge), low-detail-building-wide-a/b (stadium stands), low-detail-building-a/b/c (construction plots). Credit: Kenney (www.kenney.nl).
+
+Kenney characters stay unused, so the agents stay original ingots.
 
 | File | Source | License |
 | --- | --- | --- |
@@ -70,7 +73,7 @@ Kenney's CC0 kits stay vendored and unused as characters, so the silhouette stay
 
 Kenney asks for a credit, and it is not a license requirement. Credit: Kenney (www.kenney.nl).
 
-No Quaternius file is in the tree.
+Quaternius nature is packed into `nature.glb`. The loose Kenney GLBs under `assets/cc0/` are the earlier unused copies (they have no colormap). The characters are not used as agents.
 
 ## Fonts
 

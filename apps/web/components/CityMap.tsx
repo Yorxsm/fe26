@@ -24,6 +24,7 @@ import { audio } from "@/lib/audio";
 import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, placeAgent, type CityAgent, type District } from "@/lib/city";
 import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
 
+useGLTF.preload("/models/kits.glb", false, true);
 useGLTF.preload("/models/station.glb", false, true);
 useGLTF.preload("/models/agent.glb", false, true);
 
@@ -148,6 +149,41 @@ function paintWarMap(ctx: CanvasRenderingContext2D, width: number, height: numbe
   }
 }
 
+function Kits({ onPick }: { onPick: (district: District) => void }) {
+  const gltf = useGLTF("/models/kits.glb", false, true);
+  const scene = useMemo(() => {
+    const cloned = gltf.scene.clone(true);
+    cloned.traverse((node) => {
+      const key = node.name.split(".")[1];
+      if (key && ROOM_PREFIX[key]) node.userData.district = ROOM_PREFIX[key];
+      const mesh = node as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+    });
+    return cloned;
+  }, [gltf.scene]);
+  return (
+    <primitive
+      object={scene}
+      onClick={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        let node: THREE.Object3D | null = event.object;
+        while (node) {
+          const id = node.userData.district as string | undefined;
+          if (id) {
+            const district = DISTRICTS.find((entry) => entry.id === id);
+            if (district) onPick(district);
+            return;
+          }
+          node = node.parent;
+        }
+      }}
+    />
+  );
+}
+
 function dress(root: THREE.Object3D, recolor?: string) {
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
@@ -173,6 +209,7 @@ function dress(root: THREE.Object3D, recolor?: string) {
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     if (mesh.name.startsWith("tree.")) mesh.visible = false;
+    if (ROOM_PREFIX[prefix] && !mesh.name.endsWith(".pad")) mesh.visible = false;
   });
   return root;
 }
@@ -591,6 +628,25 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <Nature />
+      <Kits onPick={onPick} />
+      {DISTRICTS.filter((district) => district.status === "soon").map((district) => (
+        <group key={district.id} position={[district.x, 5.2, district.z + 9]}>
+          <mesh>
+            <boxGeometry args={[8.5, 2.4, 0.25]} />
+            <meshStandardMaterial color="#f4e7c4" roughness={0.7} />
+          </mesh>
+          <Text
+            position={[0, 0, 0.16]}
+            font={DISPLAY_FONT}
+            fontSize={0.62}
+            color="#1c140c"
+            anchorX="center"
+            anchorY="middle"
+          >
+            COMING SOON
+          </Text>
+        </group>
+      ))}
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 5, 18]} intensity={25} color="#ffb060" distance={28} decay={2} />
       <pointLight position={[46, 4, 14]} intensity={18} color="#ffd2a8" distance={26} decay={2} />
