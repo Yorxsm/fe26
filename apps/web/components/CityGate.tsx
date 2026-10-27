@@ -121,6 +121,7 @@ export function CityGate() {
   const [frameMode, setFrameMode] = useState<"in" | "out">("in");
   const [lineup, setLineup] = useState(false);
   const [street, setStreet] = useState(false);
+  const [poster, setPoster] = useState<string | null>(null);
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [soundLive, setSoundLive] = useState(false);
@@ -134,15 +135,17 @@ export function CityGate() {
     const frame = new URLSearchParams(window.location.search).get("frame");
     if (frame === "street") {
       setStreet(true);
+      setPoster("street");
       setPhase("city");
       setNote("The street, after sunset.");
       return;
     }
-    if (frame === "lineup") {
-      setLineup(true);
+    if (frame === "lineup" || frame === "face" || frame === "trails" || frame === "skins" || frame === "walk") {
+      if (frame === "lineup") setLineup(true);
+      setPoster(frame);
       setPaused(true);
       setPhase("city");
-      setNote("Six roles, on the lawn.");
+      setNote(frame === "lineup" ? "Six roles, on the lawn." : frame);
       return;
     }
     if (frame) {
@@ -379,6 +382,7 @@ export function CityGate() {
                 frameMode={frameMode}
                 lineup={lineup}
                 street={street}
+                poster={poster}
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}

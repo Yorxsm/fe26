@@ -1,83 +1,161 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Dices, Hammer } from "lucide-react";
 import { SkinPreview } from "@/components/SkinPreview";
+import { Button, Panel } from "@/components/ui";
 import { audio } from "@/lib/audio";
-import { defaultSkin, type SkinTraits } from "@/lib/skin";
+import {
+  BACK_ITEM_NAMES,
+  BACK_ITEMS,
+  EMBLEM_NAMES,
+  EMBLEMS,
+  EYE_NAMES,
+  EYE_STYLES,
+  FACE_ITEM_NAMES,
+  FACE_ITEMS,
+  HEADWEAR,
+  HEADWEAR_NAMES,
+  PAINT_COLORS,
+  PAINT_NAMES,
+  PAINTS,
+  ROLE_NAMES,
+  ROLE_OUTFITS,
+  SCREEN_COLORS,
+  SCREEN_NAMES,
+  SCREENS,
+  TRAIL_NAMES,
+  TRAILS,
+  defaultSkin,
+  rarity,
+  type SkinTraits,
+} from "@/lib/skin";
+import { PLACEHOLDER_CONTRACTS, assertTestnet } from "@/lib/wallet";
 
 const PREVIEW_KEY = "fe2vi.skin-preview.v1";
 
-const ROLES = ["Safecracker", "Trader", "Hacker", "Auditor", "Builder", "Scout"];
-const HATS = ["None", "Beanie", "Brim", "Hood", "Hard hat", "Antenna"];
-const FACES = ["Core", "Bright", "Alarm", "Slit"];
-const EXTRAS = ["None", "Headset", "Magnifier", "Goggles", "Hip kit", "Bolt"];
-const TRAILS = ["None", "Sparks", "Ribbon", "Embers"];
-
-function Stepper({
-  label,
-  value,
-  names,
-  onChange,
-}: {
+const CATEGORIES: Array<{
+  key: keyof SkinTraits;
   label: string;
-  value: number;
   names: string[];
-  onChange: (next: number) => void;
-}) {
-  return (
-    <fieldset>
-      <legend>{label}</legend>
-      <div className="trait-row">
-        {names.map((name, index) => (
-          <button key={name} type="button" aria-pressed={value === index} onClick={() => onChange(index)}>
-            {name}
-          </button>
-        ))}
-      </div>
-    </fieldset>
-  );
+  count: number;
+  colors?: string[];
+}> = [
+  { key: "paint", label: "Paint", names: PAINT_NAMES, count: PAINTS, colors: PAINT_COLORS },
+  { key: "screen", label: "Screen", names: SCREEN_NAMES, count: SCREENS, colors: SCREEN_COLORS },
+  { key: "eyes", label: "Eyes", names: EYE_NAMES, count: EYE_STYLES },
+  { key: "headwear", label: "Headwear", names: HEADWEAR_NAMES, count: HEADWEAR },
+  { key: "face_item", label: "Face", names: FACE_ITEM_NAMES, count: FACE_ITEMS },
+  { key: "back_item", label: "Back", names: BACK_ITEM_NAMES, count: BACK_ITEMS },
+  { key: "emblem", label: "Emblem", names: EMBLEM_NAMES, count: EMBLEMS },
+  { key: "trail", label: "Trail", names: TRAIL_NAMES, count: TRAILS },
+  { key: "role", label: "Role", names: ROLE_NAMES, count: ROLE_OUTFITS },
+];
+
+function mintCall(agent: string, traits: SkinTraits) {
+  assertTestnet();
+  return {
+    network: "testnet" as const,
+    receiver_id: PLACEHOLDER_CONTRACTS.registry,
+    method_name: "forge_mint",
+    args: { agent, traits },
+    attached_deposit: "0",
+    gas: "80000000000000",
+  };
 }
 
 export default function ForgePage() {
   const seed = useMemo(() => defaultSkin("scout.vault.fe2vi.testnet"), []);
   const [traits, setTraits] = useState<SkinTraits>(seed);
-  const [saved, setSaved] = useState(false);
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>(CATEGORIES[0]);
+  const [agent, setAgent] = useState("scout.vault.fe2vi.testnet");
+  const [call, setCall] = useState<string | null>(null);
 
-  function set<K extends keyof SkinTraits>(key: K, value: SkinTraits[K]) {
-    setSaved(false);
+  function set<K extends keyof SkinTraits>(key: K, value: number) {
+    setCall(null);
     setTraits((current) => ({ ...current, [key]: value }));
   }
 
+  const active = CATEGORIES.find((entry) => entry.key === category.key) ?? CATEGORIES[0];
+
   return (
-    <main className="board">
+    <main className="board forge-customizer">
       <h1>Skin Forge</h1>
-      <p className="lede">
-        A cosmetic look for an iron ingot. One NEAR on testnet. It does not change scoring, caps, or a game.
-      </p>
+      <p className="lede">A turntable for an iron ingot. One NEAR on testnet. Paint, screen, and gear change nothing about scoring or caps.</p>
       <p>
-        You can design here. The mint is an agent spend: the registrant funds registry escrow, then the agent or its owner calls forge_mint with no attached deposit. The heist key cannot mint. This page does not submit a transaction.
+        The registrant funds registry escrow, then the agent or its owner calls forge_mint with no attached deposit. The heist key cannot mint. Storage is inside the 1 NEAR. This page builds the call and does not submit it.
       </p>
-      <div className="forge-layout">
+      <div className="forge-stage">
         <SkinPreview traits={traits} />
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            window.localStorage.setItem(PREVIEW_KEY, JSON.stringify(traits));
-            setSaved(true);
-            audio.unlock();
-            audio.sting("forge");
-          }}
-        >
-          <Stepper label="Body" value={traits.body} names={["Rust", "Steel", "Teal", "Gold", "Ember", "Slate", "Paper", "Bronze"]} onChange={(value) => set("body", value)} />
-          <Stepper label="Face" value={traits.face} names={FACES} onChange={(value) => set("face", value)} />
-          <Stepper label="Role" value={traits.role} names={ROLES} onChange={(value) => set("role", value)} />
-          <Stepper label="Hat" value={traits.hat} names={HATS} onChange={(value) => set("hat", value)} />
-          <Stepper label="Accessory" value={traits.accessory} names={EXTRAS} onChange={(value) => set("accessory", value)} />
-          <Stepper label="Trail" value={traits.trail} names={TRAILS} onChange={(value) => set("trail", value)} />
-          <p className="meta">Trail is particles in the city, not a mesh. Price 1 NEAR, storage included.</p>
-          <button type="submit">Save preview and play the mint sting</button>
-          {saved && <p role="status">Preview saved on this browser. It is not a minted skin.</p>}
-        </form>
+        <Panel>
+          <p className="type-label">
+            {rarity(traits)} · {ROLE_NAMES[traits.role]}
+          </p>
+          <div className="forge-tabs" role="tablist" aria-label="Trait categories">
+            {CATEGORIES.map((entry) => (
+              <button key={entry.key} type="button" role="tab" aria-selected={active.key === entry.key} onClick={() => setCategory(entry)}>
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <div className="forge-swatches" role="listbox" aria-label={active.label}>
+            {active.names.map((name, index) => (
+              <button
+                key={name}
+                type="button"
+                role="option"
+                aria-selected={traits[active.key] === index}
+                onClick={() => set(active.key, index)}
+              >
+                {active.colors ? <span className="swatch" style={{ background: active.colors[index] }} /> : null}
+                {name}
+              </button>
+            ))}
+          </div>
+          <label className="forge-agent">
+            Agent account
+            <input value={agent} onChange={(event) => { setAgent(event.target.value); setCall(null); }} spellCheck={false} />
+          </label>
+          <div className="forge-actions">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCall(null);
+                setTraits({
+                  paint: Math.floor(Math.random() * PAINTS),
+                  screen: Math.floor(Math.random() * SCREENS),
+                  eyes: Math.floor(Math.random() * EYE_STYLES),
+                  headwear: Math.floor(Math.random() * HEADWEAR),
+                  face_item: Math.floor(Math.random() * FACE_ITEMS),
+                  back_item: Math.floor(Math.random() * BACK_ITEMS),
+                  emblem: Math.floor(Math.random() * EMBLEMS),
+                  trail: Math.floor(Math.random() * TRAILS),
+                  role: Math.floor(Math.random() * ROLE_OUTFITS),
+                });
+              }}
+            >
+              <Dices size={20} aria-hidden="true" /> Randomise
+            </Button>
+            <Button
+              onClick={() => {
+                const next = mintCall(agent.trim() || "scout.vault.fe2vi.testnet", traits);
+                setCall(JSON.stringify(next, null, 2));
+                window.localStorage.setItem(PREVIEW_KEY, JSON.stringify(traits));
+                audio.unlock();
+                audio.sting("forge");
+              }}
+            >
+              <Hammer size={20} aria-hidden="true" /> Mint
+            </Button>
+          </div>
+          {call ? (
+            <pre className="forge-call" role="status">
+              {call}
+            </pre>
+          ) : (
+            <p className="meta">Mint shows the testnet forge_mint call. Nothing is broadcast.</p>
+          )}
+        </Panel>
       </div>
     </main>
   );

@@ -112,7 +112,7 @@ def build_armature():
         arm_bone.head = (x, -0.04, 0.7)
         arm_bone.tail = (x, -0.02, 0.38)
         arm_bone.parent = spine
-        arm_bone.align_roll((0, 1, 0))
+        arm_bone.align_roll((1, 0, 0))
     bpy.ops.object.mode_set(mode="OBJECT")
     return arm
 
@@ -213,11 +213,11 @@ def animate(arm, leg_axis, leg_sign, left_arm, right_arm):
     stash_action(arm, "walk")
 
     arm.animation_data.action = bpy.data.actions.new("celebrate")
-    for frame, lift in ((1, 0.0), (8, 0.12), (16, 0.0)):
+    for frame, lift, arm_amt in ((1, 0.0, 0.2), (6, 0.26, 2.2), (12, 0.06, 1.7), (18, 0.0, 0.2)):
         key_loc(arm, "bone.hips", frame, (0, 0, lift))
-        key_rot(arm, "bone.arm.L", frame, swing(left_arm[0], left_arm[1] * (1.35 if lift else 0.15)))
-        key_rot(arm, "bone.arm.R", frame, swing(right_arm[0], right_arm[1] * (1.35 if lift else 0.15)))
-        key_rot(arm, "bone.spine", frame, (-0.15 if lift else 0.0, 0, 0))
+        key_rot(arm, "bone.arm.L", frame, swing(left_arm[0], left_arm[1] * arm_amt))
+        key_rot(arm, "bone.arm.R", frame, swing(right_arm[0], right_arm[1] * arm_amt))
+        key_rot(arm, "bone.spine", frame, (-0.5 if lift > 0.1 else 0.0, 0, 0))
     stash_action(arm, "celebrate")
 
     arm.animation_data.action = bpy.data.actions.new("caught")
@@ -307,7 +307,9 @@ def build_body(arm, parts, skinned):
     smile.scale = (1.4, 0.35, 0.45)
     bpy.context.view_layer.objects.active = smile
     bpy.ops.object.transform_apply(scale=True)
-    for ob in (*neutral, *happy, *angry, *smile_eyes, smile):
+    wide = eyes("body.face.4", 2.35, (0, 0, 0), (0, 0, 0), 0.68)
+    sleepy = eyes("body.face.5", 0.32, (0, 0, 0), (0, 0, 0), 0.655)
+    for ob in (*neutral, *happy, *angry, *smile_eyes, smile, *wide, *sleepy):
         skinned.append((ob, "bone.head"))
         parts.append(ob)
 
@@ -366,6 +368,35 @@ def build_roles(parts, skinned, front):
     wear(parts, skinned, cube("role.scout.pack", (0, 0.28, 0.58), (0.28, 0.14, 0.32), pack, bevel=0.03, subdiv=1), "bone.spine")
     wear(parts, skinned, cube("role.scout.strap", (0, 0.08, 0.7), (0.36, 0.03, 0.04), pack, bevel=0.008, subdiv=0), "bone.spine")
     wear(parts, skinned, cyl("role.scout.compass", (0, 0.36, 0.62), 0.04, 0.012, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.spine")
+
+    crown = material("Crown", (0.92, 0.76, 0.28), 0.8, 0.25)
+    cloth = material("Cape", (0.45, 0.12, 0.14), 0.05, 0.75)
+    wear(parts, skinned, cyl("headwear.crown.band", (0, -0.02, 0.98), 0.2, 0.05, crown, vertices=8), "bone.head")
+    for index, x in enumerate((-0.1, 0.0, 0.1)):
+        wear(parts, skinned, cube(f"headwear.crown.point.{index}", (x, -0.02, 1.06), (0.04, 0.04, 0.08), crown, bevel=0.01, subdiv=0), "bone.head")
+    wear(parts, skinned, ball("headwear.cap", (0, -0.04, 0.96), 0.18, hat, scale=(1.3, 1.15, 0.5)), "bone.head")
+    wear(parts, skinned, cube("headwear.brim", (0, front - 0.02, 0.9), (0.28, 0.12, 0.025), hat, bevel=0.008, subdiv=0), "bone.head")
+
+    wear(parts, skinned, cube("faceitem.0.visor", (0, front - 0.045, 0.78), (0.28, 0.02, 0.035), black, bevel=0.004, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("faceitem.1.monocle", (0.09, front - 0.045, 0.68), 0.04, 0.012, gold, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("faceitem.2.mask", (0, front - 0.04, 0.52), (0.22, 0.02, 0.08), navy, bevel=0.008, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("faceitem.3.mic", (-0.16, front - 0.02, 0.56), 0.012, 0.16, gold, vertices=6, rot=(math.pi / 2.4, 0, -0.4)), "bone.head")
+
+    wear(parts, skinned, cube("back.0.pack", (0, 0.3, 0.58), (0.26, 0.12, 0.3), pack, bevel=0.03, subdiv=1), "bone.spine")
+    wear(parts, skinned, cyl("back.1.left", (-0.08, 0.28, 0.62), 0.05, 0.22, gold, vertices=10), "bone.spine")
+    wear(parts, skinned, cyl("back.1.right", (0.08, 0.28, 0.62), 0.05, 0.22, gold, vertices=10), "bone.spine")
+    wear(parts, skinned, cube("back.2.cape", (0, 0.22, 0.5), (0.42, 0.02, 0.55), cloth, bevel=0.01, subdiv=0), "bone.spine")
+    wear(parts, skinned, cyl("back.3.mast", (0, 0.16, 0.95), 0.012, 0.18, navy, vertices=6), "bone.spine")
+    wear(parts, skinned, ball("back.3.tip", (0, 0.16, 1.06), 0.03, cyan), "bone.spine")
+
+    emblem_colors = (gold, cyan, hat, lime, crown, cloth)
+    for index, color in enumerate(emblem_colors):
+        wear(
+            parts,
+            skinned,
+            cyl(f"emblem.{index}", (-0.12, front - 0.02, 0.42), 0.035, 0.012, color, vertices=6 + index, rot=(math.pi / 2, 0, 0)),
+            "bone.spine",
+        )
 
 
 def main():

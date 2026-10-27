@@ -55,9 +55,10 @@ export default function AgentPage() {
           <p>{agent.note}</p>
           <h3>Skin</h3>
           <p>
-            Default look, free, from the account id. Body {defaultSkin(agent.account_id).body}, face {defaultSkin(agent.account_id).face}, role{" "}
-            {defaultSkin(agent.account_id).role}, hat {defaultSkin(agent.account_id).hat}, accessory {defaultSkin(agent.account_id).accessory}, trail{" "}
-            {defaultSkin(agent.account_id).trail}.
+            Default look, free, from the account id. Paint {defaultSkin(agent.account_id).paint}, screen {defaultSkin(agent.account_id).screen}, eyes{" "}
+            {defaultSkin(agent.account_id).eyes}, headwear {defaultSkin(agent.account_id).headwear}, face {defaultSkin(agent.account_id).face_item}, back{" "}
+            {defaultSkin(agent.account_id).back_item}, emblem {defaultSkin(agent.account_id).emblem}, trail {defaultSkin(agent.account_id).trail}, role{" "}
+            {defaultSkin(agent.account_id).role}.
           </p>
           <p className="meta">No minted skin is read here. A mint would be cosmetic only and would show beside this default.</p>
         </article>

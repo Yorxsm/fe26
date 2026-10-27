@@ -426,7 +426,7 @@ fn nft_event(event: &str, data: &near_sdk::serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fe2vi_core::HAT_STYLES;
+    use fe2vi_core::HEADWEAR;
     use near_sdk::test_utils::{get_created_receipts, VMContextBuilder};
     use near_sdk::{testing_env, Gas, NearToken};
     use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -509,7 +509,7 @@ mod tests {
         let mut forge = boot();
         let agent: AccountId = "alpha.registry.fe2vi.testnet".parse().unwrap();
         let mut traits = sample();
-        traits.hat = HAT_STYLES;
+        traits.headwear = HEADWEAR;
         context("registry.fe2vi.testnet", MINT_PRICE_YOCTO);
         let err = catch_unwind(AssertUnwindSafe(|| {
             forge.mint_skin(agent, traits);

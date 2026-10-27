@@ -115,10 +115,14 @@ export const LINEUP_SPOTS: Array<[number, number]> = [
   [11.25, 0],
 ];
 
-export const LINEUP_SHOT: CameraShot = { eye: [0, 3.2, 26], aim: [0, 2.5, 0], fov: 36 };
+export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8, 18], aim: [0, 2.7, 0], fov: 50 };
 
-/** Eye height on the ring road, looking along the lamps. */
-export const STREET_SHOT: CameraShot = { eye: [-24, 1.65, 16], aim: [8, 1.4, -8], fov: 52 };
+/** Eye height on the ring road, with the nearest agents a few meters ahead. */
+export const STREET_SHOT: CameraShot = { eye: [-18, 1.7, 14], aim: [-8, 2.2, 6], fov: 46 };
+
+export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55, 3.4], aim: [0, 3.35, 0], fov: 28 };
+
+export const WALK_SHOT: CameraShot = { eye: [0, 2.4, 14], aim: [0, 2.2, 0], fov: 42 };
 
 /** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
 function acrossRoom(x: number, z: number): CameraShot {
@@ -214,12 +218,13 @@ export function placeAgent(index: number, time: number, paused: boolean) {
   const dx = to[0] - from[0];
   const dz = to[1] - from[1];
   const dist = Math.hypot(dx, dz);
+  const ease = 6 * t * (1 - t);
   return {
     x: from[0] + dx * smooth,
     y: 0,
     z: from[1] + dz * smooth,
     rot: Math.atan2(dx, dz),
-    speed: dist * 0.28,
+    speed: dist * 0.28 * ease,
   };
 }
 

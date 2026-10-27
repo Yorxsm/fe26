@@ -25,8 +25,8 @@ pub use score::{
     action_price, round_index, score_actions, split_pot, tape_winner, ActionKind, SubmittedAction,
 };
 pub use skin::{
-    default_skin, unknown_trait, SkinTraits, ACCESSORIES, BODY_STYLES, FACE_STYLES, HAT_STYLES,
-    MINT_PRICE_YOCTO, ROLE_OUTFITS, TRAILS,
+    default_skin, unknown_trait, SkinTraits, BACK_ITEMS, EMBLEMS, EYE_STYLES, FACE_ITEMS, HEADWEAR,
+    MINT_PRICE_YOCTO, PAINTS, ROLE_OUTFITS, SCREENS, TRAILS,
 };
 pub use types::{
     absolute_ceiling, default_platform_caps, heist_night_example, trading_cup_example, GameRules,

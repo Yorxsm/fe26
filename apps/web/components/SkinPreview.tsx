@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
-import { ROLE_COLORS, expressionVisible, roleVisible, type Mood, type SkinTraits } from "@/lib/skin";
+import { nodeVisible, paintFinish, screenColor, type Mood, type SkinTraits } from "@/lib/skin";
 import type { Object3D } from "three";
 
 function sourceName(node: Object3D): string {
@@ -33,18 +33,30 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
   }, [gltf.animations, mixer]);
 
   useLayoutEffect(() => {
-    const color = ROLE_COLORS[traits.role] ?? ROLE_COLORS[0];
+    const finish = paintFinish(traits.paint);
+    const glow = screenColor(traits.screen);
     scene.traverse((node) => {
       const label = sourceName(node);
-      const shown = roleVisible(label, traits, mood) ?? expressionVisible(label, traits, mood);
+      const shown = nodeVisible(label, traits, mood);
       if (shown !== null) node.visible = shown;
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh) return;
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       materials.forEach((material) => {
         const standard = material as THREE.MeshStandardMaterial;
-        if (standard.name !== "Body" || !standard.color) return;
-        standard.color.set(color);
+        if (!standard.color) return;
+        if (standard.name === "Body") {
+          standard.color.set(finish.color);
+          standard.metalness = finish.metal;
+          standard.roughness = finish.rough;
+        }
+        if (standard.name === "Screen") {
+          standard.color.set(glow);
+          if (standard.emissive) {
+            standard.emissive.set(glow);
+            standard.emissiveIntensity = 1.8;
+          }
+        }
       });
     });
   }, [mood, scene, traits]);
@@ -81,11 +93,13 @@ export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mo
       }}
     >
       <color attach="background" args={["#0a0a0b"]} />
-      <hemisphereLight args={["#8ea0d4", "#1c140e", 0.4]} />
-      <directionalLight position={[2, 1.2, 2]} intensity={0.55} color="#ffb07a" />
+      <hemisphereLight args={["#8ea0d4", "#2a2018", 0.55]} />
+      <ambientLight intensity={0.2} color="#4a4036" />
+      <directionalLight position={[2.2, 2.4, 2.4]} intensity={1.1} color="#ffc49a" />
+      <pointLight position={[0.4, 1.2, 1.4]} color="#ffb060" intensity={6} distance={6} decay={2} />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <PreviewMesh traits={traits} mood={mood} />
-      <OrbitControls enablePan={false} minDistance={1.4} maxDistance={4} target={[0, 0.8, 0]} />
+      <OrbitControls autoRotate autoRotateSpeed={0.7} enablePan={false} minDistance={1.5} maxDistance={4.2} target={[0, 0.72, 0]} />
     </Canvas>
   );
 }

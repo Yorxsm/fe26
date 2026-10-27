@@ -411,7 +411,20 @@ body:has(.game-root) { overflow: hidden; height: 100vh; }
 .audio-hud label { display: flex; align-items: center; gap: var(--space-xs); font-size: 0.85rem; }
 .audio-hud input[type="range"] { width: 7rem; }
 .forge-layout { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1.2fr); gap: var(--space-md); align-items: start; }
-.forge-canvas { width: 100%; height: 28rem; display: block; background: var(--background); border: 1px solid var(--line); }
+.forge-canvas { width: 100%; height: 28rem; display: block; background: #0a0a0b; border: 1px solid var(--line); border-radius: 16px; }
+.forge-stage { display: grid; grid-template-columns: minmax(18rem, 1.1fr) minmax(18rem, 0.9fr); gap: 24px; align-items: start; }
+.forge-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.forge-tabs button { background: transparent; color: var(--ink-secondary); border: 0; border-bottom: 2px solid transparent; border-radius: 0; min-height: 36px; padding: 8px 10px; }
+.forge-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--orange); }
+.forge-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.forge-swatches button { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; min-height: 40px; }
+.forge-swatches button[aria-selected="true"] { border-color: var(--orange); color: var(--ink); }
+.swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; }
+.forge-agent { display: grid; gap: 8px; margin-top: 16px; color: var(--ink-secondary); font-size: 14px; }
+.forge-agent input { background: var(--background); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; min-height: 48px; padding: 0 12px; }
+.forge-actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.forge-call { margin-top: 16px; white-space: pre-wrap; color: var(--ink); background: var(--background); border-radius: 12px; padding: 12px; }
+@media (max-width: 900px) { .forge-stage { grid-template-columns: 1fr; } }
 .trait-row { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
 .trait-row button[aria-pressed="true"] { outline: 2px solid var(--focus); }
 @media (max-width: 800px) {

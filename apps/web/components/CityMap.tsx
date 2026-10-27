@@ -21,8 +21,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
-import { ROLE_COLORS, SCREEN_COLORS, expressionVisible, roleVisible, type Mood } from "@/lib/skin";
+import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
 useGLTF.preload("/models/station.glb", false, true);
@@ -339,15 +339,20 @@ function Kits({
   );
 }
 
-function paintColor(material: THREE.MeshStandardMaterial, color: string) {
+function paintColor(material: THREE.MeshStandardMaterial, finish: PaintFinish, emissive = false) {
   const copy = material.clone();
   copy.name = material.name;
-  copy.color.set(color);
-  if (copy.emissive) copy.emissive.set(color);
+  copy.color.set(finish.color);
+  if (finish.metal !== undefined) copy.metalness = finish.metal;
+  if (finish.rough !== undefined) copy.roughness = finish.rough;
+  if (emissive && copy.emissive) {
+    copy.emissive.set(finish.color);
+    copy.emissiveIntensity = 1.8;
+  }
   return copy;
 }
 
-function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
+function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
@@ -355,10 +360,10 @@ function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
   });
   meshes.forEach((mesh) => {
     let sources = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
-    if (recolor) {
+    if (finish) {
       sources = sources.map((material) => {
-        if (material.name === "Body" && material.color) return paintColor(material, recolor);
-        if (screen && material.name === "Screen") return paintColor(material, screen);
+        if (material.name === "Body" && material.color) return paintColor(material, finish);
+        if (screen && material.name === "Screen") return paintColor(material, { color: screen, metal: 0.05, rough: 0.2 }, true);
         return material;
       });
       mesh.material = Array.isArray(mesh.material) ? sources : sources[0];
@@ -367,7 +372,7 @@ function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
       if (!("envMapIntensity" in material)) return;
       const metal = "metalness" in material ? material.metalness : 0;
       material.envMapIntensity = metal > 0.45 ? 0.16 : 0.03;
-      if (!recolor && material.color) material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
+      if (!finish && material.color) material.color.multiply(new THREE.Color(0.62, 0.66, 0.72));
     });
     const label = sourceName(mesh);
     if (label.startsWith("terrain.")) {
@@ -386,7 +391,7 @@ function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
-    if (label.includes("tree") || label.includes("crown") || label.includes("bush")) mesh.visible = false;
+    if (label.startsWith("tree.")) mesh.visible = false;
     if (ROOM_PREFIX[prefix] && !label.endsWith(".pad")) mesh.visible = false;
   });
   return root;
@@ -410,13 +415,10 @@ function moodFor(x: number, z: number): Mood {
   return "trait";
 }
 
-function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood, role: number) {
-  const skin = { ...agent.skin, role };
+function applyLook(root: THREE.Object3D, skin: SkinTraits, mood: Mood) {
   root.traverse((node) => {
-    const label = sourceName(node);
-    const shown = roleVisible(label, skin, mood) ?? expressionVisible(label, skin, mood);
+    const shown = nodeVisible(sourceName(node), skin, mood);
     if (shown !== null) node.visible = shown;
-    if (label.startsWith("body.antenna") && [0, 2, 4].includes(skin.role % 6)) node.visible = false;
   });
 }
 
@@ -506,6 +508,64 @@ function tagLift(index: number, time: number, paused: boolean) {
   return lift;
 }
 
+function displaySkin(agent: CityAgent, index: number, poster: string | null): SkinTraits {
+  if (poster === "lineup" || poster === "face") return lineupSkin(index);
+  if (poster === "trails") return { ...lineupSkin(index), trail: index % 4 };
+  if (poster === "skins") {
+    return {
+      ...lineupSkin(index % 6),
+      paint: index % 12,
+      screen: index % 8,
+      eyes: index % 6,
+      headwear: index % 8,
+      face_item: index % 4,
+      back_item: index % 4,
+      emblem: index % 6,
+    };
+  }
+  if (poster === "walk") return lineupSkin(4);
+  return { ...agent.skin, role: index % 6 };
+}
+
+function ParticleTrail({ kind }: { kind: number }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const count = 18;
+  useFrame(({ clock }) => {
+    const field = mesh.current;
+    if (!field) return;
+    const dummy = new THREE.Object3D();
+    const t = clock.elapsedTime;
+    for (let i = 0; i < count; i += 1) {
+      const age = (t * 0.85 + i / count) % 1;
+      const back = 0.55 + age * 2.4;
+      let x = Math.sin(i * 2.1 + t * 3) * 0.18;
+      let y = 0.55 + age * (kind === 3 ? 1.8 : 1.1);
+      if (kind === 1) {
+        x = Math.sin(i) * 0.22;
+        y = 0.7 + Math.sin(t * 4 + i) * 0.2;
+      }
+      if (kind === 2) {
+        x = ((i * 5) % 7) * 0.08 - 0.24;
+        y = 0.5 + ((i * 3) % 5) * 0.22;
+      }
+      dummy.position.set(x, y, -back);
+      const size = kind === 3 ? 0.08 + age * 0.22 : kind === 1 ? 0.12 : 0.07;
+      dummy.scale.setScalar(size * (1 - age * 0.65));
+      dummy.rotation.set(kind === 1 ? t * 3 + i : 0, 0, 0);
+      dummy.updateMatrix();
+      field.setMatrixAt(i, dummy.matrix);
+    }
+    field.instanceMatrix.needsUpdate = true;
+  });
+  const color = ["#ff5a1f", "#e2b340", "#2fe6e6", "#b8b8c4"][kind % 4];
+  return (
+    <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
+      {kind === 1 ? <cylinderGeometry args={[1, 1, 0.22, 8]} /> : kind === 2 ? <boxGeometry args={[1, 0.3, 1]} /> : <sphereGeometry args={[1, 6, 5]} />}
+      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={kind === 3 ? 0.15 : 1.6} roughness={0.35} />
+    </instancedMesh>
+  );
+}
+
 function AgentMesh({
   agent,
   index,
@@ -513,6 +573,7 @@ function AgentMesh({
   audit,
   focusId,
   lineup,
+  poster,
   onFollow,
 }: {
   agent: CityAgent;
@@ -521,6 +582,7 @@ function AgentMesh({
   audit: boolean;
   focusId: string | null;
   lineup: boolean;
+  poster: string | null;
   onFollow: (index: number) => void;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
@@ -529,49 +591,84 @@ function AgentMesh({
   const clipName = useRef("");
   const clipAction = useRef<THREE.AnimationAction | null>(null);
   const mood = useRef<Mood>("trait");
-  const role = lineup && index < LINEUP_SPOTS.length ? index : index % ROLE_COLORS.length;
+  const skin = useMemo(() => displaySkin(agent, index, poster), [agent, index, poster]);
   const scene = useMemo(() => {
     const cloned = SkeletonUtils.clone(gltf.scene);
-    dress(cloned, ROLE_COLORS[role] ?? ROLE_COLORS[0], SCREEN_COLORS[role] ?? SCREEN_COLORS[0]);
-    applyMood(cloned, agent, "trait", role);
+    dress(cloned, paintFinish(skin.paint), screenColor(skin.screen));
+    applyLook(cloned, skin, "trait");
     return cloned;
-  }, [agent, gltf.scene, role]);
+  }, [gltf.scene, skin]);
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
     const walking = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
-    const pose = lineup && index < LINEUP_SPOTS.length
-      ? { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 }
-      : walking;
-    const nextMood = lineup ? "trait" : moodFor(pose.x, pose.z);
+    let pose: { x: number; y: number; z: number; rot: number } = walking;
+    if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
+    else if ((poster === "lineup" || lineup) && index < LINEUP_SPOTS.length) {
+      pose = { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 };
+    } else if (poster === "trails") pose = { x: -6 + index * 4, y: 0, z: 0, rot: 0 };
+    else if (poster === "walk") pose = { x: -7.5 + index * 5, y: 0, z: 0, rot: 0 };
+    else if (poster === "skins") {
+      const col = index % 4;
+      const row = Math.floor(index / 4);
+      pose = { x: (col - 1.5) * 7, y: 0, z: (1 - row) * 7, rot: 0 };
+    } else if (poster === "street" && index < 3) {
+      const x = -15 + index * 3.4;
+      const z = 11 - index * 2.1;
+      pose = { x, y: 0, z, rot: Math.atan2(-18 - x, 14 - z) };
+    }
+    const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
-      applyMood(scene, agent, nextMood, role);
+      applyLook(scene, skin, nextMood);
     }
-    const nextClip = paused || lineup ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
-    if (clipName.current !== nextClip) {
-      mixer.stopAllAction();
-      const clip = gltf.animations.find((entry) => entry.name === nextClip);
-      clipAction.current = clip ? mixer.clipAction(clip).reset().play() : null;
-      clipName.current = nextClip;
+    const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+    const planted = !poster && speed < 0.4;
+    if (poster === "walk") {
+      if (clipName.current !== "walk-hold") {
+        mixer.stopAllAction();
+        const clip = gltf.animations.find((entry) => entry.name === "walk");
+        const action = clip ? mixer.clipAction(clip) : null;
+        if (action && clip) {
+          action.play();
+          action.paused = true;
+          action.time = (index / 4) * clip.duration;
+        }
+        clipAction.current = action;
+        clipName.current = "walk-hold";
+      }
+    } else {
+      const nextClip = paused || lineup || poster || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
+      if (clipName.current !== nextClip) {
+        mixer.stopAllAction();
+        const clip = gltf.animations.find((entry) => entry.name === nextClip);
+        clipAction.current = clip ? mixer.clipAction(clip).reset().play() : null;
+        clipName.current = nextClip;
+      }
+      if (clipAction.current) clipAction.current.timeScale = nextClip === "walk" ? Math.min(3.2, Math.max(0.25, speed / 1.7)) : 1;
     }
-    if (clipAction.current) {
-      const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
-      clipAction.current.timeScale = nextClip === "walk" ? Math.min(3.4, Math.max(0.7, speed / 1.9)) : 1;
-    }
-    if (!paused) mixer.update(delta);
+    if (!paused || poster === "walk") mixer.update(poster === "walk" ? 0 : delta);
     const blink = Math.sin(state.clock.elapsedTime * 2.1 + index * 1.3) > 0.92;
     scene.traverse((node) => {
       const label = sourceName(node);
       if (!label.endsWith(".eye.L") && !label.endsWith(".eye.R")) return;
       node.scale.y = blink ? 0.15 : 1;
     });
+    const shown =
+      poster === "face" ? index === 0
+      : poster === "walk" || poster === "trails" ? index < 4
+      : poster === "skins" ? index < 12
+      : poster === "street" ? index < 8
+      : !lineup || index < LINEUP_SPOTS.length;
     if (group.current) {
-      group.current.visible = !lineup || index < LINEUP_SPOTS.length;
+      group.current.visible = shown;
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.rotation.y = pose.rot;
     }
-    if (tag.current) tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
+    if (tag.current) {
+      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails";
+      tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
+    }
   });
 
   return (
@@ -581,6 +678,7 @@ function AgentMesh({
         <meshBasicMaterial color="#05060a" transparent opacity={0.45} depthWrite={false} />
       </mesh>
       <pointLight position={[0, 3.6, -2.6]} color="#9eb4ee" intensity={3.2} distance={9} decay={2} />
+      {poster === "trails" || (!poster && !lineup) ? <ParticleTrail kind={skin.trail % 4} /> : null}
       <primitive
         object={scene}
         scale={AGENT_SCALE}
@@ -688,6 +786,7 @@ function CameraDriver({
   frameMode,
   lineup,
   street,
+  poster,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
@@ -697,6 +796,7 @@ function CameraDriver({
   frameMode: "in" | "out";
   lineup: boolean;
   street: boolean;
+  poster: string | null;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
@@ -710,7 +810,7 @@ function CameraDriver({
   useFrame((state, delta) => {
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
-    const driving = mode === "cutscene" || lineup || street || (mode === "play" && (followIndex !== null || Boolean(focusId)));
+    const driving = mode === "cutscene" || lineup || street || Boolean(poster) || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
     rig.autoRotate = false;
@@ -750,10 +850,30 @@ function CameraDriver({
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
       applyFov(beat < 4 ? 64 : 32);
       drive = true;
+    } else if (poster === "face") {
+      eye.set(FACE_SHOT.eye[0], FACE_SHOT.eye[1], FACE_SHOT.eye[2]);
+      aim.set(FACE_SHOT.aim[0], FACE_SHOT.aim[1], FACE_SHOT.aim[2]);
+      applyFov(FACE_SHOT.fov ?? 28);
+      drive = true;
+    } else if (poster === "walk") {
+      eye.set(WALK_SHOT.eye[0], WALK_SHOT.eye[1], WALK_SHOT.eye[2]);
+      aim.set(WALK_SHOT.aim[0], WALK_SHOT.aim[1], WALK_SHOT.aim[2]);
+      applyFov(WALK_SHOT.fov ?? 42);
+      drive = true;
+    } else if (poster === "trails") {
+      eye.set(0, 3.5, 16);
+      aim.set(0, 2.3, 0);
+      applyFov(42);
+      drive = true;
+    } else if (poster === "skins") {
+      eye.set(0, 16, 26);
+      aim.set(0, 2, 0);
+      applyFov(48);
+      drive = true;
     } else if (lineup) {
       eye.set(LINEUP_SHOT.eye[0], LINEUP_SHOT.eye[1], LINEUP_SHOT.eye[2]);
       aim.set(LINEUP_SHOT.aim[0], LINEUP_SHOT.aim[1], LINEUP_SHOT.aim[2]);
-      applyFov(LINEUP_SHOT.fov ?? 36);
+      applyFov(LINEUP_SHOT.fov ?? 50);
       drive = true;
     } else if (street) {
       eye.set(STREET_SHOT.eye[0], STREET_SHOT.eye[1], STREET_SHOT.eye[2]);
@@ -807,6 +927,7 @@ export default function CityMap({
   frameMode,
   lineup,
   street,
+  poster,
   onPick,
   onFollow,
   onUnavailable,
@@ -820,6 +941,7 @@ export default function CityMap({
   frameMode: "in" | "out";
   lineup: boolean;
   street: boolean;
+  poster: string | null;
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
@@ -913,12 +1035,18 @@ export default function CityMap({
       <pointLight position={[46, 2.4, 14]} intensity={5} color="#ffd2a8" distance={14} decay={2} />
       <pointLight position={[12, 2.4, 40]} intensity={4} color="#9fd0ff" distance={12} decay={2} />
       <pointLight position={[-38, 2.4, -24]} intensity={5} color="#ff6a1a" distance={12} decay={2} />
+      {lineup ? (
+        <mesh position={[0, 4.2, -3.5]}>
+          <planeGeometry args={[52, 16]} />
+          <meshBasicMaterial color="#101018" />
+        </mesh>
+      ) : null}
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
-      {CITY_AGENTS.map((agent, index) => (
-        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused || lineup} audit={audit} focusId={focusId} lineup={lineup} onFollow={onFollow} />
+      {(poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
+        <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault
