@@ -42,10 +42,10 @@ export const SCREEN_COLORS = [
   "#ffc928",
   "#e04bff",
   "#2fe6e6",
-  "#ff5a1f",
-  "#3dff8a",
+  "#c94a1a",
+  "#2fb86a",
   "#9cff3a",
-  "#f5f5f4",
+  "#d4d2cc",
   "#ff4d6a",
 ];
 

@@ -5,35 +5,39 @@ description: Live arena surfaces adapted from a sports gamecast, recast as an ir
 colors:
   background: "#0a0a0b"
   surface: "#141416"
-  surface-raised: "#1c1c1f"
-  line: "#2a2a2e"
-  orange: "#ff5a1f"
-  orange-hover: "#ff7a3d"
-  orange-deep: "#c23d0c"
-  orange-glow: "rgba(255,90,31,.45)"
-  green: "#3dff8a"
-  green-deep: "#19b85c"
-  green-glow: "rgba(61,255,138,.35)"
-  ink: "#f5f5f4"
-  ink-secondary: "#a1a1aa"
-  ink-muted: "#6b6b73"
-  forge: "#ff5a1f"
-  action: "#ff5a1f"
+  surface-raised: "#1e1e21"
+  line: "#1f1f23"
+  orange: "#c94a1a"
+  orange-hover: "#c94a1a"
+  orange-deep: "#8a3110"
+  orange-glow: "rgba(201,74,26,.28)"
+  green: "#2fb86a"
+  green-deep: "#1f8a4e"
+  green-glow: "rgba(47,184,106,.22)"
+  ink: "#d4d2cc"
+  ink-secondary: "#8b8a86"
+  ink-muted: "#8b8a86"
+  secondary-button: "#222225"
+  secondary-lip: "#121214"
+  forge: "#c94a1a"
+  action: "#c94a1a"
   action-ink: "#0a0a0b"
-  focus: "#3dff8a"
+  focus: "#8b8a86"
 typography:
   display:
-    fontFamily: Unbounded
+    fontFamily: Chakra Petch
     fontWeight: 700
-    h1: "64/72"
-    h2: "40/48"
-    h3: "24/32"
-    labelTracking: "0.02em"
+    display: "48/1.2"
+    h1: "32/1.2"
+    h2: "24/1.2"
+    h3: "20/1.2"
+    labelTracking: "0.04em"
   body:
-    fontFamily: Manrope
+    fontFamily: Inter
     fontWeight: 400
-    body: "16/24"
-    small: "14/20"
+    body: "16/1.5"
+    small: "14/1.5"
+    caption: "12/1.5"
   numbers:
     fontFamily: JetBrains Mono
     fontWeight: 500
@@ -42,14 +46,15 @@ spacing:
   margin: 24px
   columns: 12
 radius:
-  button: 12px
-  panel: 16px
-  pill: 999px
+  button: 6px
+  panel: 8px
+  max: 8px
 motion:
-  enter: 240ms
-  offset: 8px
+  press: 80ms
+  hoverLift: 1px
+  pressDrop: 3px
   stagger: 40ms
-  easing: ease-out
+  easing: linear
 ---
 
 # fe2VI iron broadcast
@@ -64,11 +69,11 @@ YAML tokens above are normative. The sections below say why a token exists. Comp
 
 `background` is the page. `surface` is a card. `surface-raised` is a seat or a meter track. `ink` is primary text. `ink-secondary` is body copy on the dark plate and stays above WCAG AA. `ink-muted` is for timestamps and hashes, still AA on `surface`.
 
-`action` and `orange` are the only filled button color. The label is `action-ink` (near-black). `green` is live state, success, and the keyboard ring. No pastel, lilac, peach, or cream.
+`action` and `orange` are the primary button fill. The label is `action-ink` (near-black). The secondary button is `#222225` with a `#121214` lip. `green` is live figures and stats. The keyboard ring is `focus` (`#8b8a86`). Borders are none or 1px `line`. A selected control changes fill to `surface-raised`.
 
 ## Typography
 
-Unbounded is display: H1 64/72, H2 40/48, H3 24/32. Labels are uppercase with +2% tracking. Manrope is body at 16/24 and 14/20. JetBrains Mono is numbers. Weights stay on those steps. The families load through `next/font` in the app.
+Chakra Petch is display and headings: display 48, H1 32, H2 24, H3 20, all at line-height 1.2. Inter is body at 16 and small at 14, line-height 1.5. Captions are 12. Uppercase labels use +0.04em tracking. Body tracking is 0. JetBrains Mono is numbers. The families load through `next/font` in the app.
 
 ## Layout
 
@@ -76,11 +81,11 @@ Spacing is an 8px grid. Safe margin is 24px. Alignment is 12 columns. The city H
 
 ## Elevation & Depth
 
-Panels are black glass: surface at 85% with a 12px backdrop blur, a 1px border, and a 2px orange top accent. Radius is 16px.
+Panels are a flat `#141416` plate with a 1px `#1f1f23` border and no accent bar. Radius is 8px.
 
 ## Shapes
 
-Buttons are 12px radius and 48px tall. Tags, chips, and agent names are pills.
+Buttons are 6px radius and 48px tall (40px small). Primary fill is `#c94a1a` with a 4px `#8a3110` lip. Secondary fill is `#222225` with a `#121214` lip. Hover lifts 1px. Press moves down 3px and the lip shrinks to 1px, in 80ms. Disabled buttons are desaturated and have no lip. Tags and chips use the 8px radius.
 
 ## Components
 
@@ -95,7 +100,7 @@ Buttons are 12px radius and 48px tall. Tags, chips, and agent names are pills.
 
 ## Motion
 
-Panels slide and fade in 240ms ease-out from an 8px offset. Children stagger by 40ms. Buttons scale to 0.97 on press. Live dots pulse green. Numbers tick up. `prefers-reduced-motion: reduce` removes those motions. The pot meter still fills once when motion is allowed.
+Buttons move on the 80ms press. Live dots pulse green. Numbers tick up. `prefers-reduced-motion: reduce` removes those motions. The pot meter still fills once when motion is allowed.
 
 ## Responsive
 
@@ -103,9 +108,9 @@ Below 720px the nav wraps, seats stack, and the create steps stay one column. Ta
 
 ## Accessibility
 
-- Contrast for text pairs above is WCAG AA on the surface they sit on. Near-black `#0a0a0b` on orange `#ff5a1f` is the action pair. Primary text `#f5f5f4` on `#141416` is the panel pair. Green `#3dff8a` is for live figures and the focus ring, large enough to read on black.
+- Contrast for text on the plate stays at WCAG AA. `#d4d2cc` on `#0a0a0b` is 13.1:1 and on `#141416` is 12.2:1. `#8b8a86` on `#141416` is 5.3:1. Near-black `#0a0a0b` on orange `#c94a1a` is 4.2:1, under 4.5 because that orange is the specified fill. Green `#2fb86a` on `#0a0a0b` is 7.7:1.
 - A skip link is the first focusable control.
-- `:focus-visible` draws a green focus ring. Focus is never removed.
+- `:focus-visible` draws a `#8b8a86` focus ring. Focus is never removed.
 - Forms use real labels. The timeline and stamps expose their state as text.
 - The feed is `aria-live="polite"`.
 - Reduced motion is honored.

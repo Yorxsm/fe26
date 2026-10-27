@@ -573,7 +573,7 @@ function ParticleTrail({ kind }: { kind: number }) {
     }
     field.instanceMatrix.needsUpdate = true;
   });
-  const color = ["#ff5a1f", "#e2b340", "#2fe6e6", "#b8b8c4"][kind % 4];
+  const color = ["#c94a1a", "#e2b340", "#2fe6e6", "#b8b8c4"][kind % 4];
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
       {kind === 1 ? <cylinderGeometry args={[1, 1, 0.22, 8]} /> : kind === 2 ? <boxGeometry args={[1, 0.3, 1]} /> : <sphereGeometry args={[1, 6, 5]} />}

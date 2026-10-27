@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Volume2 } from "lucide-react";
+import { Hammer, Volume2 } from "lucide-react";
+import { Logo } from "@/components/Logo";
 import {
   Button,
   IconButton,
@@ -26,6 +27,20 @@ const ROWS = [
   { rank: 4, name: "Pike", score: "4.2" },
 ];
 
+const SWATCHES: { hex: string; name: string; ink?: string }[] = [
+  { hex: "#0a0a0b", name: "background" },
+  { hex: "#141416", name: "panel" },
+  { hex: "#1e1e21", name: "raised" },
+  { hex: "#c94a1a", name: "orange", ink: "#0a0a0b" },
+  { hex: "#8a3110", name: "lip" },
+  { hex: "#2fb86a", name: "green", ink: "#0a0a0b" },
+  { hex: "#d4d2cc", name: "text", ink: "#0a0a0b" },
+  { hex: "#8b8a86", name: "secondary", ink: "#0a0a0b" },
+  { hex: "#222225", name: "secondary button" },
+  { hex: "#121214", name: "secondary lip" },
+  { hex: "#1f1f23", name: "line" },
+];
+
 export default function StyleguidePage() {
   const [on, setOn] = useState(true);
   const [volume, setVolume] = useState(70);
@@ -36,43 +51,54 @@ export default function StyleguidePage() {
     <main className="guide">
       <header className="ui-stagger">
         <p className="label">Design system</p>
-        <h1 className="type-h1">fe2VI</h1>
-        <p className="lede">Black plate, molten orange, live green. Eight-pixel grid, 24px margins, twelve columns.</p>
+        <Logo variant="hero" />
+        <h1>Iron plate</h1>
+        <p className="lede">Muted core colours, Chakra Petch for display, Inter for body. Eight-pixel grid, 24px margins, twelve columns.</p>
       </header>
 
       <section>
-        <h2 className="type-h3">Type</h2>
-        <p className="type-h1">H1 Unbounded 64/72</p>
-        <p className="type-h2">H2 Unbounded 40/48</p>
-        <p className="type-h3">H3 Unbounded 24/32</p>
-        <p className="label">Label tracking +2%</p>
-        <p>Body Manrope 16/24. Secondary copy stays on the secondary ink.</p>
-        <p className="meta">Muted 14/20 for notes and hashes.</p>
+        <h2>Type</h2>
+        <p className="type-display">Display 48</p>
+        <p className="type-h1">Heading 1 · 32</p>
+        <p className="type-h2">Heading 2 · 24</p>
+        <p className="type-h3">Heading 3 · 20</p>
+        <p>Body 16. Line height 1.5. Letter-spacing stays at zero.</p>
+        <p className="meta">Small 14 for notes and hashes.</p>
+        <p className="label">Caption 12 · tracking +0.04em</p>
         <p className="num live-ink">
           <Tick value={26} /> agents · JetBrains Mono
         </p>
       </section>
 
       <section>
-        <h2 className="type-h3">Colour</h2>
+        <h2>Colour</h2>
         <div className="swatches">
-          <span style={{ background: "#0a0a0b" }}>bg</span>
-          <span style={{ background: "#141416" }}>surface</span>
-          <span style={{ background: "#1c1c1f" }}>raised</span>
-          <span style={{ background: "#ff5a1f" }}>orange</span>
-          <span style={{ background: "#3dff8a", color: "#0a0a0b" }}>green</span>
-          <span style={{ background: "#f5f5f4", color: "#0a0a0b" }}>text</span>
+          {SWATCHES.map((swatch) => (
+            <span key={swatch.hex} style={{ background: swatch.hex, color: swatch.ink ?? "#d4d2cc" }}>
+              {swatch.name}
+              <small>{swatch.hex}</small>
+            </span>
+          ))}
         </div>
+        <p className="meta">
+          #d4d2cc on #0a0a0b is 13.1:1. #d4d2cc on #141416 is 12.2:1. #8b8a86 on #141416 is 5.3:1. #0a0a0b on #c94a1a is 4.2:1.
+        </p>
       </section>
 
       <section>
-        <h2 className="type-h3">Buttons</h2>
+        <h2>Buttons</h2>
         <div className="row">
-          <Button>Enter as spectator</Button>
-          <Button variant="secondary">Send your agent in</Button>
-          <Button variant="ghost">Skip</Button>
+          <Button>Primary</Button>
+          <Button variant="secondary">Secondary</Button>
+          <Button className="is-hover">Hover</Button>
+          <Button className="is-pressed">Pressed</Button>
+          <Button disabled>Disabled</Button>
+          <Button className="btn-sm">Small</Button>
+          <Button>
+            <Hammer size={16} /> With icon
+          </Button>
           <IconButton icon={Volume2} label="Sound" />
-          <Tooltip tip="Molten orange is the only fill.">
+          <Tooltip tip="The lip is a solid darker shade.">
             <Button variant="ghost">Hover tip</Button>
           </Tooltip>
         </div>
@@ -80,7 +106,7 @@ export default function StyleguidePage() {
 
       <section className="guide-split">
         <Panel title="Panel">
-          <p>Black glass, one-pixel border, orange top accent, 16px radius.</p>
+          <p>Flat plate, one-pixel neutral border, 8px radius. Selected state is a fill change.</p>
           <div className="row">
             <Tag>testnet</Tag>
             <Tag tone="live">live</Tag>
@@ -113,16 +139,21 @@ export default function StyleguidePage() {
           </div>
           {toast ? (
             <Toast>
-              Caps hold. <button type="button" className="btn btn-ghost" onClick={() => setToast(false)}>Dismiss</button>
+              Caps hold.{" "}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setToast(false)}>
+                Dismiss
+              </button>
             </Toast>
           ) : (
-            <Button variant="secondary" onClick={() => setToast(true)}>Show toast</Button>
+            <Button variant="secondary" onClick={() => setToast(true)}>
+              Show toast
+            </Button>
           )}
         </div>
       </section>
 
       <section>
-        <h2 className="type-h3">Icons</h2>
+        <h2>Icons</h2>
         <IconRow />
       </section>
     </main>

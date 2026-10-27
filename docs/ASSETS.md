@@ -84,24 +84,24 @@ Kenney nature-kit trees are packed into `nature.glb` with the Quaternius ground 
 
 ## Fonts
 
-UI text loads through `next/font/google` (`Unbounded`, `Manrope`, `JetBrains Mono`). Next downloads the subsets at build time and serves them from this site. The browser does not call Google.
+UI text loads through `next/font/google` (`Chakra Petch`, `Inter`, `JetBrains Mono`). Next downloads the subsets at build time and serves them from this site. The browser does not call Google.
 
-Unbounded is the display face: titles, the HUD brand, room signs, and intro captions. Manrope is body and HUD copy. JetBrains Mono is only for numbers, account addresses, pins, and leaderboards.
+Chakra Petch (600 and 700) is the display face: headings, buttons, and in-world room signs. Inter (400, 500, 600) is body and HUD copy. JetBrains Mono is only for numbers, account addresses, pins, and leaderboards.
 
-drei `Text` cannot read the woff2 subsets Next emits. In-world signs use the same families as static TrueType files, instantiated from the official variable fonts and served from `apps/web/public/fonts/`. `apps/web/lib/fonts.ts` points at those files. Room signs use `Unbounded-Bold.ttf`.
+drei `Text` cannot read the woff2 subsets Next emits. In-world signs use static TrueType files served from `apps/web/public/fonts/`. `apps/web/lib/fonts.ts` points at `ChakraPetch-Bold.ttf` and `Inter-Medium.ttf`.
 
-Each family is under the SIL Open Font License 1.1. The verbatim licence files sit beside the fonts. The text of each is below.
+Each family is under the SIL Open Font License 1.1. The verbatim licence files sit beside the fonts.
 
-### Unbounded
-
-```
-Copyright 2022 The Unbounded Project Authors (https://github.com/googlefonts/unbounded)
-```
-
-### Manrope
+### Chakra Petch
 
 ```
-Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)
+Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
+```
+
+### Inter
+
+```
+Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
 ```
 
 ### JetBrains Mono
@@ -110,7 +110,7 @@ Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manro
 Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 ```
 
-The licence body is the same for all three. This is the Unbounded copy; Manrope and JetBrains Mono use the same terms, and their files are `OFL-Manrope.txt` and `OFL-JetBrainsMono.txt`.
+The licence body is the same for all three. This is the Chakra Petch copy; Inter and JetBrains Mono use the same terms, and their files are `OFL-Inter.txt` and `OFL-JetBrainsMono.txt`.
 
 ```
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
