@@ -3,7 +3,9 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
+import { audio } from "@/lib/audio";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
 import { fixtureEvents, fixtureGames, HEIST_PIN } from "@/lib/fixtures";
@@ -47,6 +49,7 @@ export function CityGate() {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [soundLive, setSoundLive] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
 
   useEffect(() => {
@@ -56,6 +59,11 @@ export function CityGate() {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPaused(true);
     setWebgl(webglAvailable());
   }, []);
+
+  useEffect(() => {
+    if (phase === "cutscene" || phase === "vantage") audio.theme();
+    if (phase === "city") audio.city();
+  }, [phase]);
 
   function commit(next: SpectatorSave) {
     setSave(next);
@@ -74,8 +82,18 @@ export function CityGate() {
     setFocusId(district.id);
     setFollowIndex(null);
     const quests = { ...save.quests };
-    if (district.id === "vault-quarter") quests.heist = true;
-    if (district.id === "war-room") quests.breach = true;
+    if (district.id === "vault-quarter") {
+      if (!quests.heist) audio.sting("quest");
+      quests.heist = true;
+      audio.sting("heist");
+    }
+    if (district.id === "war-room") {
+      if (!quests.breach) audio.sting("quest");
+      quests.breach = true;
+      audio.sting("breach");
+    }
+    if (district.id === "trading-village" || district.id === "cup-stadium") audio.sting("trade");
+    if (district.id === "skin-forge") audio.sting("forge");
     commit({ ...save, quests });
     if (district.status === "soon") {
       setPaused(true);
@@ -93,6 +111,7 @@ export function CityGate() {
     setFollowIndex(index);
     setFocusId(null);
     const tutorial = save.tutorial === 0 ? 1 : save.tutorial;
+    if (!save.quests.follow) audio.sting("quest");
     commit({ ...save, tutorial, quests: { ...save.quests, follow: true } });
     setNote(`${CITY_AGENTS[index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
   }
@@ -145,6 +164,11 @@ export function CityGate() {
         )}
         <div className="city-stage">
           <div className="city-frame">
+            {phase !== "boot" && phase !== "title" && phase !== "dispatch" && (
+              <div className="audio-dock">
+                <AudioHud live={soundLive} />
+              </div>
+            )}
             {phase === "boot" ? (
               <LoadingState label="the map" />
             ) : (
@@ -172,7 +196,15 @@ export function CityGate() {
                 </h1>
                 <p className="subtitle">pronounced iron 26</p>
                 <div className="title-actions">
-                  <button type="button" className="enter" onClick={() => setPhase("cutscene")}>
+                  <button
+                    type="button"
+                    className="enter"
+                    onClick={() => {
+                      audio.unlock();
+                      setSoundLive(true);
+                      setPhase("cutscene");
+                    }}
+                  >
                     ENTER AS SPECTATOR
                   </button>
                   <button type="button" className="btn-quiet" onClick={() => setPhase("dispatch")}>
@@ -298,6 +330,7 @@ export function CityGate() {
                 <button
                   type="button"
                   onClick={() => {
+                    audio.sting("rank");
                     commit({ ...save, tutorial: 2 });
                     router.push("/village");
                   }}

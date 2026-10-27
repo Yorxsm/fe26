@@ -37,6 +37,8 @@ The hip kit is a side satchel. The body stays a boxy ingot.
 
 `apps/web/components/CityMap.tsx` loads both files with drei `useGLTF` and three-stdlib's meshopt decoder. Draco stays off so the page does not fetch a decoder.
 
+Sound is synthesized in `apps/web/lib/audio.ts`. There is no sample file. A district bed is noise plus a sine, placed on a panner at that room, so the room near the camera is louder. The title theme is a short sine line. Clicks, hovers, and the heist, breach, trade, rank, quest, and forge stings are oscillators. Playback starts from ENTER AS SPECTATOR, or from Unmute if the spectator skipped. Mute, volume, and Quiet are stored in `localStorage` under `fe2vi.audio.v1`. Quiet and reduced motion duck the stings.
+
 Kenney's CC0 kits stay vendored and unused as characters, so the silhouette stays the ingot.
 
 | File | Source | License |

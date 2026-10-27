@@ -6,6 +6,7 @@ import { BloomEffect, EffectComposer, EffectPass, RenderPass } from "postprocess
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
+import { audio } from "@/lib/audio";
 import { CITY_AGENTS, DISTRICTS, placeAgent, type CityAgent, type District } from "@/lib/city";
 import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
 
@@ -303,6 +304,27 @@ function ScreenBloom() {
   return null;
 }
 
+const earDirection = new THREE.Vector3();
+
+function Ears({ paused }: { paused: boolean }) {
+  const camera = useThree((state) => state.camera);
+  useFrame((state) => {
+    camera.getWorldDirection(earDirection);
+    audio.listener(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+      earDirection.x,
+      earDirection.y,
+      earDirection.z,
+    );
+    if (paused) return;
+    const pose = placeAgent(0, state.clock.elapsedTime, false);
+    audio.blip(pose.x, 1, pose.z, state.clock.elapsedTime);
+  });
+  return null;
+}
+
 function CameraDriver({
   mode,
   beat,
@@ -427,6 +449,7 @@ export default function CityMap({
           onFollow={onFollow}
         />
       ))}
+      <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} />
       <ScreenBloom />
       <OrbitControls
