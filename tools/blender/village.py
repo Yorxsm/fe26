@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 5
+ART_STEP = 6
 
 # three.js (x, z). Blender y is -z.
 SITES = [
@@ -315,6 +315,28 @@ def build_market(kit, mats):
         kit.ico(f"market.string.{light}", (cx - 9 + light * 2.5, cy, 5.6), 0.1, mats["amber"])
 
 
+def build_stadium(kit, mats):
+    cx, cy = blender_xy(-8.0, -42.0)
+    sx, sy = 28.0, 20.0
+    box(kit, "stadium.field", (cx, cy, 0.12), (sx, sy, 0.16), mats["pitch"], 0)
+    box(kit, "stadium.ring", (cx, cy, 0.22), (10.0, 7.0, 0.04), mats["paint"], 0)
+    kit.cylinder("stadium.emblem", (cx, cy, 0.28), 1.4, 0.06, mats["gold"], vertices=8)
+    for step in range(5):
+        inset = step * 1.15
+        rise = 0.45 + step * 0.38
+        box(kit, f"stadium.stand.n.{step}", (cx, cy + sy / 2 - 1.2 - inset, rise), (sx - 2, 1.05, 0.28), mats["seat"] if step % 2 == 0 else mats["trim"], 0)
+        box(kit, f"stadium.stand.e.{step}", (cx + sx / 2 - 1.2 - inset, cy, rise), (1.05, sy - 4 - inset, 0.28), mats["trim"] if step % 2 == 0 else mats["seat"], 0)
+        box(kit, f"stadium.stand.w.{step}", (cx - sx / 2 + 1.2 + inset, cy, rise), (1.05, sy - 4 - inset, 0.28), mats["seat"] if step % 2 == 0 else mats["trim"], 0)
+    box(kit, "stadium.screen", (cx, cy + sy / 2 - 0.4, 4.2), (8.5, 0.2, 3.4), mats["screen"], 0)
+    box(kit, "stadium.board", (cx, cy + sy / 2 + 0.15, 4.2), (9.2, 0.25, 4.0), mats["iron"], 0)
+    for index, (ox, oy) in enumerate(((-sx / 2, sy / 2), (sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))):
+        kit.cylinder(f"stadium.mast.{index}", (cx + ox, cy + oy, 4.5), 0.08, 9.0, mats["iron"], vertices=6)
+        box(kit, f"stadium.flag.{index}", (cx + ox + 0.7, cy + oy, 7.6), (1.3, 0.06, 0.7), mats[f"awning.{index}"], 0)
+        kit.cylinder(f"stadium.flood.{index}", (cx + ox * 0.72, cy + oy * 0.72, 7.2), 0.28, 0.16, mats["cloth"], vertices=8)
+    for step in range(3):
+        box(kit, f"stadium.step.{step}", (cx, cy - sy / 2 - 1.2 - step * 0.7, 0.1 + step * 0.06), (6.0, 0.65, 0.12), mats["kerb"], 0)
+
+
 def build_village():
     core.reset_scene()
     kit = core.Kit()
@@ -352,6 +374,9 @@ def build_village():
         "awning.3": core.material("awning.3", "#f4a261", metallic=0.0, roughness=0.65),
         "awning.4": core.material("awning.4", "#8ecae6", metallic=0.0, roughness=0.65),
         "awning.5": core.material("awning.5", "#e07a9a", metallic=0.0, roughness=0.65),
+        "pitch": core.material("pitch", "#3f8f45", metallic=0.0, roughness=0.85),
+        "seat": core.material("seat", "#d8692a", metallic=0.05, roughness=0.55),
+        "trim": core.material("trim", "#2a2e33", metallic=0.4, roughness=0.45),
     }
     build_terrain(kit, mats)
     if ART_STEP >= 3:
@@ -361,6 +386,8 @@ def build_village():
         build_vault_bank(kit, mats)
     if ART_STEP >= 5:
         build_market(kit, mats)
+    if ART_STEP >= 6:
+        build_stadium(kit, mats)
     rooms = []
     for district, name, _prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)

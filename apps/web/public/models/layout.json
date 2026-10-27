@@ -1,6 +1,6 @@
 {
   "units": "gltf-y-up-meters",
-  "artStep": 5,
+  "artStep": 6,
   "rooms": [
     {
       "id": "vault-quarter",
