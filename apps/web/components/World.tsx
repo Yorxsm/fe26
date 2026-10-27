@@ -57,6 +57,7 @@ function EnvironmentLight() {
     const loader = new RGBELoader();
     let alive = true;
     let env: THREE.Texture | null = null;
+    let sky: THREE.Texture | null = null;
     loader.load("/textures/kiara_1_dawn_1k.hdr", (texture) => {
       if (!alive) {
         texture.dispose();
@@ -65,14 +66,18 @@ function EnvironmentLight() {
       texture.mapping = THREE.EquirectangularReflectionMapping;
       const pmrem = new THREE.PMREMGenerator(gl);
       env = pmrem.fromEquirectangular(texture).texture;
+      sky = texture;
       scene.environment = env;
-      texture.dispose();
+      scene.background = texture;
+      scene.backgroundBlurriness = 0.12;
       pmrem.dispose();
     });
     return () => {
       alive = false;
       if (scene.environment === env) scene.environment = null;
+      if (scene.background === sky) scene.background = null;
       env?.dispose();
+      sky?.dispose();
     };
   }, [gl, scene]);
   return null;
@@ -106,7 +111,7 @@ function CloudSea() {
       {puffs.map(([x, y, z, w, h], index) => (
         <mesh key={index} position={[x, y, z]} rotation={[-Math.PI / 2, 0, index * 0.2]}>
           <planeGeometry args={[w, h]} />
-          <meshBasicMaterial map={texture} transparent depthWrite={false} fog />
+          <meshBasicMaterial map={texture} transparent opacity={0.4} depthWrite={false} fog />
         </mesh>
       ))}
     </group>
@@ -172,7 +177,6 @@ function SunBeams() {
 export function World() {
   return (
     <>
-      <Sky />
       <EnvironmentLight />
       <CloudSea />
       <GrassBlades />

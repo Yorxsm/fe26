@@ -8,12 +8,14 @@ import {
   DepthOfFieldEffect,
   EffectComposer,
   EffectPass,
+  GodRaysEffect,
   NormalPass,
   RenderPass,
   SSAOEffect,
   ToneMappingEffect,
   ToneMappingMode,
 } from "postprocessing";
+import { Nature } from "@/components/Nature";
 import { World } from "@/components/World";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -170,6 +172,7 @@ function dress(root: THREE.Object3D, recolor?: string) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
+    if (mesh.name.startsWith("tree.")) mesh.visible = false;
   });
   return root;
 }
@@ -365,6 +368,14 @@ function Grade({ focusId }: { focusId: string | null }) {
   const focus = useRef(focusId);
   focus.current = focusId;
   const grade = useMemo(() => {
+    const sun = new THREE.Mesh(
+      new THREE.SphereGeometry(7, 16, 12),
+      new THREE.MeshBasicMaterial({ color: "#ffe3a8", transparent: true, opacity: 0.95, depthWrite: false, fog: false }),
+    );
+    sun.name = "sun.disc";
+    sun.position.set(96, 52, 40);
+    sun.frustumCulled = false;
+    scene.add(sun);
     const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
     const normal = new NormalPass(scene, camera, { resolutionScale: 0.5 });
     const dof = new DepthOfFieldEffect(camera, { focusDistance: 18, focusRange: 8, bokehScale: 0.2, resolutionScale: 0.5 });
@@ -383,18 +394,25 @@ function Grade({ focusId }: { focusId: string | null }) {
         camera,
         ssao,
         dof,
+        new GodRaysEffect(camera, sun, { samples: 24, density: 0.9, decay: 0.95, weight: 0.1, exposure: 0.18, clampMax: 0.45 }),
         new BloomEffect({ intensity: 0.06, luminanceThreshold: 0.98, luminanceSmoothing: 0.2, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
-    return { composer, dof };
+    return { composer, dof, sun };
   }, [camera, gl, scene]);
 
   useLayoutEffect(() => {
     grade.composer.setSize(size.width, size.height);
   }, [grade, size.height, size.width]);
 
-  useLayoutEffect(() => () => grade.composer.dispose(), [grade]);
+  useLayoutEffect(
+    () => () => {
+      grade.composer.dispose();
+      grade.sun.removeFromParent();
+    },
+    [grade],
+  );
 
   useFrame((_, delta) => {
     const room = DISTRICTS.find((district) => district.id === focus.current);
@@ -572,6 +590,7 @@ export default function CityMap({
     >
       <color attach="background" args={["#ffcf9e"]} />
       <World />
+      <Nature />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 5, 18]} intensity={25} color="#ffb060" distance={28} decay={2} />
       <pointLight position={[46, 4, 14]} intensity={18} color="#ffd2a8" distance={26} decay={2} />
