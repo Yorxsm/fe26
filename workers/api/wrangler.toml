@@ -1,9 +1,14 @@
 name = "fe2vi-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-01-15"
-workers_dev = true
+workers_dev = false
 
-# Build the wasm shim locally. Do not deploy from this foundation.
+# Served at https://api.fe2vi.space as a Workers Custom Domain.
+routes = [
+  { pattern = "api.fe2vi.space", custom_domain = true }
+]
+
+# Build the wasm shim with worker-build, then deploy with `wrangler deploy`.
 [build]
 command = "worker-build --release"
 
@@ -14,9 +19,10 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["SpectatorFeed"]
+# SQLite-backed Durable Objects (required on the Workers Free plan).
+new_sqlite_classes = ["SpectatorFeed"]
 
-# Cron is local configuration. Do not deploy this worker.
+# Cron runs on the deployed worker every five minutes.
 [triggers]
 crons = ["*/5 * * * *"]
 
@@ -26,7 +32,7 @@ FE2VI_RPC_URL = "https://rpc.testnet.near.org"
 FE2VI_FACTORY_ID = "factory.fe2vi.testnet"
 FE2VI_REGISTRY_ID = "registry.fe2vi.testnet"
 FE2VI_HEIST_ID = "heist.fe2vi.testnet"
-# fe2vi.space is a name in the docs. This file does not bind a domain.
+# Deployed to api.fe2vi.space (see routes above). Testnet only.
 # The Intents API key is a secret. Do not put it in [vars]. Live calls stay off.
 FE2VI_INTENTS_LIVE = "0"
 NEAR_INTENTS_AGENT_API_URL = "https://api.agentsonintents.com"

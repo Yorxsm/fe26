@@ -7,7 +7,8 @@
     "build": "node scripts/check-type.mjs && next build",
     "check:type": "node scripts/check-type.mjs",
     "start": "next start",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview"
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "NEXT_PUBLIC_FE2VI_API_URL=https://api.fe2vi.space opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@near-js/transactions": "^2.5.1",

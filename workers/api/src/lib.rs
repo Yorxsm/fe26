@@ -102,7 +102,7 @@ mod edge {
                     }
                     let mut response = Response::ok(body)?.with_status(status);
                     if let Some(location) = location {
-                        response = response.with_header("Location", &location)?;
+                        response.headers_mut().set("Location", &location)?;
                     }
                     with_cors(response, content_type)
                 }

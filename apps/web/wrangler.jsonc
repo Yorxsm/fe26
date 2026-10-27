@@ -8,7 +8,14 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Served at fe2vi.space and www.fe2vi.space as Workers Custom Domains.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "fe2vi.space", "custom_domain": true },
+    { "pattern": "www.fe2vi.space", "custom_domain": true }
+  ],
   "vars": {
-    "FE2VI_NETWORK": "testnet"
+    "FE2VI_NETWORK": "testnet",
+    "NEXT_PUBLIC_FE2VI_API_URL": "https://api.fe2vi.space"
   }
 }
