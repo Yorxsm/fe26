@@ -57,13 +57,7 @@ const titleAimMobile = new THREE.Vector3(18, 14.9, -6);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
-const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: INTERIOR_SHOTS["vault-quarter"].eye, target: INTERIOR_SHOTS["vault-quarter"].aim },
-  { position: INTERIOR_SHOTS["trading-village"].eye, target: INTERIOR_SHOTS["trading-village"].aim },
-  { position: INTERIOR_SHOTS["war-room"].eye, target: INTERIOR_SHOTS["war-room"].aim },
-  { position: INTERIOR_SHOTS["skin-forge"].eye, target: INTERIOR_SHOTS["skin-forge"].aim },
-  { position: [-8, 7, -20], target: [-8, 2.2, -48] },
-];
+const BEATS = BEAT_IDS.map((id) => INTERIOR_SHOTS[id]);
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
 
@@ -82,12 +76,17 @@ type ScreenRect = { left: number; right: number; top: number; bottom: number };
 const projectPoint = new THREE.Vector3();
 const hudCover = { stamp: -1, bottom: [] as ScreenRect[], tags: [] as ScreenRect[], canvas: null as DOMRect | null };
 
-function readHudRects(selector: string) {
+function readHudRects(selector: string, pad = 0) {
   const rects: ScreenRect[] = [];
   document.querySelectorAll(selector).forEach((node) => {
     const rect = node.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return;
-    rects.push({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+    rects.push({
+      left: rect.left - pad,
+      right: rect.right + pad,
+      top: rect.top - pad,
+      bottom: rect.bottom + pad,
+    });
   });
   return rects;
 }
@@ -95,7 +94,7 @@ function readHudRects(selector: string) {
 function hudRects(stamp: number, canvas: HTMLCanvasElement) {
   if (hudCover.stamp !== stamp) {
     hudCover.stamp = stamp;
-    hudCover.bottom = readHudRects(".hud-br, .live-feed, .minimap");
+    hudCover.bottom = readHudRects(".hud-br, .live-feed, .minimap", 18);
     hudCover.tags = readHudRects(".hud-tl, .hud-tr, .hud-bl, .hud-br, .hud-bc, .live-feed, .minimap, .audio-hud, .quest-hint, .stress-readout");
     hudCover.canvas = canvas.getBoundingClientRect();
   }
@@ -108,7 +107,7 @@ function rectsOverlap(a: ScreenRect, b: ScreenRect) {
 
 /** Screen box of a standing agent, in viewport pixels. Null when the body is behind the camera. */
 function agentOnScreen(x: number, z: number, camera: THREE.Camera, canvas: DOMRect) {
-  const half = 0.3;
+  const half = 0.52;
   const samples: Array<[number, number]> = [
     [0, 0.02],
     [0, AGENT_SCALE],
@@ -290,7 +289,7 @@ function Smoke({ position }: { position: [number, number, number] }) {
   );
 }
 
-const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge"]);
+const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"]);
 
 const BUILDING_GRADE: Record<string, { tint: string; rough: number; metal: number }> = {
   vault: { tint: "#d4a05a", rough: 0.78, metal: 0.02 },
@@ -412,8 +411,8 @@ function Kits({
         const copies = source.map((mat) => {
           const copy = mat.clone();
           if (isStandard(copy)) {
-            copy.emissive = new THREE.Color("#ffe6b0");
-            copy.emissiveIntensity = 0.7;
+            copy.emissive = new THREE.Color("#ff8a2a");
+            copy.emissiveIntensity = 0.48;
           }
           return copy;
         });
@@ -672,10 +671,12 @@ function Station({
   onPick,
   focusId,
   beatPrefix,
+  concealed,
 }: {
   onPick: (district: District) => void;
   focusId: string | null;
   beatPrefix: string | null;
+  concealed: boolean;
 }) {
   const gltf = useGLTF("/models/station.glb", false, true);
   const scene = useMemo(() => {
@@ -698,6 +699,8 @@ function Station({
     paintScreen(scene, "war.map", paintWarMap);
   }, [scene]);
   useFrame((state, delta) => {
+    scene.visible = !concealed;
+    if (concealed) return;
     const wheel = scene.getObjectByName("vault.wheel");
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
@@ -1238,9 +1241,9 @@ function CameraDriver({
     let drive = false;
     if (mode === "cutscene") {
       const shot = BEATS[Math.min(beat, BEATS.length - 1)];
-      aim.set(shot.target[0], shot.target[1], shot.target[2]);
-      eye.set(shot.position[0], shot.position[1], shot.position[2]);
-      applyFov(beat < 4 ? 64 : 32);
+      aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+      eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
+      applyFov(shot.fov ?? 50);
       drive = true;
     } else if (poster === "front6") {
       eye.set(0, 3.42 * fit, 17);
@@ -1612,9 +1615,35 @@ function WindowGlow() {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, spots.length]}>
       <planeGeometry args={[1.5, 1.15]} />
-      <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={0.7} roughness={0.35} />
+      <meshStandardMaterial color="#e08a3a" emissive="#ff7a28" emissiveIntensity={0.62} roughness={0.42} />
     </instancedMesh>
   );
+}
+
+function DrawProbe() {
+  const gl = useThree((state) => state.gl);
+  const armed = useRef(false);
+  useLayoutEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("frame")) return;
+    armed.current = true;
+    gl.info.autoReset = false;
+    return () => {
+      gl.info.autoReset = true;
+    };
+  }, [gl]);
+  useFrame(() => {
+    if (!armed.current) return;
+    let node = document.getElementById("draw-readout");
+    if (!node) {
+      node = document.createElement("p");
+      node.id = "draw-readout";
+      node.hidden = true;
+      document.body.appendChild(node);
+    }
+    node.textContent = String(gl.info.render.calls);
+    gl.info.reset();
+  });
+  return null;
 }
 
 function FrameStats({ count }: { count: number }) {
@@ -1745,7 +1774,7 @@ export default function CityMap({
       ))}
       <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
-        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 9.6]} color="#ffb060" intensity={5} distance={18} decay={2} />
+        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 9.6]} color="#ff8a32" intensity={4.5} distance={16} decay={2} />
       ))}
       <mesh position={[12, 16.2, 40]}>
         <sphereGeometry args={[0.32, 10, 8]} />
@@ -1758,7 +1787,7 @@ export default function CityMap({
       </mesh>
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 2.4, 18]} intensity={6} color="#ffb060" distance={14} decay={2} />
-      <pointLight position={[46, 2.4, 14]} intensity={5} color="#ffd2a8" distance={14} decay={2} />
+      <pointLight position={[46, 2.4, 14]} intensity={5} color="#ff9a4a" distance={14} decay={2} />
       <pointLight position={[12, 2.4, 40]} intensity={4} color="#9fd0ff" distance={12} decay={2} />
       <pointLight position={[-38, 2.4, -24]} intensity={5} color="#ff6a1a" distance={12} decay={2} />
       {lineup ? (
@@ -1767,7 +1796,8 @@ export default function CityMap({
           <meshBasicMaterial color="#101018" />
         </mesh>
       ) : null}
-      <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
+      <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
+      <DrawProbe />
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
       ) : (

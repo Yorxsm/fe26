@@ -1,69 +1,160 @@
 "use client";
 
-import { useGLTF } from "@react-three/drei";
-import { Suspense, useMemo } from "react";
+import { Text, useGLTF } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
+import { Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { DISPLAY_FONT } from "@/lib/fonts";
+import { tapeLines } from "@/lib/tape";
 
-const ROOMS: Record<string, { url: string; position: [number, number, number]; wall: string; floor: string }> = {
-  "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18], wall: "#8d6438", floor: "#6a4a2e" },
-  "trading-village": { url: "/models/interior-market.glb", position: [46, 0, 14], wall: "#8a3e1c", floor: "#5c3018" },
-  "war-room": { url: "/models/interior-war.glb", position: [12, 0, 40], wall: "#3a4654", floor: "#242a30" },
-  "skin-forge": { url: "/models/interior-forge.glb", position: [-38, 0, -24], wall: "#7a2e1c", floor: "#542418" },
-  "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -34], wall: "#a89068", floor: "#6e5838" },
+const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
+  "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18] },
+  "trading-village": { url: "/models/interior-market.glb", position: [46, 0, 14] },
+  "war-room": { url: "/models/interior-war.glb", position: [12, 0, 40] },
+  "skin-forge": { url: "/models/interior-forge.glb", position: [-38, 0, -24] },
+  "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -42] },
 };
 
-function sourceName(node: THREE.Object3D): string {
-  let current: THREE.Object3D | null = node;
-  while (current) {
-    const stored = current.userData.name;
-    if (typeof stored === "string" && stored.includes(".")) return stored;
-    current = current.parent;
-  }
-  return node.name;
-}
+const LAMPS: Array<[number, number, number, string]> = [
+  [0, 3.15, -1.2, "#ff9a3c"],
+  [-3.4, 2.5, 0.8, "#ffb15a"],
+  [3.2, 2.3, -0.4, "#ff8a32"],
+  [0.4, 2.1, 2.6, "#ffc48a"],
+];
 
-function paintFinish(mesh: THREE.Mesh, color: string, roughness: number) {
-  const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-  const copies = source.map((mat) => {
-    const copy = mat.clone();
-    const standard = copy as THREE.MeshStandardMaterial;
-    if (standard.isMeshStandardMaterial) {
-      standard.color.set(color);
-      standard.roughness = roughness;
-      standard.metalness = 0;
-      standard.envMapIntensity = 0.06;
-      standard.map = null;
-    }
-    return copy;
-  });
-  mesh.material = Array.isArray(mesh.material) ? copies : copies[0];
-}
-
-function Room({ url, wall, floor }: { url: string; wall: string; floor: string }) {
+function RoomMesh({ url }: { url: string }) {
   const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
     cloned.traverse((node) => {
       const mesh = node as THREE.Mesh;
-      const label = sourceName(node);
-      if (label.includes("wall.e")) node.visible = false;
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
-      if (label.includes("wall")) paintFinish(mesh, wall, 0.9);
-      else if (label.includes("floor")) paintFinish(mesh, floor, 0.94);
-      else if (mesh.material) {
-        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        source.forEach((mat) => {
-          const standard = mat as THREE.MeshStandardMaterial;
-          if (standard.isMeshStandardMaterial) standard.envMapIntensity = 0.12;
-        });
-      }
     });
     return cloned;
-  }, [gltf.scene, wall, floor]);
+  }, [gltf.scene]);
   return <primitive object={scene} />;
+}
+
+function Tape({ position }: { position: [number, number, number] }) {
+  const [lines, setLines] = useState(() => tapeLines());
+  const minute = useRef(Math.floor(Date.now() / 60000));
+  useFrame(() => {
+    const next = Math.floor(Date.now() / 60000);
+    if (next === minute.current) return;
+    minute.current = next;
+    setLines(tapeLines());
+  });
+  return (
+    <group position={position}>
+      {lines.map((line, index) => (
+        <Text
+          key={line}
+          position={[0, 0.42 - index * 0.38, 0.08]}
+          font={DISPLAY_FONT}
+          fontSize={0.22}
+          color="#2fb86a"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {line}
+        </Text>
+      ))}
+    </group>
+  );
+}
+
+function SeatCrowd() {
+  const bodies = useRef<THREE.InstancedMesh>(null);
+  const heads = useRef<THREE.InstancedMesh>(null);
+  const spots = useMemo(() => {
+    const list: Array<[number, number, number]> = [];
+    for (let row = 0; row < 4; row += 1) {
+      for (let seat = 0; seat < 10; seat += 1) {
+        list.push([-4.6 + seat * 1.02, 0.55 + row * 0.28, 2.55 + row * 0.72]);
+      }
+    }
+    return list;
+  }, []);
+  useLayoutEffect(() => {
+    const dummy = new THREE.Object3D();
+    spots.forEach(([x, y, z], index) => {
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      bodies.current?.setMatrixAt(index, dummy.matrix);
+      dummy.position.set(x, y + 0.34, z);
+      dummy.updateMatrix();
+      heads.current?.setMatrixAt(index, dummy.matrix);
+    });
+    if (bodies.current) bodies.current.instanceMatrix.needsUpdate = true;
+    if (heads.current) heads.current.instanceMatrix.needsUpdate = true;
+  }, [spots]);
+  return (
+    <>
+      <instancedMesh ref={bodies} args={[undefined, undefined, spots.length]} frustumCulled={false}>
+        <capsuleGeometry args={[0.12, 0.22, 2, 6]} />
+        <meshStandardMaterial color="#3a2a24" roughness={0.72} />
+      </instancedMesh>
+      <instancedMesh ref={heads} args={[undefined, undefined, spots.length]} frustumCulled={false}>
+        <sphereGeometry args={[0.1, 8, 6]} />
+        <meshStandardMaterial color="#c4a484" roughness={0.6} />
+      </instancedMesh>
+    </>
+  );
+}
+
+function RoomCopy({ id }: { id: string }) {
+  if (id === "vault-quarter") {
+    return (
+      <>
+        <Text position={[0, 0.16, 5.15]} rotation={[-Math.PI / 2, 0, 0]} font={DISPLAY_FONT} fontSize={0.22} color="#ffb15a" anchorX="center">
+          ENTRY
+        </Text>
+        <Text position={[5.35, 0.7, -1.2]} font={DISPLAY_FONT} fontSize={0.18} color="#ff5a4a" anchorX="center">
+          EXIT
+        </Text>
+      </>
+    );
+  }
+  if (id === "trading-village") {
+    return (
+      <>
+        <Tape position={[0, 2.35, -5.72]} />
+        <Text position={[5.28, 2.7, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+          1 TAPE
+        </Text>
+        <Text position={[5.28, 2.25, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+          2 MASON
+        </Text>
+        <Text position={[5.28, 1.8, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+          3 SCOUT
+        </Text>
+      </>
+    );
+  }
+  if (id === "war-room") {
+    return (
+      <Text position={[0, 1.35, -1.2]} font={DISPLAY_FONT} fontSize={0.2} color="#7ee0ea" anchorX="center">
+        FLAG
+      </Text>
+    );
+  }
+  if (id === "skin-forge") {
+    return (
+      <Text position={[5.4, 1.85, -4.6]} font={DISPLAY_FONT} fontSize={0.16} color="#e2b340" anchorX="center">
+        TROPHIES
+      </Text>
+    );
+  }
+  return (
+    <Text position={[0, 2.7, -5.68]} font={DISPLAY_FONT} fontSize={0.34} color="#2fb86a" anchorX="center">
+      CUP  2-1
+    </Text>
+  );
 }
 
 export function Interiors({ focusId, frameMode }: { focusId: string | null; frameMode: "in" | "out" }) {
@@ -72,8 +163,15 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   return (
     <Suspense fallback={null}>
       <group position={room.position}>
-        <Room key={room.url} url={room.url} wall={room.wall} floor={room.floor} />
+        <RoomMesh key={room.url} url={room.url} />
+        {LAMPS.map(([x, y, z, color], index) => (
+          <pointLight key={index} position={[x, y, z]} color={color} intensity={8} distance={8} decay={2} />
+        ))}
+        <RoomCopy id={focusId} />
+        {focusId === "cup-stadium" ? <SeatCrowd /> : null}
       </group>
     </Suspense>
   );
 }
+
+for (const room of Object.values(ROOMS)) useGLTF.preload(room.url, false, true);

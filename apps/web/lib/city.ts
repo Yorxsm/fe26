@@ -134,17 +134,20 @@ export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: 
 
 export const WALK_SHOT: CameraShot = { eye: [0, 2.4 / 1.5, 14 / 1.5], aim: [0, 2.2 / 1.5, 0], fov: 42 };
 
-/** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
-function acrossRoom(x: number, z: number): CameraShot {
-  return { eye: [x + 2.7, 1.62, z + 2.15], aim: [x - 1.55, 0.82, z - 1.45], fov: 64 };
+/**
+ * Inside the authored room. The shell runs x ±7.2, z ±6.2, ceiling y 4.4.
+ * The eye sits south of center, clear of the door lintel and the side walls.
+ */
+function insideRoom(x: number, z: number): CameraShot {
+  return { eye: [x + 0.15, 1.62, z + 4.35], aim: [x - 0.15, 1.4, z - 2.6], fov: 50 };
 }
 
 export const INTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": acrossRoom(-42, 18),
-  "trading-village": acrossRoom(46, 14),
-  "war-room": acrossRoom(12, 40),
-  "skin-forge": acrossRoom(-38, -24),
-  "cup-stadium": acrossRoom(-8, -34),
+  "vault-quarter": insideRoom(-42, 18),
+  "trading-village": insideRoom(46, 14),
+  "war-room": insideRoom(12, 40),
+  "skin-forge": insideRoom(-38, -24),
+  "cup-stadium": insideRoom(-8, -42),
   "launch-pier": { eye: [62, 8, -12], aim: [50, 3, -28] },
   "card-club": { eye: [-42, 8, 12], aim: [-54, 3, -2] },
   "oracle-plaza": { eye: [32, 8, 4], aim: [20, 3, -10] },
@@ -159,13 +162,13 @@ const CAMERA_PARK: Record<string, [number, number]> = {
   "cup-stadium": [-14, -18],
 };
 
-/** Front lawn, looking at the facade. */
+/** Front lawn, close enough that the facade fills the frame. */
 export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": { eye: [-42, 10, 54], aim: [-42, 6, 18] },
-  "trading-village": { eye: [46, 10, 50], aim: [46, 6, 14] },
-  "war-room": { eye: [12, 12, 72], aim: [12, 8, 40] },
-  "skin-forge": { eye: [-38, 9, -2], aim: [-38, 4, -24] },
-  "cup-stadium": { eye: [-8, 14, -14], aim: [-8, 4, -42] },
+  "vault-quarter": { eye: [-42, 6.5, 44], aim: [-42, 3.4, 20], fov: 42 },
+  "trading-village": { eye: [46, 6.5, 38], aim: [46, 3.2, 16], fov: 42 },
+  "war-room": { eye: [12, 6.5, 56], aim: [12, 3.2, 40], fov: 40 },
+  "skin-forge": { eye: [-38, 6, -8], aim: [-38, 2.8, -22], fov: 42 },
+  "cup-stadium": { eye: [-8, 7, -26], aim: [-8, 3, -40], fov: 40 },
   "launch-pier": { eye: [50, 12, -4], aim: [50, 4, -28] },
   "card-club": { eye: [-54, 12, 18], aim: [-54, 4, -2] },
   "oracle-plaza": { eye: [20, 12, 10], aim: [20, 4, -10] },
