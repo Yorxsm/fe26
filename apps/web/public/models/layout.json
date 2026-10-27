@@ -1,0 +1,131 @@
+{
+  "units": "gltf-y-up-meters",
+  "rooms": [
+    {
+      "id": "vault-quarter",
+      "name": "Vault",
+      "position": [
+        -8.8,
+        0,
+        -5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "oracle-plaza",
+      "name": "Oracle Plaza",
+      "position": [
+        0.0,
+        0,
+        -5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "cup-stadium",
+      "name": "Stadium",
+      "position": [
+        8.8,
+        0,
+        -5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "war-room",
+      "name": "War Room",
+      "position": [
+        -8.8,
+        0,
+        5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "skin-forge",
+      "name": "Skin Forge",
+      "position": [
+        0.0,
+        0,
+        5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "trading-village",
+      "name": "Trading Market",
+      "position": [
+        8.8,
+        0,
+        5.2
+      ],
+      "size": [
+        6.2,
+        2.45,
+        5.8
+      ]
+    },
+    {
+      "id": "launch-pier",
+      "name": "Launch Pier",
+      "position": [
+        16.4,
+        0,
+        0
+      ],
+      "size": [
+        5.0,
+        2.45,
+        4.6
+      ]
+    },
+    {
+      "id": "card-club",
+      "name": "Card Club",
+      "position": [
+        -16.4,
+        0,
+        0
+      ],
+      "size": [
+        5.0,
+        2.45,
+        4.6
+      ]
+    },
+    {
+      "id": "observation",
+      "name": "Observation Deck",
+      "position": [
+        0,
+        0.7,
+        -11.6
+      ],
+      "size": [
+        20,
+        1.2,
+        3.4
+      ]
+    }
+  ]
+}
