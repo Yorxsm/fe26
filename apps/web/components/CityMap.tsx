@@ -46,12 +46,13 @@ const overviewEye = new THREE.Vector3(
 );
 const overviewAim = new THREE.Vector3(0, 1.2, 0);
 
+const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: [-32, 10, 28], target: [-42, 2, 18] },
-  { position: [56, 10, 24], target: [46, 2, 14] },
-  { position: [22, 12, 52], target: [12, 2, 40] },
-  { position: [-28, 14, -12], target: [-38, 2, -24] },
-  { position: [4, 16, -28], target: [-8, 3, -42] },
+  { position: [-42, 3.2, 24], target: [-42, 2.2, 14] },
+  { position: [46, 3.2, 20], target: [46, 2.2, 10] },
+  { position: [12, 3.2, 46], target: [12, 2.2, 36] },
+  { position: [-38, 3.2, -18], target: [-38, 2.0, -28] },
+  { position: [-8, 4.2, -34], target: [-8, 2.2, -46] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
@@ -159,7 +160,9 @@ function dress(root: THREE.Object3D, recolor?: string) {
       });
     }
     sources.forEach((material) => {
-      if ("envMapIntensity" in material) material.envMapIntensity = 0.35;
+      if (!("envMapIntensity" in material)) return;
+      const metal = "metalness" in material ? material.metalness : 0;
+      material.envMapIntensity = metal > 0.45 ? 0.22 : 0.04;
     });
     const prefix = mesh.name.split(".")[0];
     const district = ROOM_PREFIX[prefix];
@@ -196,7 +199,15 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
   });
 }
 
-function Station({ onPick, focusId }: { onPick: (district: District) => void; focusId: string | null }) {
+function Station({
+  onPick,
+  focusId,
+  beatPrefix,
+}: {
+  onPick: (district: District) => void;
+  focusId: string | null;
+  beatPrefix: string | null;
+}) {
   const gltf = useGLTF("/models/station.glb", false, true);
   const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
   useLayoutEffect(() => {
@@ -207,7 +218,7 @@ function Station({ onPick, focusId }: { onPick: (district: District) => void; fo
   useFrame((state, delta) => {
     const wheel = scene.getObjectByName("vault.wheel");
     if (wheel) wheel.rotateY(delta * 0.35);
-    const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0];
+    const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
     scene.traverse((node) => {
       if (!node.name.endsWith(".roof")) return;
       node.visible = node.name.split(".")[0] !== openPrefix;
@@ -358,7 +369,7 @@ function Grade({ focusId }: { focusId: string | null }) {
     const ssao = new SSAOEffect(camera, normal.texture, {
       samples: 9,
       rings: 4,
-      intensity: 0.4,
+      intensity: 0.12,
       radius: 0.08,
       luminanceInfluence: 0.65,
       bias: 0.04,
@@ -370,7 +381,7 @@ function Grade({ focusId }: { focusId: string | null }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.35, luminanceThreshold: 0.85, luminanceSmoothing: 0.25, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.06, luminanceThreshold: 0.98, luminanceSmoothing: 0.2, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -388,10 +399,10 @@ function Grade({ focusId }: { focusId: string | null }) {
     if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
     if (room) {
       grade.dof.target.set(room.x, 1.2, room.z);
-      grade.dof.bokehScale = 1.7;
+      grade.dof.bokehScale = 0.25;
     } else {
       grade.dof.target.set(0, 1.2, 0);
-      grade.dof.bokehScale = 0.15;
+      grade.dof.bokehScale = 0.02;
     }
     grade.composer.render(delta);
   }, 1);
@@ -551,7 +562,10 @@ export default function CityMap({
       <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-42, 5, 18]} intensity={25} color="#ffb060" distance={28} decay={2} />
-      <Station onPick={onPick} focusId={focusId} />
+      <pointLight position={[46, 4, 14]} intensity={18} color="#ffd2a8" distance={26} decay={2} />
+      <pointLight position={[12, 4, 40]} intensity={16} color="#9fd0ff" distance={24} decay={2} />
+      <pointLight position={[-38, 4, -24]} intensity={18} color="#ff6a1a" distance={22} decay={2} />
+      <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
       {CITY_AGENTS.map((agent, index) => (
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
       ))}

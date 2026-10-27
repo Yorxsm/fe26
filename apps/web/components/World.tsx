@@ -25,8 +25,8 @@ const skyFragment = `
     vec3 color = mix(peach, lilac, smoothstep(0.02, 0.48, h));
     color = mix(color, blue, smoothstep(0.42, 0.95, h));
     vec3 sun = normalize(vec3(0.55, 0.28, 0.22));
-    float glow = pow(max(dot(dir, sun), 0.0), 28.0);
-    color += vec3(1.0, 0.72, 0.42) * glow * 0.85;
+    float glow = pow(max(dot(dir, sun), 0.0), 48.0);
+    color += vec3(1.0, 0.78, 0.45) * glow * 0.28;
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -138,7 +138,7 @@ function GrassBlades() {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, 700]}>
       <coneGeometry args={[0.08, 0.7, 3]} />
-      <meshStandardMaterial color="#3f7a38" roughness={0.9} />
+      <meshStandardMaterial color="#1f7a32" roughness={0.92} metalness={0} envMapIntensity={0.02} />
     </instancedMesh>
   );
 }
@@ -157,7 +157,7 @@ function SunBeams() {
           <meshBasicMaterial
             color="#ffe0b0"
             transparent
-            opacity={0.09}
+            opacity={0.035}
             depthWrite={false}
             blending={THREE.AdditiveBlending}
             fog={false}
@@ -177,12 +177,12 @@ export function World() {
       <CloudSea />
       <GrassBlades />
       <SunBeams />
-      <hemisphereLight args={["#ffe0c4", "#b9a3e8", 0.32]} />
-      <ambientLight intensity={0.16} />
+      <hemisphereLight args={["#fff4dd", "#2f6a32", 0.42]} />
+      <ambientLight intensity={0.22} color="#fff8ee" />
       <directionalLight
         position={[60, 80, 30]}
-        intensity={1.8}
-        color="#ffd2a8"
+        intensity={1.05}
+        color="#fff0d0"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0008}
@@ -194,7 +194,7 @@ export function World() {
         shadow-camera-top={90}
         shadow-camera-bottom={-90}
       />
-      <fog attach="fog" args={["#f6d7b8", 120, 420]} />
+      <fog attach="fog" args={["#d5e4c4", 380, 980]} />
     </>
   );
 }
