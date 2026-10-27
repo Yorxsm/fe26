@@ -196,7 +196,7 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
   });
 }
 
-function Station({ onPick }: { onPick: (district: District) => void }) {
+function Station({ onPick, focusId }: { onPick: (district: District) => void; focusId: string | null }) {
   const gltf = useGLTF("/models/station.glb", false, true);
   const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
   useLayoutEffect(() => {
@@ -206,7 +206,12 @@ function Station({ onPick }: { onPick: (district: District) => void }) {
   }, [scene]);
   useFrame((state, delta) => {
     const wheel = scene.getObjectByName("vault.wheel");
-    if (wheel) wheel.rotateZ(delta * 0.35);
+    if (wheel) wheel.rotateY(delta * 0.35);
+    const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0];
+    scene.traverse((node) => {
+      if (!node.name.endsWith(".roof")) return;
+      node.visible = node.name.split(".")[0] !== openPrefix;
+    });
     const holo = scene.getObjectByName("war.holo");
     if (holo) holo.rotateY(delta * 0.8);
     const beacon = scene.getObjectByName("war.beacon") as THREE.Mesh | undefined;
@@ -235,7 +240,7 @@ function Station({ onPick }: { onPick: (district: District) => void }) {
         }}
       />
       {DISTRICTS.map((district) => (
-        <Billboard key={district.id} position={[district.x, 6, district.z]}>
+        <Billboard key={district.id} position={[district.x, 11, district.z]}>
           <mesh position={[0, 0, -0.05]}>
             <planeGeometry args={[Math.max(1.8, district.station.length * 0.2), 0.46]} />
             <meshStandardMaterial color="#2a241c" roughness={0.8} />
@@ -477,8 +482,8 @@ function CameraDriver({
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room) {
-        aim.set(room.x, 1.15, room.z);
-        eye.set(room.x + 8, 7.2, room.z + 8);
+        eye.set(room.x + 6, 3.4, room.z + 14);
+        aim.set(room.x, 2.2, room.z);
         drive = true;
       }
     }
@@ -540,7 +545,8 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <Station onPick={onPick} />
+      <pointLight position={[-42, 5, 18]} intensity={25} color="#ffb060" distance={28} decay={2} />
+      <Station onPick={onPick} focusId={focusId} />
       {CITY_AGENTS.map((agent, index) => (
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
       ))}
