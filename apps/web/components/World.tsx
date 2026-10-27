@@ -83,41 +83,6 @@ function EnvironmentLight() {
   return null;
 }
 
-function CloudSea() {
-  const group = useRef<THREE.Group>(null);
-  const texture = useMemo(() => {
-    const map = new THREE.TextureLoader().load("/textures/cloud.png");
-    map.colorSpace = THREE.SRGBColorSpace;
-    return map;
-  }, []);
-  useFrame((_, delta) => {
-    const root = group.current;
-    if (!root) return;
-    root.children.forEach((child, index) => {
-      child.position.x += delta * (0.35 + index * 0.08);
-      if (child.position.x > 90) child.position.x = -90;
-    });
-  });
-  const puffs = [
-    [-80, 55, -30, 90, 28],
-    [-20, 70, 20, 110, 32],
-    [40, 48, -50, 80, 24],
-    [90, 62, 10, 100, 30],
-    [-90, 40, 40, 70, 22],
-    [10, 80, 70, 120, 34],
-  ] as const;
-  return (
-    <group ref={group}>
-      {puffs.map(([x, y, z, w, h], index) => (
-        <mesh key={index} position={[x, y, z]} rotation={[-Math.PI / 2, 0, index * 0.2]}>
-          <planeGeometry args={[w, h]} />
-          <meshBasicMaterial map={texture} transparent opacity={0.4} depthWrite={false} fog />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 function GrassBlades() {
   const mesh = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
@@ -148,39 +113,11 @@ function GrassBlades() {
   );
 }
 
-function SunBeams() {
-  const beams = [
-    [22, 28, 10, -1.05, 0.35, 0.15],
-    [8, 32, 24, -1.15, 0.1, -0.2],
-    [30, 24, -6, -0.9, 0.55, 0.25],
-  ] as const;
-  return (
-    <group>
-      {beams.map(([x, y, z, rx, ry, rz], index) => (
-        <mesh key={index} position={[x, y, z]} rotation={[rx, ry, rz]}>
-          <planeGeometry args={[7, 46]} />
-          <meshBasicMaterial
-            color="#ffe0b0"
-            transparent
-            opacity={0.035}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            fog={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 export function World() {
   return (
     <>
       <EnvironmentLight />
-      <CloudSea />
       <GrassBlades />
-      <SunBeams />
       <hemisphereLight args={["#fff4dd", "#2f6a32", 0.42]} />
       <ambientLight intensity={0.22} color="#fff8ee" />
       <directionalLight

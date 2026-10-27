@@ -8,7 +8,6 @@ import {
   DepthOfFieldEffect,
   EffectComposer,
   EffectPass,
-  GodRaysEffect,
   NormalPass,
   RenderPass,
   SSAOEffect,
@@ -22,7 +21,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, placeAgent, type CityAgent, type District } from "@/lib/city";
+import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
@@ -51,18 +50,34 @@ const overviewEye = new THREE.Vector3(
 const overviewAim = new THREE.Vector3(0, 1.2, 0);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
+const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: [-42, 3.2, 24], target: [-42, 2.2, 14] },
-  { position: [46, 3.2, 20], target: [46, 2.2, 10] },
-  { position: [12, 3.2, 46], target: [12, 2.2, 36] },
-  { position: [-38, 3.2, -18], target: [-38, 2.0, -28] },
-  { position: [-8, 4.2, -34], target: [-8, 2.2, -46] },
+  { position: INTERIOR_SHOTS["vault-quarter"].eye, target: INTERIOR_SHOTS["vault-quarter"].aim },
+  { position: INTERIOR_SHOTS["trading-village"].eye, target: INTERIOR_SHOTS["trading-village"].aim },
+  { position: INTERIOR_SHOTS["war-room"].eye, target: INTERIOR_SHOTS["war-room"].aim },
+  { position: INTERIOR_SHOTS["skin-forge"].eye, target: INTERIOR_SHOTS["skin-forge"].aim },
+  { position: [-8, 7, -20], target: [-8, 2.2, -48] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
 
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
+
+/** glTFLoader strips "." from Object3D names. The authored name stays on userData. */
+function sourceName(node: THREE.Object3D): string {
+  let current: THREE.Object3D | null = node;
+  while (current) {
+    const stored = current.userData.name;
+    if (typeof stored === "string" && stored.includes(".")) return stored;
+    current = current.parent;
+  }
+  return node.name;
+}
+
+function isStandard(material: THREE.Material): material is THREE.MeshStandardMaterial {
+  return (material as THREE.MeshStandardMaterial).isMeshStandardMaterial === true;
+}
 
 function paintScreen(root: THREE.Object3D, name: string, draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void) {
   const mesh = root.getObjectByName(name) as THREE.Mesh | undefined;
@@ -178,23 +193,120 @@ function Smoke({ position }: { position: [number, number, number] }) {
 
 const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge"]);
 
-function Kits({ onPick, focusId, frameMode }: { onPick: (district: District) => void; focusId: string | null; frameMode: "in" | "out" }) {
+const BUILDING_GRADE: Record<string, { tint: string; rough: number; metal: number }> = {
+  vault: { tint: "#d4a05a", rough: 0.78, metal: 0.02 },
+  market: { tint: "#c4622a", rough: 0.82, metal: 0.02 },
+  war: { tint: "#3a4c5e", rough: 0.22, metal: 0.52 },
+  forge: { tint: "#b33a22", rough: 0.88, metal: 0.02 },
+  stadium: { tint: "#c9a36a", rough: 0.8, metal: 0.03 },
+  pier: { tint: "#c4a36c", rough: 0.84, metal: 0.02 },
+  club: { tint: "#c4a36c", rough: 0.84, metal: 0.02 },
+  oracle: { tint: "#c4a36c", rough: 0.84, metal: 0.02 },
+};
+
+const gradedAtlases = new Map<string, THREE.Texture>();
+
+/** Kenney's commercial atlas paints walls lilac. Swap those texels for a real wall color and leave trim alone. */
+function warmAtlas(source: THREE.Texture, key: string, tint: string): THREE.Texture {
+  const cached = gradedAtlases.get(key);
+  if (cached) return cached;
+  const image = source.image as CanvasImageSource & { width?: number; height?: number };
+  if (!image?.width || !image.height) return source;
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return source;
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  const hex = Number.parseInt(tint.slice(1), 16);
+  const wr = (hex >> 16) & 255;
+  const wg = (hex >> 8) & 255;
+  const wb = hex & 255;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i] / 255;
+    const g = data[i + 1] / 255;
+    const b = data[i + 2] / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const luma = (r + g + b) / 3;
+    const lilac = b + 0.02 >= r && b + 0.02 >= g && max - min < 0.36 && luma > 0.12 && luma < 0.92;
+    if (!lilac) continue;
+    const shade = 0.42 + luma * 0.9;
+    data[i] = Math.min(255, Math.round(wr * shade));
+    data[i + 1] = Math.min(255, Math.round(wg * shade));
+    data[i + 2] = Math.min(255, Math.round(wb * shade));
+  }
+  ctx.putImageData(pixels, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = source.flipY;
+  texture.wrapS = source.wrapS;
+  texture.wrapT = source.wrapT;
+  texture.repeat.copy(source.repeat);
+  texture.offset.copy(source.offset);
+  texture.anisotropy = source.anisotropy;
+  texture.needsUpdate = true;
+  gradedAtlases.set(key, texture);
+  return texture;
+}
+
+function buildingGrade(name: string) {
+  if (!name.startsWith("kit.")) return null;
+  if (/light|flag|crane|fence|cone|scaffold|plank|sign|gantry|flood|dish/.test(name)) return null;
+  return BUILDING_GRADE[name.split(".")[1]] ?? null;
+}
+
+function Kits({
+  onPick,
+  focusId,
+  frameMode,
+  beatId,
+}: {
+  onPick: (district: District) => void;
+  focusId: string | null;
+  frameMode: "in" | "out";
+  beatId: string | null;
+}) {
   const gltf = useGLTF("/models/kits.glb", false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
     cloned.traverse((node) => {
-      const key = node.name.split(".")[1];
+      const label = sourceName(node);
+      const key = label.startsWith("kit.") ? label.split(".")[1] : "";
       if (key && ROOM_PREFIX[key]) node.userData.district = ROOM_PREFIX[key];
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
-      if (/lights|flood|gantry/.test(node.name) && mesh.material) {
+      const grade = buildingGrade(label);
+      if (grade && mesh.material) {
+        const atlasKey = key || "kit";
         const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         const copies = source.map((mat) => {
           const copy = mat.clone();
-          if (copy instanceof THREE.MeshStandardMaterial) {
+          if (isStandard(copy)) {
+            copy.roughness = grade.rough;
+            copy.metalness = grade.metal;
+            copy.envMapIntensity = grade.metal > 0.4 ? 0.35 : 0.08;
+            if (copy.map) {
+              copy.map = warmAtlas(copy.map, atlasKey, grade.tint);
+              copy.color.set("#ffffff");
+            } else {
+              copy.color.set(grade.tint);
+            }
+          }
+          return copy;
+        });
+        mesh.material = Array.isArray(mesh.material) ? copies : copies[0];
+      }
+      if (/lights|flood|gantry/.test(label) && mesh.material) {
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const copies = source.map((mat) => {
+          const copy = mat.clone();
+          if (isStandard(copy)) {
             copy.emissive = new THREE.Color("#ffe6b0");
             copy.emissiveIntensity = 0.7;
           }
@@ -206,12 +318,13 @@ function Kits({ onPick, focusId, frameMode }: { onPick: (district: District) => 
     return cloned;
   }, [gltf.scene]);
   useLayoutEffect(() => {
+    const openId = beatId ?? (frameMode === "in" ? focusId : null);
     scene.traverse((node) => {
       const id = node.userData.district as string | undefined;
       if (!id) return;
-      node.visible = !(frameMode === "in" && focusId === id && INTERIOR_IDS.has(id));
+      node.visible = !(openId === id && INTERIOR_IDS.has(id));
     });
-  }, [scene, focusId, frameMode]);
+  }, [scene, focusId, frameMode, beatId]);
   return (
     <primitive
       object={scene}
@@ -250,14 +363,15 @@ function dress(root: THREE.Object3D, recolor?: string) {
       const metal = "metalness" in material ? material.metalness : 0;
       material.envMapIntensity = metal > 0.45 ? 0.22 : 0.04;
     });
-    const prefix = mesh.name.split(".")[0];
+    const label = sourceName(mesh);
+    const prefix = label.split(".")[0];
     const district = ROOM_PREFIX[prefix];
     if (district) mesh.userData.district = district;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
-    if (mesh.name.startsWith("tree.")) mesh.visible = false;
-    if (ROOM_PREFIX[prefix] && !mesh.name.endsWith(".pad")) mesh.visible = false;
+    if (label.startsWith("tree.")) mesh.visible = false;
+    if (ROOM_PREFIX[prefix] && !label.endsWith(".pad")) mesh.visible = false;
   });
   return root;
 }
@@ -308,7 +422,7 @@ function Station({
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
     scene.traverse((node) => {
-      const bits = node.name.split(".");
+      const bits = sourceName(node).split(".");
       if (!bits.includes("roof")) return;
       node.visible = bits[0] !== openPrefix;
     });
@@ -378,12 +492,14 @@ function AgentMesh({
   index,
   paused,
   audit,
+  focusId,
   onFollow,
 }: {
   agent: CityAgent;
   index: number;
   paused: boolean;
   audit: boolean;
+  focusId: string | null;
   onFollow: (index: number) => void;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
@@ -400,7 +516,7 @@ function AgentMesh({
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
-    const pose = placeAgent(index, state.clock.elapsedTime, paused);
+    const pose = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
     const nextMood = moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
@@ -445,22 +561,14 @@ function AgentMesh({
   );
 }
 
-function Grade({ focusId }: { focusId: string | null }) {
+function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
-  const focus = useRef(focusId);
-  focus.current = focusId;
+  const shotKind = useRef(shot);
+  shotKind.current = shot;
   const grade = useMemo(() => {
-    const sun = new THREE.Mesh(
-      new THREE.SphereGeometry(7, 16, 12),
-      new THREE.MeshBasicMaterial({ color: "#ffe3a8", transparent: true, opacity: 0.95, depthWrite: false, fog: false }),
-    );
-    sun.name = "sun.disc";
-    sun.position.set(96, 52, 40);
-    sun.frustumCulled = false;
-    scene.add(sun);
     const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
     const normal = new NormalPass(scene, camera, { resolutionScale: 0.5 });
     const dof = new DepthOfFieldEffect(camera, { focusDistance: 18, focusRange: 8, bokehScale: 0.2, resolutionScale: 0.5 });
@@ -479,12 +587,11 @@ function Grade({ focusId }: { focusId: string | null }) {
         camera,
         ssao,
         dof,
-        new GodRaysEffect(camera, sun, { samples: 24, density: 0.9, decay: 0.95, weight: 0.1, exposure: 0.18, clampMax: 0.45 }),
-        new BloomEffect({ intensity: 0.06, luminanceThreshold: 0.98, luminanceSmoothing: 0.2, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.04, luminanceThreshold: 0.98, luminanceSmoothing: 0.2, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
-    return { composer, dof, sun };
+    return { composer, dof };
   }, [camera, gl, scene]);
 
   useLayoutEffect(() => {
@@ -494,21 +601,17 @@ function Grade({ focusId }: { focusId: string | null }) {
   useLayoutEffect(
     () => () => {
       grade.composer.dispose();
-      grade.sun.removeFromParent();
     },
     [grade],
   );
 
   useFrame((_, delta) => {
-    const room = DISTRICTS.find((district) => district.id === focus.current);
     if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
-    if (room) {
-      grade.dof.target.set(room.x, 1.2, room.z);
-      grade.dof.bokehScale = 0.25;
-    } else {
-      grade.dof.target.set(0, 1.2, 0);
-      grade.dof.bokehScale = 0.02;
-    }
+    camera.getWorldDirection(aim);
+    const kind = shotKind.current;
+    const focusDistance = kind === "interior" ? 5.4 : kind === "hero" ? 26 : 48;
+    grade.dof.target.copy(camera.position).addScaledVector(aim, focusDistance);
+    grade.dof.bokehScale = kind === "overview" ? 0.015 : 0;
     grade.composer.render(delta);
   }, 1);
 
@@ -567,7 +670,13 @@ function CameraDriver({
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
     rig.autoRotate = false;
+    const applyFov = (fov: number) => {
+      if (Math.abs(camera.fov - fov) < 0.05) return;
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    };
     if (mode === "orbit") {
+      applyFov(32);
       rig.enabled = false;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
@@ -579,6 +688,7 @@ function CameraDriver({
     }
     if (!driving && homing.current) {
       rig.enabled = false;
+      applyFov(32);
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2.4);
@@ -594,8 +704,10 @@ function CameraDriver({
       const shot = BEATS[Math.min(beat, BEATS.length - 1)];
       aim.set(shot.target[0], shot.target[1], shot.target[2]);
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
+      applyFov(beat < 4 ? 64 : 32);
       drive = true;
     } else if (followIndex !== null) {
+      applyFov(32);
       const pose = placeAgent(followIndex, state.clock.elapsedTime, paused);
       const aheadX = Math.sin(pose.rot);
       const aheadZ = Math.cos(pose.rot);
@@ -609,6 +721,7 @@ function CameraDriver({
         if (shot) {
           eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
           aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+          applyFov(shot.fov ?? 32);
         } else {
           eye.set(room.x, 2.6, room.z + 8);
           aim.set(room.x, 1.8, room.z);
@@ -654,6 +767,8 @@ export default function CityMap({
   onUnavailable: () => void;
 }) {
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
+  const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
+  const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
 
   return (
     <Canvas
@@ -681,8 +796,8 @@ export default function CityMap({
       <color attach="background" args={["#ffcf9e"]} />
       <World />
       <Nature />
-      <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} />
-      <Interiors focusId={focusId} frameMode={frameMode} />
+      <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
+      <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
@@ -712,17 +827,17 @@ export default function CityMap({
         </group>
       ))}
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <pointLight position={[-42, 5, 18]} intensity={25} color="#ffb060" distance={28} decay={2} />
-      <pointLight position={[46, 4, 14]} intensity={18} color="#ffd2a8" distance={26} decay={2} />
-      <pointLight position={[12, 4, 40]} intensity={16} color="#9fd0ff" distance={24} decay={2} />
-      <pointLight position={[-38, 4, -24]} intensity={18} color="#ff6a1a" distance={22} decay={2} />
+      <pointLight position={[-42, 2.4, 18]} intensity={6} color="#ffb060" distance={14} decay={2} />
+      <pointLight position={[46, 2.4, 14]} intensity={5} color="#ffd2a8" distance={14} decay={2} />
+      <pointLight position={[12, 2.4, 40]} intensity={4} color="#9fd0ff" distance={12} decay={2} />
+      <pointLight position={[-38, 2.4, -24]} intensity={5} color="#ff6a1a" distance={12} decay={2} />
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
       {CITY_AGENTS.map((agent, index) => (
-        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
+        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} />
-      <Grade focusId={focusId} />
+      <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault
         enabled={!focusId && followIndex === null && mode !== "cutscene"}

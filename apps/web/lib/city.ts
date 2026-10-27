@@ -100,18 +100,31 @@ const ROOM_XZ: Record<string, [number, number]> = {
   "oracle-plaza": [20, -10],
 };
 
-export type CameraShot = { eye: [number, number, number]; aim: [number, number, number] };
+export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
-/** Inside the doorway, looking at the back wall. Plots stay outside the fence. */
+/** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
+function acrossRoom(x: number, z: number): CameraShot {
+  return { eye: [x + 2.7, 1.62, z + 2.15], aim: [x - 1.55, 0.82, z - 1.45], fov: 64 };
+}
+
 export const INTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": { eye: [-40.6, 1.72, 24.4], aim: [-42.2, 1.3, 16.6] },
-  "trading-village": { eye: [47.4, 1.72, 20.4], aim: [45.8, 1.3, 12.6] },
-  "war-room": { eye: [13.4, 1.72, 46.4], aim: [11.8, 1.3, 38.6] },
-  "skin-forge": { eye: [-36.6, 1.72, -17.6], aim: [-38.2, 1.2, -25.4] },
-  "cup-stadium": { eye: [-6.6, 1.8, -27.6], aim: [-8.2, 1.25, -35.4] },
-  "launch-pier": { eye: [58, 5, -16], aim: [50, 2, -28] },
-  "card-club": { eye: [-46, 5, 8], aim: [-54, 2, -2] },
-  "oracle-plaza": { eye: [28, 5, 0], aim: [20, 2, -10] },
+  "vault-quarter": acrossRoom(-42, 18),
+  "trading-village": acrossRoom(46, 14),
+  "war-room": acrossRoom(12, 40),
+  "skin-forge": acrossRoom(-38, -24),
+  "cup-stadium": acrossRoom(-8, -34),
+  "launch-pier": { eye: [62, 8, -12], aim: [50, 3, -28] },
+  "card-club": { eye: [-42, 8, 12], aim: [-54, 3, -2] },
+  "oracle-plaza": { eye: [32, 8, 4], aim: [20, 3, -10] },
+};
+
+/** Where an agent stands while a room camera is active, clear of that corner. */
+const CAMERA_PARK: Record<string, [number, number]> = {
+  "vault-quarter": [-48, 34],
+  "trading-village": [40, 30],
+  "war-room": [6, 56],
+  "skin-forge": [-44, -8],
+  "cup-stadium": [-14, -18],
 };
 
 /** Front lawn, looking at the facade. */
@@ -154,26 +167,16 @@ export const CITY_AGENTS: CityAgent[] = [
   skin: defaultSkin(accountId),
 }));
 
-/** Road ring, with a step through each live doorway (the +z face). */
+/** Road ring. Stops stay on the lawn in front of each plot, outside the rooms. */
 export const WALK_LOOP: Array<[number, number]> = [
   [-54, -2],
-  [-38, -24],
-  [-38, -16],
-  [-38, -24],
-  [-8, -42],
-  [-8, -32],
-  [-8, -42],
-  [50, -28],
-  [20, -10],
-  [46, 14],
-  [46, 22],
-  [46, 14],
-  [12, 40],
-  [12, 48],
-  [12, 40],
-  [-42, 18],
-  [-42, 26],
-  [-42, 18],
+  [-38, -8],
+  [-8, -18],
+  [50, -12],
+  [20, 4],
+  [46, 30],
+  [12, 56],
+  [-42, 34],
 ];
 
 export function placeAgent(index: number, time: number, paused: boolean) {
@@ -198,4 +201,19 @@ export function placeAgent(index: number, time: number, paused: boolean) {
     z: from[1] + dz * smooth,
     rot: Math.atan2(dx, dz),
   };
+}
+
+export function poseClearOf(
+  pose: { x: number; y: number; z: number; rot: number },
+  focusId: string | null,
+  index: number,
+) {
+  if (!focusId) return pose;
+  const shot = INTERIOR_SHOTS[focusId];
+  const park = CAMERA_PARK[focusId];
+  if (!shot || !park) return pose;
+  const dx = pose.x - shot.eye[0];
+  const dz = pose.z - shot.eye[2];
+  if (dx * dx + dz * dz > 64) return pose;
+  return { ...pose, x: park[0] + (index % 3) * 1.8, z: park[1] };
 }

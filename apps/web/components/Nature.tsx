@@ -23,6 +23,10 @@ const TREES = ["pine.a", "pine.b", "oak.a", "oak.b", "birch.a", "birch.b"];
 
 type Spot = { name: string; x: number; z: number; rot: number; scale: number };
 
+function blocksFront(x: number, z: number) {
+  return DISTRICTS.some((district) => Math.abs(x - district.x) < 18 && z > district.z - 2 && z < district.z + 20);
+}
+
 function nearBuilding(x: number, z: number, radius: number) {
   return DISTRICTS.some((district) => {
     const dx = district.x - x;
@@ -61,16 +65,16 @@ function spots(): Spot[] {
     const pz = ux;
     for (let dist = 8; dist < length - 6; dist += 11) {
       for (const side of [-1, 1]) {
-        const x = ax + ux * dist + px * side * 11;
-        const z = az + uz * dist + pz * side * 11;
-        if (Math.abs(x) > 100 || Math.abs(z) > 100 || nearBuilding(x, z, 14)) continue;
+        const x = ax + ux * dist + px * side * 16;
+        const z = az + uz * dist + pz * side * 16;
+        if (Math.abs(x) > 100 || Math.abs(z) > 100 || nearBuilding(x, z, 20) || blocksFront(x, z)) continue;
         const name = TREES[n % TREES.length];
         placed.push({ name, x, z, rot: n * 0.7, scale: 0.85 + (n % 5) * 0.07 });
         n += 1;
         placed.push({
           name: n % 2 === 0 ? "bush.a" : "bush.b",
-          x: x + px * side * 2.2,
-          z: z + pz * side * 2.2,
+          x: x + px * side * 2.4,
+          z: z + pz * side * 2.4,
           rot: n,
           scale: 0.9 + (n % 3) * 0.15,
         });
@@ -82,7 +86,7 @@ function spots(): Spot[] {
     const radius = 36 + (i * 7) % 52;
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    if (nearBuilding(x, z, 15) || nearRoad(x, z, 8)) continue;
+    if (nearBuilding(x, z, 20) || nearRoad(x, z, 11) || blocksFront(x, z)) continue;
     placed.push({ name: TREES[i % TREES.length], x, z, rot: angle, scale: 0.9 + (i % 4) * 0.08 });
     if (i % 2 === 0) {
       placed.push({ name: "rock.a", x: x + 3, z: z - 2, rot: angle, scale: 0.8 + (i % 3) * 0.3 });
@@ -138,6 +142,12 @@ function makeField(src: THREE.Mesh, items: Spot[], amount: number, uTime: { valu
   mesh.instanceMatrix.needsUpdate = true;
   mesh.count = items.length;
   mesh.frustumCulled = false;
+  mesh.userData.spots = items;
+  mesh.userData.base = items.map((_, index) => {
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(index, matrix);
+    return matrix;
+  });
   mesh.castShadow = amount > 0.05;
   mesh.receiveShadow = true;
   return mesh;
@@ -162,9 +172,12 @@ function GrassField({ source, uTime }: { source: THREE.Mesh; uTime: { value: num
     for (let index = 0; index < 1400; index += 1) {
       const angle = index * 2.399;
       const radius = (index % 38) * 0.55;
-      dummy.position.set(x + Math.cos(angle) * radius, 0, z + Math.sin(angle) * radius);
+      const gx = x + Math.cos(angle) * radius;
+      const gz = z + Math.sin(angle) * radius;
+      dummy.position.set(gx, 0, gz);
       dummy.rotation.set(0, angle, 0);
-      dummy.scale.setScalar(0.85 + (index % 5) * 0.08);
+      const indoors = radius < 2.2 || nearBuilding(gx, gz, 9);
+      dummy.scale.setScalar(indoors ? 0 : 0.85 + (index % 5) * 0.08);
       dummy.updateMatrix();
       mesh.setMatrixAt(index, dummy.matrix);
     }
@@ -173,8 +186,22 @@ function GrassField({ source, uTime }: { source: THREE.Mesh; uTime: { value: num
   return <primitive object={mesh} />;
 }
 
+function blocksView(x: number, z: number, camera: THREE.Vector3, direction: THREE.Vector3) {
+  const reach = 32;
+  const vx = direction.x * reach;
+  const vz = direction.z * reach;
+  const len2 = vx * vx + vz * vz || 1;
+  const t = Math.max(0, Math.min(1, ((x - camera.x) * vx + (z - camera.z) * vz) / len2));
+  if (t < 0.08 || t > 0.9) return false;
+  const px = camera.x + vx * t;
+  const pz = camera.z + vz * t;
+  return (x - px) ** 2 + (z - pz) ** 2 < 18;
+}
+
 export function Nature() {
   const gltf = useGLTF("/models/nature.glb", false, true);
+  const camera = useThree((state) => state.camera);
+  const view = useRef(new THREE.Vector3());
   const uTime = useMemo(() => ({ value: 0 }), []);
   const fields = useMemo(() => {
     const names = new Set(PLACED.map((spot) => spot.name));
@@ -188,6 +215,23 @@ export function Nature() {
   const grass = gltf.scene.getObjectByName("grass.a") as THREE.Mesh | undefined;
   useFrame(({ clock }) => {
     uTime.value = clock.elapsedTime;
+    camera.getWorldDirection(view.current);
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    fields.forEach((field) => {
+      if (!field) return;
+      const spots = field.userData.spots as Spot[] | undefined;
+      const base = field.userData.base as THREE.Matrix4[] | undefined;
+      if (!spots || !base) return;
+      let changed = false;
+      spots.forEach((spot, index) => {
+        const tree = spot.name.startsWith("pine") || spot.name.startsWith("oak") || spot.name.startsWith("birch");
+        const cull = tree && blocksView(spot.x, spot.z, camera.position, view.current);
+        const next = cull ? hidden : base[index];
+        field.setMatrixAt(index, next);
+        changed = true;
+      });
+      if (changed) field.instanceMatrix.needsUpdate = true;
+    });
   });
   return (
     <group>

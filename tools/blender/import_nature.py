@@ -17,23 +17,24 @@ SRC = os.environ.get(
     "NATURE_FBX",
     "/tmp/cc0src/nature/Ultimate Nature Pack - Jun 2019/FBX",
 )
+KENNEY = os.environ.get("KENNEY_NATURE", "/tmp/cc0src/dress/nature")
 
-# name, file, target height in meters
+# name, file, target height, folder. Kenney's detailed and round trees replace the faceted pines.
 SPECS = [
-    ("pine.a", "PineTree_1.fbx", 14.0),
-    ("pine.b", "PineTree_3.fbx", 16.0),
-    ("oak.a", "CommonTree_2.fbx", 13.0),
-    ("oak.b", "CommonTree_4.fbx", 11.0),
-    ("birch.a", "BirchTree_1.fbx", 12.0),
-    ("birch.b", "BirchTree_3.fbx", 10.0),
-    ("bush.a", "Bush_1.fbx", 1.6),
-    ("bush.b", "BushBerries_1.fbx", 1.4),
-    ("flower.a", "Flowers.fbx", 0.55),
-    ("rock.a", "Rock_1.fbx", 1.5),
-    ("rock.b", "Rock_3.fbx", 2.2),
-    ("rock.c", "Rock_Moss_2.fbx", 1.8),
-    ("grass.a", "Grass_Short.fbx", 0.4),
-    ("plant.a", "Plant_1.fbx", 0.9),
+    ("pine.a", "tree_pineRoundC.glb", 11.0, KENNEY),
+    ("pine.b", "tree_pineRoundA.glb", 12.0, KENNEY),
+    ("oak.a", "tree_detailed.glb", 10.5, KENNEY),
+    ("oak.b", "tree_oak.glb", 9.0, KENNEY),
+    ("birch.a", "tree_thin.glb", 11.0, KENNEY),
+    ("birch.b", "tree_pineDefaultA.glb", 10.0, KENNEY),
+    ("bush.a", "Bush_1.fbx", 1.6, SRC),
+    ("bush.b", "BushBerries_1.fbx", 1.4, SRC),
+    ("flower.a", "Flowers.fbx", 0.55, SRC),
+    ("rock.a", "Rock_1.fbx", 1.5, SRC),
+    ("rock.b", "Rock_3.fbx", 2.2, SRC),
+    ("rock.c", "Rock_Moss_2.fbx", 1.8, SRC),
+    ("grass.a", "Grass_Short.fbx", 0.4, SRC),
+    ("plant.a", "Plant_1.fbx", 0.9, SRC),
 ]
 
 
@@ -78,16 +79,25 @@ def normalize(ob, height):
             bsdf.inputs["Roughness"].default_value = 0.82
             if "Alpha" in bsdf.inputs:
                 bsdf.inputs["Alpha"].default_value = 1.0
+            label = mat.name.lower()
+            if "leaf" in label:
+                bsdf.inputs["Base Color"].default_value = (0.13, 0.48, 0.16, 1.0)
+            elif "wood" in label or "bark" in label:
+                bsdf.inputs["Base Color"].default_value = (0.45, 0.27, 0.14, 1.0)
         mat.blend_method = "OPAQUE"
         mat.use_backface_culling = False
+    bpy.ops.object.shade_smooth()
 
 
 def main():
     reset()
-    for name, filename, height in SPECS:
-        path = os.path.join(SRC, filename)
+    for name, filename, height, folder in SPECS:
+        path = os.path.join(folder, filename)
         before = set(bpy.data.objects)
-        bpy.ops.import_scene.fbx(filepath=path)
+        if path.lower().endswith(".glb"):
+            bpy.ops.import_scene.gltf(filepath=path)
+        else:
+            bpy.ops.import_scene.fbx(filepath=path)
         meshes = imported_meshes(before)
         if not meshes:
             raise SystemExit(f"no mesh in {filename}")
