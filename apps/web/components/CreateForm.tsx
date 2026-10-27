@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { apiBase, canonicalRules, nearToYocto, sha256Hex, withinDefaultCaps, type Rules } from "@/lib/protocol";
+import { SignPanel } from "@/components/SignPanel";
+import { canonicalRules, nearToYocto, sha256Hex, withinDefaultCaps, type Rules } from "@/lib/protocol";
+import { PLACEHOLDER_CONTRACTS } from "@/lib/wallet";
 
 const initial = {
+  template: "heist-night",
   maxPlayers: "6",
   durationSeconds: "3600",
   roundCount: "4",
@@ -14,9 +17,9 @@ const initial = {
 };
 
 export function CreateForm() {
+  const [step, setStep] = useState(0);
   const [fields, setFields] = useState(initial);
   const [hash, setHash] = useState("");
-  const [status, setStatus] = useState("");
 
   const rules = useMemo<Rules | null>(() => {
     const pot = nearToYocto(fields.potNear);
@@ -29,7 +32,7 @@ export function CreateForm() {
     if (pot === null || agent === null || action === null || entry === null) return null;
     if (![maxPlayers, durationSeconds, roundCount].every((value) => Number.isInteger(value) && value >= 0)) return null;
     return {
-      template_id: "heist-night",
+      template_id: fields.template,
       max_players: maxPlayers,
       duration_seconds: durationSeconds,
       round_count: roundCount,
@@ -59,28 +62,18 @@ export function CreateForm() {
 
   function update(name: keyof typeof initial, value: string) {
     setFields((current) => ({ ...current, [name]: value }));
-    setStatus("");
   }
 
-  async function preview() {
-    if (!rules || problem || !hash) return;
-    const base = apiBase();
-    if (!base) {
-      setStatus("No relay configured. Use the fe26 CLI to submit this preview on testnet.");
-      return;
-    }
-    const response = await fetch(`${base}/v1/games`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id: `preview-${hash.slice(0, 8)}`,
-        creator: "preview.fe26.testnet",
-        rules,
-      }),
-    });
-    const body = await response.text();
-    setStatus(response.ok ? `Relay accepted a preview. ${body}` : `Relay refused the preview. ${body}`);
-  }
+  const call =
+    rules && !problem && hash
+      ? {
+          receiverId: PLACEHOLDER_CONTRACTS.factory,
+          methodName: "create_game",
+          args: { rules, game_md_hash: hash },
+          deposit: rules.pot_yocto,
+          gas: "200000000000000",
+        }
+      : null;
 
   return (
     <div className="two">
@@ -88,37 +81,54 @@ export function CreateForm() {
         className="card"
         onSubmit={(event) => {
           event.preventDefault();
-          void preview();
+          if (!problem) setStep(Math.min(step + 1, 2));
         }}
       >
-        <h2>Structured rules</h2>
-        <p className="meta">No free-text instructions. The template is Heist Night.</p>
-        <label>
-          Template
-          <select value="heist-night" disabled>
-            <option value="heist-night">heist-night</option>
-          </select>
-        </label>
-        <Field label="Max players" value={fields.maxPlayers} onChange={(value) => update("maxPlayers", value)} />
-        <Field label="Duration seconds" value={fields.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
-        <Field label="Rounds" value={fields.roundCount} onChange={(value) => update("roundCount", value)} />
-        <Field label="Pot (NEAR)" value={fields.potNear} onChange={(value) => update("potNear", value)} />
-        <Field label="Per-agent cap (NEAR)" value={fields.perAgentNear} onChange={(value) => update("perAgentNear", value)} />
-        <Field label="Per-action cap (NEAR)" value={fields.perActionNear} onChange={(value) => update("perActionNear", value)} />
-        <Field label="Entry (NEAR)" value={fields.entryNear} onChange={(value) => update("entryNear", value)} />
+        <ol className="steps">
+          {["Rules", "Caps", "Sign"].map((label, index) => (
+            <li key={label}>
+              <button type="button" className={step === index ? "on" : ""} onClick={() => setStep(index)}>
+                {index + 1}. {label}
+              </button>
+            </li>
+          ))}
+        </ol>
+        {step === 0 && (
+          <>
+            <label>
+              Template
+              <select value={fields.template} onChange={(event) => update("template", event.target.value)}>
+                <option value="heist-night">heist-night</option>
+                <option value="trading-cup">trading-cup</option>
+              </select>
+            </label>
+            <Field label="Max players" value={fields.maxPlayers} onChange={(value) => update("maxPlayers", value)} />
+            <Field label="Duration seconds" value={fields.durationSeconds} onChange={(value) => update("durationSeconds", value)} />
+            <Field label="Rounds" value={fields.roundCount} onChange={(value) => update("roundCount", value)} />
+          </>
+        )}
+        {step === 1 && (
+          <>
+            <Field label="Pot (NEAR)" value={fields.potNear} onChange={(value) => update("potNear", value)} />
+            <Field label="Per-agent cap (NEAR)" value={fields.perAgentNear} onChange={(value) => update("perAgentNear", value)} />
+            <Field label="Per-action cap (NEAR)" value={fields.perActionNear} onChange={(value) => update("perActionNear", value)} />
+            <Field label="Entry (NEAR)" value={fields.entryNear} onChange={(value) => update("entryNear", value)} />
+          </>
+        )}
+        {step === 2 && (
+          <p className="meta">
+            Signing calls create_game on {PLACEHOLDER_CONTRACTS.factory} and attaches the pot. The CLI dry-run remains available if you do not connect a wallet.
+          </p>
+        )}
         {problem ? <p className="error">{problem}</p> : <p className="ok">Inside the default platform caps.</p>}
-        <button type="submit" disabled={Boolean(problem) || !hash}>
-          Post preview to relay
-        </button>
-        {status && <p className="note">{status}</p>}
+        <button type="submit">{step < 2 ? "Next" : "Review stays on this page"}</button>
       </form>
       <aside className="card">
         <h2>Pinned hash</h2>
         <p className="meta">sha256 of the canonical rules JSON. This is the commitment, not a secret.</p>
         <pre>{hash || "…"}</pre>
         <pre>{canonical}</pre>
-        <p className="meta">Chain submission, after you export a testnet key into the environment:</p>
-        <pre>{`fe26 create-game --rules rules.json --game-md GAME.md`}</pre>
+        {step === 2 && <SignPanel title="Sign create_game" call={call} idle="Connect a testnet wallet when you want to list this game." />}
       </aside>
     </div>
   );

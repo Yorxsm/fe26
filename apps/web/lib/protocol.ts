@@ -36,6 +36,7 @@ export type GameCard = {
   rules: Rules;
   game_md_hash: string;
   delisted: boolean;
+  verified_events?: number;
   trust: Trust;
 };
 
@@ -61,6 +62,8 @@ export type FeedEvent = {
   game_id: string;
   kind: string;
   summary: string;
+  verified?: boolean;
+  source?: string;
 };
 
 export function canonicalRules(rules: Rules): string {
@@ -98,11 +101,13 @@ export async function sha256Hex(text: string): Promise<string> {
 }
 
 export function apiBase(): string {
-  return process.env.NEXT_PUBLIC_FE26_API_URL?.replace(/\/$/, "") ?? "";
+  return process.env.NEXT_PUBLIC_FE2VI_API_URL?.replace(/\/$/, "") ?? "";
 }
 
 export function withinDefaultCaps(rules: Rules): string | null {
-  if (rules.template_id !== "heist-night") return "Only the Heist Night template exists.";
+  if (rules.template_id !== "heist-night" && rules.template_id !== "trading-cup") {
+    return "Unknown template. Choose Heist Night or Trading Cup.";
+  }
   if (rules.max_players < 1 || rules.max_players > DEFAULT_CAPS.maxPlayers) return "Players exceed the platform cap.";
   if (rules.duration_seconds < 1 || rules.duration_seconds > DEFAULT_CAPS.maxDurationSeconds) {
     return "Duration exceeds the platform cap.";

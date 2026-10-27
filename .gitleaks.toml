@@ -1,4 +1,4 @@
-title = "fe26"
+title = "fe2vi"
 
 [extend]
 useDefault = true
@@ -11,4 +11,17 @@ paths = [
 ]
 regexes = [
   '''320421571d7cf9e178b0b5c0aa1dce8d3ea3f2dbf0bdc507849aaf70a121651d''',
+  '''993ccadefb348204b7edf422e2bd80c9cf587ea3e48911f12e7951490cda6428''',
 ]
+
+[[rules]]
+id = "fe2vi-intents-api-key"
+description = "NEAR Intents Agent API key"
+regex = '''naa_[A-Za-z0-9_-]{20,}'''
+keywords = ["naa_"]
+
+[[rules]]
+id = "fe2vi-intents-grant-token"
+description = "NEAR Intents grant token"
+regex = '''ngt_[A-Za-z0-9_-]{20,}'''
+keywords = ["ngt_"]

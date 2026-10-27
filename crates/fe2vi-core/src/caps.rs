@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::types::{GameRules, PlatformCaps, TEMPLATE_HEIST};
+use crate::types::{GameRules, PlatformCaps, TEMPLATE_CUP, TEMPLATE_HEIST};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CapActor {
@@ -104,7 +104,7 @@ pub fn authorize_cap_change(
 }
 
 pub fn validate_rules(rules: &GameRules, caps: &PlatformCaps) -> Result<(), RuleError> {
-    if rules.template_id != TEMPLATE_HEIST {
+    if rules.template_id != TEMPLATE_HEIST && rules.template_id != TEMPLATE_CUP {
         return Err(RuleError::UnknownTemplate);
     }
     if rules.max_players == 0 || rules.max_players > caps.max_players {
@@ -209,7 +209,7 @@ mod tests {
             RuleError::AgentCap
         );
         rules.per_agent_cap_yocto = caps.max_per_agent_yocto;
-        rules.template_id = "trading-cup".to_string();
+        rules.template_id = "auction-night".to_string();
         assert_eq!(
             validate_rules(&rules, &caps).unwrap_err(),
             RuleError::UnknownTemplate

@@ -2,5 +2,9 @@
 # Leave the ingest token empty for an open relay. Every response is labeled unverified.
 # Set a token only in your local file or with `wrangler secret put`. Do not commit it.
 
-FE26_NETWORK=testnet
-FE26_INGEST_TOKEN=
+FE2VI_NETWORK=testnet
+FE2VI_INGEST_TOKEN=
+# Intents key is a Wrangler secret, not a var. Leave empty here.
+NEAR_INTENTS_AGENT_API_KEY=
+NEAR_INTENTS_AGENT_API_URL=https://api.agentsonintents.com
+FE2VI_INTENTS_LIVE=0

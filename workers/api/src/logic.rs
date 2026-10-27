@@ -3,13 +3,18 @@
 //! raise those caps. When no ingest token is configured the relay is open and
 //! every response says so.
 
-use fe26_core::{
-    default_platform_caps, pin_hash, render_game_md, validate_rules, GamePointer, GameRules,
-    PlatformCaps, SCOPED_METHODS, TEMPLATE_HEIST,
+use fe2vi_core::{
+    default_platform_caps, pin_hash, render_game_md, validate_rules, FollowEdge, GamePointer,
+    GameRules, PlatformCaps, SCOPED_METHODS, TEMPLATE_CUP, TEMPLATE_HEIST,
 };
+use fe2vi_intents::StoredGrant;
 use serde::{Deserialize, Serialize};
 
 const HISTORY_LIMIT: usize = 200;
+
+pub fn history_limit() -> usize {
+    HISTORY_LIMIT
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArenaState {
@@ -18,6 +23,14 @@ pub struct ArenaState {
     pub events: Vec<FeedEvent>,
     pub next_event: u64,
     pub caps: PlatformCaps,
+    #[serde(default)]
+    pub indexed_height: u64,
+    #[serde(default)]
+    pub seen_chain: Vec<String>,
+    #[serde(default)]
+    pub follows: Vec<FollowEdge>,
+    #[serde(default)]
+    pub grants: Vec<StoredGrant>,
 }
 
 impl Default for ArenaState {
@@ -28,6 +41,10 @@ impl Default for ArenaState {
             events: Vec::new(),
             next_event: 1,
             caps: default_platform_caps(),
+            indexed_height: 0,
+            seen_chain: Vec::new(),
+            follows: Vec::new(),
+            grants: Vec::new(),
         }
     }
 }
@@ -53,6 +70,15 @@ pub struct FeedEvent {
     pub game_id: String,
     pub kind: String,
     pub summary: String,
+    /// True only when this worker read the log from a testnet RPC response.
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default = "relay_source")]
+    pub source: String,
+}
+
+fn relay_source() -> String {
+    "relay".to_string()
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -103,6 +129,13 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             200,
             "application/json",
             r#"{"ok":true,"network":"testnet"}"#.into(),
+            false,
+            None,
+        ),
+        ("POST", ["v1", "index"]) => http(
+            403,
+            "application/json",
+            json_error("chain index does not accept a request body"),
             false,
             None,
         ),
@@ -169,6 +202,18 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         }
         ("POST", ["v1", "agents"]) => ingest_agent(state, incoming),
         ("POST", ["v1", "events"]) => ingest_event(state, incoming),
+        ("GET", ["v1", "city"]) => crate::surface::city(),
+        ("GET", ["v1", "village", "leaderboard"]) => crate::surface::leaderboard(
+            query_param(incoming.path, "window"),
+            query_now(incoming.path),
+        ),
+        ("GET", ["v1", "village", "tape"]) => crate::surface::tape(query_now(incoming.path)),
+        ("POST", ["v1", "village", "follow"]) => crate::surface::follow(state, incoming, true),
+        ("POST", ["v1", "village", "unfollow"]) => crate::surface::follow(state, incoming, false),
+        ("GET", ["v1", "intents", "policy"]) => crate::surface::intents_policy(&state.caps),
+        ("POST", ["v1", "intents", "grants"]) => crate::surface::issue_grant(state, incoming),
+        ("POST", ["v1", "intents", "revoke"]) => crate::surface::revoke_grant(state, incoming),
+        ("POST", ["v1", "intents", "act"]) => crate::surface::intents_act(state, incoming),
         _ => http(
             404,
             "application/json",
@@ -333,6 +378,8 @@ fn ingest_event(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         game_id: body.game_id.clone(),
         kind: body.kind,
         summary,
+        verified: false,
+        source: "relay".to_string(),
     };
     state.next_event += 1;
     state.events.push(event.clone());
@@ -384,6 +431,7 @@ fn card(state: &ArenaState, game: &StoredGame) -> serde_json::Value {
         "rules": game.rules,
         "game_md_hash": pin_hash(&game.rules),
         "delisted": game.delisted,
+        "verified_events": state.events.iter().filter(|event| event.game_id == game.id && event.verified).count(),
         "trust": trust(state, game),
     })
 }
@@ -392,7 +440,8 @@ fn trust(state: &ArenaState, game: &StoredGame) -> Trust {
     Trust {
         hash_pinned: true,
         within_platform_caps: validate_rules(&game.rules, &state.caps).is_ok(),
-        known_template: game.rules.template_id == TEMPLATE_HEIST,
+        known_template: game.rules.template_id == TEMPLATE_HEIST
+            || game.rules.template_id == TEMPLATE_CUP,
         delisted: game.delisted,
         creator_text: "untrusted",
         network: "testnet",
@@ -415,13 +464,32 @@ fn agent_view(state: &ArenaState, agent: &StoredAgent) -> serde_json::Value {
 fn pointer(game_id: &str) -> GamePointer {
     GamePointer {
         network: "testnet".into(),
-        factory: "factory.fe26.testnet".into(),
+        factory: "factory.fe2vi.testnet".into(),
         game_id: game_id.to_string(),
     }
 }
 
+fn path_only(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
+pub(crate) fn query_param<'a>(path: &'a str, key: &str) -> Option<&'a str> {
+    let query = path.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == key).then_some(value)
+    })
+}
+
+fn query_now(path: &str) -> u64 {
+    query_param(path, "now")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(fe2vi_core::DEMO_EPOCH)
+}
+
 fn split_path(path: &str) -> Vec<&str> {
-    path.trim_end_matches('/')
+    path_only(path)
+        .trim_end_matches('/')
         .split('/')
         .filter(|part| !part.is_empty())
         .collect()
@@ -450,7 +518,12 @@ fn json_error(message: &str) -> String {
     serde_json::json!({"error": message}).to_string()
 }
 
-fn json(status: u16, body: &impl Serialize, mutated: bool, fanout: Option<Fanout>) -> Outcome {
+pub(crate) fn json(
+    status: u16,
+    body: &impl Serialize,
+    mutated: bool,
+    fanout: Option<Fanout>,
+) -> Outcome {
     http(
         status,
         "application/json",
@@ -460,7 +533,7 @@ fn json(status: u16, body: &impl Serialize, mutated: bool, fanout: Option<Fanout
     )
 }
 
-fn http(
+pub(crate) fn http(
     status: u16,
     content_type: &'static str,
     body: String,
@@ -502,7 +575,7 @@ struct EventIn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fe26_core::{extract_rules_json, game_md_violations, heist_night_example, ONE_NEAR};
+    use fe2vi_core::{extract_rules_json, game_md_violations, heist_night_example, ONE_NEAR};
 
     fn post<'a>(path: &'a str, body: &'a str) -> Incoming<'a> {
         Incoming {
@@ -521,7 +594,7 @@ mod tests {
         rules.per_agent_cap_yocto = state.caps.max_per_agent_yocto + ONE_NEAR;
         let body = serde_json::json!({
             "id": "g9",
-            "creator": "creator.fe26.testnet",
+            "creator": "creator.fe2vi.testnet",
             "rules": rules,
         })
         .to_string();
@@ -546,7 +619,7 @@ mod tests {
     fn function_call_key_cannot_call_methods_outside_its_scope() {
         let mut state = ArenaState::default();
         let body = serde_json::json!({
-            "account_id": "alpha.registry.fe26.testnet",
+            "account_id": "alpha.registry.fe2vi.testnet",
             "revoked": false,
             "allowed_methods": ["act", "bid", "transfer_item", "resolve"],
         })
@@ -567,7 +640,7 @@ mod tests {
         let rules = heist_night_example();
         let body = serde_json::json!({
             "id": "heist-night-template",
-            "creator": "creator.fe26.testnet",
+            "creator": "creator.fe2vi.testnet",
             "rules": rules,
         })
         .to_string();
@@ -600,7 +673,7 @@ mod tests {
                 );
                 let json = extract_rules_json(&body).unwrap();
                 let parsed: GameRules = serde_json::from_str(json).unwrap();
-                assert!(body.contains(&fe26_core::pin_hash(&parsed)));
+                assert!(body.contains(&fe2vi_core::pin_hash(&parsed)));
                 assert!(body.contains("UNTRUSTED DATA"));
             }
             Outcome::Websocket { .. } => panic!("expected http"),
@@ -611,7 +684,7 @@ mod tests {
     fn revoked_agent_is_visible_and_ingest_token_is_required_when_set() {
         let mut state = ArenaState::default();
         let body = serde_json::json!({
-            "account_id": "alpha.registry.fe26.testnet",
+            "account_id": "alpha.registry.fe2vi.testnet",
             "revoked": true,
             "allowed_methods": ["act", "bid", "transfer_item"],
         })
@@ -647,7 +720,7 @@ mod tests {
             &mut state,
             &Incoming {
                 method: "GET",
-                path: "/v1/agents/alpha.registry.fe26.testnet",
+                path: "/v1/agents/alpha.registry.fe2vi.testnet",
                 body: "",
                 authorization: None,
                 ingest_token: None,
@@ -690,5 +763,29 @@ mod tests {
             }
             Outcome::Http { .. } => panic!("expected websocket"),
         }
+    }
+
+    #[test]
+    fn public_post_cannot_mark_an_event_verified() {
+        let mut state = ArenaState::default();
+        let body = r#"{"game_id":"g1","kind":"action_taken","summary":"alice played scout","verified":true,"source":"chain"}"#;
+        match dispatch(&mut state, &post("/v1/events", body)) {
+            Outcome::Http { status, body, .. } => {
+                assert_eq!(status, 201);
+                assert!(body.contains("\"verified\":false"));
+                assert!(body.contains("\"source\":\"relay\""));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        match dispatch(&mut state, &post("/v1/index", r#"{"verified":true}"#)) {
+            Outcome::Http {
+                status, mutated, ..
+            } => {
+                assert_eq!(status, 403);
+                assert!(!mutated);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        assert!(!state.events[0].verified);
     }
 }

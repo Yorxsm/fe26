@@ -1,5 +1,5 @@
-import { Lobby } from "@/components/Lobby";
+import { CityGate } from "@/components/CityGate";
 
 export default function Page() {
-  return <Lobby />;
+  return <CityGate />;
 }

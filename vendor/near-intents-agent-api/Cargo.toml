@@ -1,0 +1,26 @@
+[package]
+name = "near-intents-agent-api"
+version = "0.1.0"
+edition = "2021"
+description = "Reference Rust client for the NEAR Intents Agent API. Vendored from NEAR-Intents-Agent-API/skills (MIT)."
+license = "MIT"
+publish = false
+
+[features]
+# Declared so `cfg(feature = "evm")` is a known value. fe2VI does not enable it.
+evm = []
+
+[dependencies]
+base64 = "0.22"
+bs58 = "0.5"
+ed25519-dalek = "2"
+hex = "0.4"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# preserve_order is intentionally off. Enabling it would change serde_json map order
+# for the rest of this repo, including the pinned rules hash. fe2VI does not call
+# the NEP-366 signer, which is the path that needs the API's key order.
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }

@@ -1,11 +1,14 @@
 [workspace]
 resolver = "2"
+exclude = ["contracts/sandbox-tests", "vendor/near-intents-agent-api"]
 members = [
-    "crates/fe26-core",
+    "crates/fe2vi-core",
+    "crates/fe2vi-intents",
     "crates/cli",
     "contracts/arena-factory",
     "contracts/arena-registry",
     "contracts/heist-game",
+    "contracts/war-room",
     "workers/api",
 ]
 
@@ -22,4 +25,4 @@ sha2 = "0.10"
 hex = "0.4"
 thiserror = "1"
 borsh = { version = "1", features = ["derive"] }
-fe26-core = { path = "crates/fe26-core", features = ["borsh"] }
+fe2vi-core = { path = "crates/fe2vi-core", features = ["borsh"] }

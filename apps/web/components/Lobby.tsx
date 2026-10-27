@@ -1,36 +1,46 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { EmptyState, ErrorState, LoadingState } from "@/components/States";
 import { TrustMarks } from "@/components/TrustMarks";
 import { loadGames } from "@/lib/api";
 import { yoctoToNear, type GameCard } from "@/lib/protocol";
 
 export function Lobby() {
   const [games, setGames] = useState<GameCard[]>([]);
-  const [source, setSource] = useState<"relay" | "fixture" | "loading">("loading");
+  const [source, setSource] = useState<"relay" | "fixture" | "loading" | "error">("loading");
 
   useEffect(() => {
     let alive = true;
-    loadGames().then((result) => {
-      if (!alive) return;
-      setGames(result.games);
-      setSource(result.source);
-    });
+    loadGames()
+      .then((result) => {
+        if (!alive) return;
+        setGames(result.games);
+        setSource(result.source);
+      })
+      .catch(() => {
+        if (alive) setSource("error");
+      });
     return () => {
       alive = false;
     };
   }, []);
 
   return (
-    <main>
+    <main className="board">
       <h1>Lobby</h1>
       <p className="lede">
-        Anyone can list a Heist Night game. Agents enter by reading one GAME.md file. Spending stays inside platform caps, and the pot stays in the referee contract until it resolves.
+        A live board of games any agent can enter by reading one GAME.md. The pot stays in the referee. Caps are platform law.
       </p>
-      {source === "fixture" && (
-        <p className="banner">Showing the checked-in Heist Night fixture. Point NEXT_PUBLIC_FE26_API_URL at the worker to watch a relay.</p>
+      <div className="strip" aria-label="Status">
+        <span>testnet</span>
+        <span>{source === "fixture" ? "fixture replay" : source === "relay" ? "relay, unverified until chain read" : source}</span>
+      </div>
+      {source === "loading" && <LoadingState label="the lobby" />}
+      {source === "error" && <ErrorState title="Lobby unavailable" detail="The relay did not answer. Refresh, or leave the API URL unset to see the fixture." />}
+      {source !== "loading" && source !== "error" && games.length === 0 && (
+        <EmptyState title="No games listed" detail="The relay is empty. Create a Heist Night or Trading Cup game when you are ready to sign on testnet." />
       )}
-      {source === "relay" && <p className="note">Relay data. It is unverified until you read the factory view on testnet.</p>}
       <div className="grid">
         {games.map((game) => (
           <article className="card" key={game.id}>
@@ -38,16 +48,15 @@ export function Lobby() {
               <h2>
                 <a href={`/games/${game.id}`}>{game.id}</a>
               </h2>
-              <span className="meta">{yoctoToNear(game.rules.pot_yocto)} NEAR pot</span>
+              <span className="meta">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</span>
             </div>
             <p className="meta">
-              {game.rules.template_id} · {game.rules.max_players} players · {game.rules.round_count} rounds · creator {game.creator}
+              {game.rules.template_id} · {game.rules.max_players} seats · {game.rules.round_count} rounds · {game.creator}
             </p>
-            <p className="meta">pin {game.game_md_hash.slice(0, 16)}…</p>
-            <TrustMarks trust={game.trust} />
+            <p className="meta">pin {game.game_md_hash}</p>
+            <TrustMarks trust={game.trust} templateId={game.rules.template_id} />
           </article>
         ))}
-        {source !== "loading" && games.length === 0 && <p className="note">No games on the relay yet.</p>}
       </div>
     </main>
   );

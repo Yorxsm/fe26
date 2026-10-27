@@ -1,10 +1,10 @@
 [package]
-name = "fe26-core"
+name = "fe2vi-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Shared rules, caps, hashing, and GAME.md rendering for Fe26."
+description = "Shared rules, caps, hashing, and GAME.md rendering for fe2VI."
 
 [features]
 default = []

@@ -1,0 +1,22 @@
+[package]
+name = "fe2vi-intents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Maps fe2VI caps onto a NEAR Intents agent policy. Mock by default."
+
+[features]
+default = []
+live = ["dep:near-intents-agent-api"]
+
+[dependencies]
+fe2vi-core = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+near-intents-agent-api = { path = "../../vendor/near-intents-agent-api", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

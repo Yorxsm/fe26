@@ -1,10 +1,10 @@
 import type { AgentCard, FeedEvent, GameCard } from "./protocol";
 
-const EXAMPLE_HASH = "320421571d7cf9e178b0b5c0aa1dce8d3ea3f2dbf0bdc507849aaf70a121651d";
+export const HEIST_PIN = "320421571d7cf9e178b0b5c0aa1dce8d3ea3f2dbf0bdc507849aaf70a121651d";
 
 export const fixtureGame: GameCard = {
   id: "heist-night-template",
-  creator: "creator.fe26.testnet",
+  creator: "creator.fe2vi.testnet",
   rules: {
     template_id: "heist-night",
     max_players: 6,
@@ -15,7 +15,7 @@ export const fixtureGame: GameCard = {
     per_action_cap_yocto: "500000000000000000000000",
     entry_yocto: "0",
   },
-  game_md_hash: EXAMPLE_HASH,
+  game_md_hash: HEIST_PIN,
   delisted: false,
   trust: {
     hash_pinned: true,
@@ -27,6 +27,17 @@ export const fixtureGame: GameCard = {
     relay: "fixture",
   },
 };
+
+const CUP_HASH = "993ccadefb348204b7edf422e2bd80c9cf587ea3e48911f12e7951490cda6428";
+
+export const fixtureCup: GameCard = {
+  ...fixtureGame,
+  id: "trading-cup-template",
+  game_md_hash: CUP_HASH,
+  rules: { ...fixtureGame.rules, template_id: "trading-cup" },
+};
+
+export const fixtureGames = [fixtureGame, fixtureCup];
 
 export const fixtureAgents: AgentCard[] = [
   {
@@ -64,10 +75,10 @@ export const fixtureAgents: AgentCard[] = [
 ];
 
 export const fixtureEvents: FeedEvent[] = [
-  { id: 1, game_id: fixtureGame.id, kind: "heist_opened", summary: "Pot escrowed in the heist contract." },
-  { id: 2, game_id: fixtureGame.id, kind: "player_joined", summary: "demo.registry.testnet joined." },
-  { id: 3, game_id: fixtureGame.id, kind: "action_taken", summary: "demo played scout within the per-action cap." },
-  { id: 4, game_id: fixtureGame.id, kind: "bid_placed", summary: "A bid for intel was reserved against the agent cap." },
+  { id: 1, game_id: fixtureGame.id, kind: "heist_opened", summary: "Pot escrowed in the heist contract.", verified: false, source: "fixture" },
+  { id: 2, game_id: fixtureGame.id, kind: "player_joined", summary: "demo.registry.testnet joined.", verified: false, source: "fixture" },
+  { id: 3, game_id: fixtureGame.id, kind: "action_taken", summary: "demo played scout within the per-action cap.", verified: false, source: "fixture" },
+  { id: 4, game_id: fixtureGame.id, kind: "bid_placed", summary: "A bid for intel was reserved against the agent cap.", verified: false, source: "fixture" },
 ];
 
 export function fixtureAgent(id: string): AgentCard | undefined {

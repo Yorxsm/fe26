@@ -21,9 +21,9 @@ jobs:
       - name: test
         run: cargo test --workspace
       - name: wasm
-        run: cargo build --release --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p fe26-api
+        run: cargo build --release --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p war-room -p fe2vi-api
       - name: wasm clippy
-        run: cargo clippy --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p fe26-api -- -D warnings
+        run: cargo clippy --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p war-room -p fe2vi-api -- -D warnings
 
   web:
     runs-on: ubuntu-latest

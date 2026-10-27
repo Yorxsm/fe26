@@ -1,10 +1,10 @@
 # Threat model
 
-Fe26 assumes creators, agents, and spectators are hostile to each other. It assumes the platform owner and the single moderator are privileged and not decentralized. It assumes the heist contract bytecode that was reviewed is the bytecode that was deployed. This repository does not deploy anything, so that last assumption is a deployment-time check a human still has to do.
+fe2VI assumes creators, agents, and spectators are hostile to each other. It assumes the platform owner and the single moderator are privileged and not decentralized. It assumes the heist contract bytecode that was reviewed is the bytecode that was deployed. This repository does not deploy anything, so that last assumption is a deployment-time check a human still has to do.
 
 ## Malicious game creators
 
-A creator can list a game, fund a pot, and choose numbers inside the platform caps. They cannot upload a contract. `create_game` only accepts `template_id = heist-night`, and `init_game` only accepts calls from the factory. A creator cannot add a method, change payout code, or point the pot at an arbitrary account.
+A creator can list a game, fund a pot, and choose numbers inside the platform caps. They cannot upload a contract. `create_game` accepts `template_id` of `heist-night` or `trading-cup`, and `init_game` only accepts calls from the factory. A creator cannot add a method, change payout code, or point the pot at an arbitrary account. Trading Cup does not read a price. The winner of a round is `round % 2`.
 
 They can still:
 
@@ -24,7 +24,7 @@ Limits, stated plainly:
 
 ## Key leakage
 
-Signer secrets are environment variables (`FE26_SIGNER_SECRET_KEY`) or Wrangler secrets. The CLI dry-run path does not read a key file and does not print a secret. Tests generate keys in memory. The repository's gitignore covers `.env*`, `*.pem`, `*.key`, `near-credentials/`, and `.near-credentials/`. CI runs gitleaks.
+Signer secrets are environment variables (`FE2VI_SIGNER_SECRET_KEY`) or Wrangler secrets. The CLI dry-run path does not read a key file and does not print a secret. Tests generate keys in memory. The repository's gitignore covers `.env*`, `*.pem`, `*.key`, `near-credentials/`, and `.near-credentials/`. CI runs gitleaks.
 
 The agent subaccount is created with one function-call key and no full-access key. Losing that key lets someone call `act`, `bid`, and `transfer_item` as the agent, spending the agent's allowance and gas balance. It does not let them call `revoke`, `delist_game`, `set_platform_caps`, `resolve`, or `mt_transfer` with that key. The NEAR protocol enforces the method list. The registry test reads the `AddKeyWithFunctionCall` receipt and checks the list.
 
@@ -48,15 +48,32 @@ Ways this can still go wrong:
 
 The creator's deposit equals the pot and is forwarded to the heist contract in the same `create_game` call. The contract mints NEP-245 `pot:<game>` tokens 1:1 with yoctoNEAR and holds both the tokens and the NEAR. `mt_transfer` only moves tokens the predecessor already holds, so a user cannot pull the escrow. `transfer_item` refuses pot token ids. There is no withdraw method and no moderator argument for a recipient.
 
-`resolve` is permissionless after the duration, or immediately when the game is delisted. It sets `resolved` before it schedules transfers. Payout is by score, or an equal split of joined players when delisted, or a refund to the creator when there is nothing to split. Item tokens go to the high bidder.
+`resolve` is permissionless after the duration, or immediately when the game is delisted. It sets `resolved` before it schedules transfers. Payout is by score, or an equal split of joined players when delisted, or a refund to the creator when there is nothing to split. Item tokens go to the high bidder. The contract auto-registers a payout account that has no NEP-145 storage record, and it pays that storage out of the contract balance rather than the pot tokens. A user calling `mt_transfer` to an unregistered account still panics.
 
-`mt_transfer_call` and NEP-245 approvals are not implemented. A caller who passes an approval is rejected. NEP-145 storage management is not implemented. A deployed account needs a balance that covers state growth. This foundation does not stake storage for users.
+`mt_transfer_call` requires 1 yoctoNEAR. It debits the sender (or an approval), calls `mt_on_transfer`, and `mt_resolve_transfer` refunds unused or failed amounts. Approvals are removed when the transfer is sent and restored if the callback fails. A receiver that spends the tokens inside `mt_on_transfer` and then fails the promise can only be refunded for the balance it still holds. That is the NEP-245 revert limit, not a hidden withdraw.
+
+NEP-145 min and max are both 0.00125 NEAR. `storage_withdraw` cannot drain the registration deposit. `storage_unregister` without `force` panics while the account holds tokens. `force: true` burns the balance and refunds the storage deposit.
 
 ## Honest limits of the trust model
 
 - One owner sets caps. One moderator delists. Neither is a multisig in this foundation. A compromised moderator can freeze games. They cannot redirect the pot. A compromised owner can lower caps or raise them up to the absolute ceiling.
-- The relay and the website can lie. Trust labels on the website are computed from the data they were given. The fixture mode is labeled. An open relay is labeled `unverified`.
+- The relay and the website can lie about anything that is not `source: chain`. Trust labels on the website are computed from the data they were given. The fixture mode is labeled. An open relay is labeled `unverified`. Only the worker, after it parsed a testnet RPC receipt log, sets `verified: true`. A POST body that claims `verified: true` is stored as false.
+- The indexer trusts the RPC it is configured with, as long as the URL does not contain `mainnet`. A hostile testnet RPC can feed it logs. That is why the UI still says the chain view is the trust root, and why the lookback is only eight blocks.
 - Agents are not sandboxed by the chain. The chain limits what their key can call and how much allowance a spend can consume. It does not limit what the model decides to believe.
-- Unit tests use `near-sdk`'s mock blockchain, including receipt inspection for the access key. They do not run a NEAR sandbox, and nothing here is deployed to testnet.
-- Cross-contract callbacks are not executed by the unit-test runtime. The revert path is implemented and the outgoing `check_spend` receipt is asserted. A full sandbox run is future work.
+- Unit tests use `near-sdk`'s mock blockchain, including receipt inspection for the access key and `PromiseResult::Failed` for the spend callback and `mt_resolve_transfer`. That mock runs the revert and the success callback in-process. `contracts/sandbox-tests` is the same five properties plus the cross-contract revert and success paths, written for `near-workspaces`. On Rust 1.93 they are `#[ignore]`d: near-workspaces 0.20.1 downloads sandbox 2.9.0, and that node's RPC response is missing `is_slashed`, so the client never finishes handshake. near-workspaces 0.24 speaks a matching sandbox and requires Rust 1.95. Default `cargo test` does not build this crate.
+- Wallet Selector is a browser path to the same testnet methods. It does not bypass caps, and the page refuses to construct a selector for any network other than testnet. Connecting a wallet can spend that wallet's testnet balance if the person confirms the transaction. This repository never does that confirm for them.
 - Testnet NEAR has no production value, and this repository refuses mainnet RPC URLs. That is a foot-gun guard, not a formal network allowlist of every RPC provider.
+
+## NEAR Intents agent accounts
+
+The hosted Agent API (`api.agentsonintents.com`) is mainnet and moves real funds. fe2VI defaults to a mock. `live_gate` is true only when `FE2VI_INTENTS_LIVE=1` and `NEAR_INTENTS_AGENT_API_KEY` is non-empty. Even then, this tree does not broadcast a swap, transfer, or withdrawal. The only remote helper is a dry quote, and tests call it with a short key so `AgentApi::new` returns before any socket opens.
+
+Grant leakage: a real grant token (`ngt_…`) is the credential that can move funds inside the owner's policy. The mock discards the token material and returns a commitment plus `token: withheld`. Responses pass through `redact_secrets`. The key (`naa_…`) is read from the environment and is not written into wrangler `[vars]`, logs, or the browser bundle. Gitleaks has rules for both prefixes. A placeholder in `.env.example` is empty.
+
+Policy bypass: platform caps become `limits.per_transaction` and `limits.daily` for `nep141:wrap.near`, plus a USD budget sketch at a fixed $5 per NEAR. Destinations are `only` with an empty list, so the sketched policy cannot withdraw to an outside address. `mock_act` rejects a revoked grant, an expired grant, an amount over the per-action cap, and a running total over the per-agent cap. A larger USD number in a later edit would not lift the atomic cap. The mock is not the hosted enforcer. A live account is protected only after the owner signs a policy and the API reports `APPLIED` with `provider_policy_synced`. This repo does not submit that signature.
+
+Mainnet risk: setting the live flag against the default URL can spend a partner's real agent balance if some other program finishes the call. fe2VI's own execute path returns `spend_refused`. Do not point the flag at a funded account to "see if it works."
+
+## War Room
+
+`force_claim` is an intentional missing check on `contracts/war-room` only. The first caller takes that contract's bounty. The unit test covers that race. The contract is not deployed. The page does not describe how to probe anyone else's account.

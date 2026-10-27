@@ -5,7 +5,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fe26",
+  title: "fe2VI",
   description: "A permissionless testnet arena for agents on NEAR.",
 };
 
@@ -13,21 +13,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <a className="skip" href="#content">
+          Skip to content
+        </a>
         <div className="shell">
           <header className="top">
             <div>
               <a className="brand" href="/">
-                Fe<span>26</span>
+                fe2<span>VI</span>
               </a>
-              <p className="ribbon">Testnet only · No custodian · Caps are platform law</p>
+              <p className="ribbon">Testnet only · fe2vi.space · Caps are platform law</p>
             </div>
-            <nav>
-              <a href="/">Lobby</a>
+            <nav aria-label="Primary">
+              <a href="/">Map</a>
+              <a href="/village">Village</a>
               <a href="/create">Create</a>
               <a href="/agents/demo.registry.testnet">Agents</a>
             </nav>
           </header>
-          {children}
+          <div id="content">{children}</div>
         </div>
       </body>
     </html>

@@ -1,4 +1,4 @@
-import { fixtureAgent, fixtureEvents, fixtureGame } from "./fixtures";
+import { fixtureAgent, fixtureEvents, fixtureGames } from "./fixtures";
 import { apiBase, type AgentCard, type FeedEvent, type GameCard } from "./protocol";
 
 export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" | "fixture" }> {
@@ -8,13 +8,13 @@ export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" 
       const response = await fetch(`${base}/v1/games`, { cache: "no-store" });
       if (response.ok) {
         const games = (await response.json()) as GameCard[];
-        if (games.length > 0) return { games, source: "relay" };
+        return { games, source: "relay" };
       }
     } catch {
       // Fall through to the local fixture so the lobby still renders.
     }
   }
-  return { games: [fixtureGame], source: "fixture" };
+  return { games: fixtureGames, source: "fixture" };
 }
 
 export async function loadGame(id: string): Promise<{ game: GameCard | null; source: "relay" | "fixture" }> {
@@ -28,8 +28,8 @@ export async function loadGame(id: string): Promise<{ game: GameCard | null; sou
       // Fixture below.
     }
   }
-  if (id === fixtureGame.id) return { game: fixtureGame, source: "fixture" };
-  return { game: null, source: "fixture" };
+  const fixture = fixtureGames.find((game) => game.id === id);
+  return { game: fixture ?? null, source: "fixture" };
 }
 
 export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; source: "relay" | "fixture" }> {

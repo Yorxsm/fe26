@@ -10,23 +10,37 @@ use std::time::Duration;
 
 use base64::Engine;
 use clap::{Parser, Subcommand};
-use fe26_core::{
-    canonical_rules_json, extract_rules_json, game_md_violations, pin_hash, GameRules,
-    MIN_AGENT_DEPOSIT_YOCTO,
+use fe2vi_core::{
+    canonical_rules_json, default_platform_caps, extract_rules_json, game_md_violations, pin_hash,
+    GameRules, MIN_AGENT_DEPOSIT_YOCTO,
 };
+use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS};
 
 use crate::tx::SignedCall;
 
 const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
-const DEFAULT_FACTORY: &str = "factory.fe26.testnet";
-const DEFAULT_REGISTRY: &str = "registry.fe26.testnet";
-const DEFAULT_HEIST: &str = "heist.fe26.testnet";
+const DEFAULT_FACTORY: &str = "factory.fe2vi.testnet";
+const DEFAULT_REGISTRY: &str = "registry.fe2vi.testnet";
+const DEFAULT_HEIST: &str = "heist.fe2vi.testnet";
 
 #[derive(Parser, Debug)]
-#[command(name = "fe26", about = "Fe26 arena tools for NEAR testnet")]
+#[command(name = "fe2vi", about = "fe2VI arena tools for NEAR testnet")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum IntentsCommand {
+    /// Print the platform-cap policy. Broadcast stays off.
+    Policy,
+    /// Issue a mock session grant. The token is discarded.
+    Grant {
+        #[arg(long)]
+        game: String,
+        #[arg(long)]
+        agent: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -56,6 +70,11 @@ enum Command {
         agent: String,
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Show the Intents policy sketch. Does not call the network or print a secret.
+    Intents {
+        #[command(subcommand)]
+        action: IntentsCommand,
     },
     /// Poll the spectator API, or a heist view if no API is configured.
     Watch {
@@ -90,27 +109,59 @@ fn main() {
 
 fn config_from_env() -> Config {
     Config {
-        rpc_url: std::env::var("FE26_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC.to_string()),
-        account_id: std::env::var("FE26_ACCOUNT_ID")
+        rpc_url: std::env::var("FE2VI_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC.to_string()),
+        account_id: std::env::var("FE2VI_ACCOUNT_ID")
             .ok()
             .filter(|value| !value.is_empty()),
-        signer_secret: std::env::var("FE26_SIGNER_SECRET_KEY")
+        signer_secret: std::env::var("FE2VI_SIGNER_SECRET_KEY")
             .ok()
             .filter(|value| !value.is_empty()),
-        factory_id: std::env::var("FE26_FACTORY_ID")
+        factory_id: std::env::var("FE2VI_FACTORY_ID")
             .unwrap_or_else(|_| DEFAULT_FACTORY.to_string()),
-        registry_id: std::env::var("FE26_REGISTRY_ID")
+        registry_id: std::env::var("FE2VI_REGISTRY_ID")
             .unwrap_or_else(|_| DEFAULT_REGISTRY.to_string()),
-        heist_id: std::env::var("FE26_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
-        api_url: std::env::var("FE26_API_URL")
+        heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
+        api_url: std::env::var("FE2VI_API_URL")
             .ok()
             .filter(|value| !value.is_empty()),
     }
 }
 
+fn intents(action: IntentsCommand) -> Result<String, String> {
+    let live = live_gate(
+        &std::env::var("FE2VI_INTENTS_LIVE").unwrap_or_default(),
+        &std::env::var("NEAR_INTENTS_AGENT_API_KEY").unwrap_or_default(),
+    );
+    match action {
+        IntentsCommand::Policy => {
+            let policy = policy_from_caps(&default_platform_caps(), MOCK_USD_PER_NEAR_CENTS);
+            Ok(serde_json::to_string_pretty(&serde_json::json!({
+                "mode": if live { "live-dry" } else { "mock" },
+                "broadcast": false,
+                "note": "fe2VI does not broadcast swaps, transfers, or withdrawals",
+                "policy": policy,
+            }))
+            .unwrap_or_else(|_| "{}".into()))
+        }
+        IntentsCommand::Grant { game, agent } => {
+            let mut grants = Vec::new();
+            let issued = issue_session(&mut grants, &game, &agent, 0, 3600);
+            Ok(serde_json::to_string_pretty(&serde_json::json!({
+                "mode": issued.mode,
+                "grant_id": issued.grant_id,
+                "label": issued.label,
+                "commitment": issued.commitment,
+                "token": "withheld",
+                "broadcast": false,
+            }))
+            .unwrap_or_else(|_| "{}".into()))
+        }
+    }
+}
+
 fn assert_testnet(rpc_url: &str) -> Result<(), String> {
     if rpc_url.to_ascii_lowercase().contains("mainnet") {
-        Err("refusing mainnet RPC; Fe26 foundation is testnet-only".into())
+        Err("refusing mainnet RPC; fe2VI foundation is testnet-only".into())
     } else {
         Ok(())
     }
@@ -189,6 +240,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
                 50_000_000_000_000,
             )
         }
+        Command::Intents { action } => intents(action),
         Command::Watch { game_id, once } => watch(config, &game_id, once),
     }
 }
@@ -219,7 +271,7 @@ fn submit(
             preview["reason"] = if dry_run {
                 serde_json::json!("dry-run")
             } else {
-                serde_json::json!("FE26_SIGNER_SECRET_KEY is not set")
+                serde_json::json!("FE2VI_SIGNER_SECRET_KEY is not set")
             };
             return Ok(serde_json::to_string_pretty(&preview).unwrap_or_else(|_| "{}".into()));
         }
@@ -227,7 +279,7 @@ fn submit(
     let account = config
         .account_id
         .clone()
-        .ok_or("FE26_ACCOUNT_ID is required to broadcast")?;
+        .ok_or("FE2VI_ACCOUNT_ID is required to broadcast")?;
     let args_bytes = serde_json::to_vec(args).map_err(|err| err.to_string())?;
     let (nonce, block_hash) = chain_head(&config.rpc_url, &account, secret)?;
     let signed = tx::sign_call(&SignedCall {
@@ -291,7 +343,7 @@ fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json:
         .post(url)
         .json(&serde_json::json!({
             "jsonrpc": "2.0",
-            "id": "fe26",
+            "id": "fe2vi",
             "method": method,
             "params": params,
         }))
@@ -353,7 +405,7 @@ fn watch(config: &Config, game_id: &str, once: bool) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fe26_core::{heist_night_example, render_game_md, GamePointer};
+    use fe2vi_core::{heist_night_example, render_game_md, GamePointer};
     use near_crypto::{KeyType, SecretKey};
     use near_primitives::transaction::SignedTransaction;
 
@@ -366,7 +418,7 @@ mod tests {
 
     #[test]
     fn create_game_dry_run_pins_the_rules_and_does_not_need_a_key() {
-        let dir = std::env::temp_dir().join(format!("fe26-cli-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("fe2vi-cli-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let rules = heist_night_example();
         let rules_path = dir.join("rules.json");
@@ -408,7 +460,7 @@ mod tests {
 
     #[test]
     fn game_md_with_a_command_is_rejected() {
-        let dir = std::env::temp_dir().join(format!("fe26-cli-bad-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("fe2vi-cli-bad-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let rules = heist_night_example();
         let rules_path = dir.join("rules.json");
@@ -445,9 +497,9 @@ mod tests {
         let bytes = tx::sign_call(&SignedCall {
             signer_id: "alice.testnet".into(),
             secret: &secret_text,
-            receiver_id: "registry.fe26.testnet".into(),
+            receiver_id: "registry.fe2vi.testnet".into(),
             method: "revoke".into(),
-            args: br#"{"agent":"alpha.registry.fe26.testnet"}"#.to_vec(),
+            args: br#"{"agent":"alpha.registry.fe2vi.testnet"}"#.to_vec(),
             gas: 30_000_000_000_000,
             deposit: 0,
             nonce: 7,

@@ -1,4 +1,4 @@
-name = "fe26-api"
+name = "fe2vi-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-01-15"
 workers_dev = true
@@ -16,5 +16,17 @@ bindings = [
 tag = "v1"
 new_classes = ["SpectatorFeed"]
 
+# Cron is local configuration. Do not deploy this worker.
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
-FE26_NETWORK = "testnet"
+FE2VI_NETWORK = "testnet"
+FE2VI_RPC_URL = "https://rpc.testnet.near.org"
+FE2VI_FACTORY_ID = "factory.fe2vi.testnet"
+FE2VI_REGISTRY_ID = "registry.fe2vi.testnet"
+FE2VI_HEIST_ID = "heist.fe2vi.testnet"
+# fe2vi.space is a name in the docs. This file does not bind a domain.
+# The Intents API key is a secret. Do not put it in [vars]. Live calls stay off.
+FE2VI_INTENTS_LIVE = "0"
+NEAR_INTENTS_AGENT_API_URL = "https://api.agentsonintents.com"

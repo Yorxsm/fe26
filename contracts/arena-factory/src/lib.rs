@@ -4,7 +4,7 @@
 //! a game. Delist does not choose a payout recipient and cannot seize the pot.
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use fe26_core::{
+use fe2vi_core::{
     absolute_ceiling, default_platform_caps, event_json, pin_hash, validate_platform_caps,
     validate_rules, GameRules, PlatformCaps,
 };
@@ -217,7 +217,7 @@ impl ArenaFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fe26_core::{heist_night_example, pin_hash, ONE_NEAR};
+    use fe2vi_core::{heist_night_example, pin_hash, ONE_NEAR};
     use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
     use near_sdk::{testing_env, NearToken};
     use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -225,7 +225,7 @@ mod tests {
     fn use_pred(predecessor: &str, deposit: u128) {
         let mut builder = VMContextBuilder::new();
         builder
-            .current_account_id("factory.fe26.testnet".parse().unwrap())
+            .current_account_id("factory.fe2vi.testnet".parse().unwrap())
             .predecessor_account_id(predecessor.parse().unwrap())
             .signer_account_id(predecessor.parse().unwrap())
             .attached_deposit(NearToken::from_yoctonear(deposit))
@@ -236,12 +236,12 @@ mod tests {
     }
 
     fn setup() -> ArenaFactory {
-        use_pred("owner.fe26.testnet", 0);
+        use_pred("owner.fe2vi.testnet", 0);
         ArenaFactory::new(
-            "owner.fe26.testnet".parse().unwrap(),
-            "moderator.fe26.testnet".parse().unwrap(),
-            "registry.fe26.testnet".parse().unwrap(),
-            "heist.fe26.testnet".parse().unwrap(),
+            "owner.fe2vi.testnet".parse().unwrap(),
+            "moderator.fe2vi.testnet".parse().unwrap(),
+            "registry.fe2vi.testnet".parse().unwrap(),
+            "heist.fe2vi.testnet".parse().unwrap(),
         )
     }
 
@@ -257,7 +257,7 @@ mod tests {
 
     fn create(factory: &mut ArenaFactory) -> String {
         let rules = heist_night_example();
-        use_pred("creator.fe26.testnet", rules.pot_yocto);
+        use_pred("creator.fe2vi.testnet", rules.pot_yocto);
         factory.create_game(rules.clone(), pin_hash(&rules))
     }
 
@@ -266,7 +266,7 @@ mod tests {
         let mut factory = setup();
         let id = create(&mut factory);
 
-        use_pred("creator.fe26.testnet", 0);
+        use_pred("creator.fe2vi.testnet", 0);
         let err = catch_unwind(AssertUnwindSafe(|| {
             factory.delist_game(id.clone());
         }))
@@ -274,14 +274,14 @@ mod tests {
         assert!(panic_text(err).contains("only the moderator can delist"));
         assert!(!factory.get_game(id.clone()).unwrap().delisted);
 
-        use_pred("heist.fe26.testnet", 0);
+        use_pred("heist.fe2vi.testnet", 0);
         let err = catch_unwind(AssertUnwindSafe(|| {
             factory.delist_game(id.clone());
         }))
         .unwrap_err();
         assert!(panic_text(err).contains("only the moderator can delist"));
 
-        use_pred("moderator.fe26.testnet", 0);
+        use_pred("moderator.fe2vi.testnet", 0);
         factory.delist_game(id.clone());
         assert!(factory.get_game(id.clone()).unwrap().delisted);
         assert!(get_logs()
@@ -305,7 +305,7 @@ mod tests {
     fn game_cannot_raise_platform_caps() {
         let mut factory = setup();
         let original = factory.get_platform_caps();
-        use_pred("heist.fe26.testnet", 0);
+        use_pred("heist.fe2vi.testnet", 0);
         let mut raised = original.clone();
         raised.max_pot_yocto = original.max_pot_yocto + ONE_NEAR;
         let err = catch_unwind(AssertUnwindSafe(|| {
@@ -317,7 +317,7 @@ mod tests {
 
         let mut rules = heist_night_example();
         rules.per_agent_cap_yocto = original.max_per_agent_yocto + 1;
-        use_pred("creator.fe26.testnet", rules.pot_yocto);
+        use_pred("creator.fe2vi.testnet", rules.pot_yocto);
         let err = catch_unwind(AssertUnwindSafe(|| {
             factory.create_game(rules.clone(), pin_hash(&rules));
         }))
@@ -332,7 +332,7 @@ mod tests {
         let id = create(&mut factory);
         let view = factory.get_game(id).unwrap();
         assert_eq!(view.game_md_hash, pin_hash(&view.rules));
-        let creator: AccountId = "creator.fe26.testnet".parse().unwrap();
+        let creator: AccountId = "creator.fe2vi.testnet".parse().unwrap();
         assert_eq!(view.creator, creator);
         assert!(get_logs().iter().any(|line| line.contains("game_created")));
         let mut forwarded = false;

@@ -1,5 +1,5 @@
 [package]
-name = "fe26-api"
+name = "fe2vi-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,8 @@ description = "Cloudflare Worker: HTTP API, GAME.md, and a Durable Object specta
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fe26-core = { path = "../../crates/fe26-core" }
+fe2vi-core = { path = "../../crates/fe2vi-core" }
+fe2vi-intents = { path = "../../crates/fe2vi-intents" }
 serde.workspace = true
 serde_json.workspace = true
 

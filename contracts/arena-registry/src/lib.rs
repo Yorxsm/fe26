@@ -1,4 +1,4 @@
-//! Agent registry for Fe26.
+//! Agent registry for fe2VI.
 //!
 //! Registering an agent creates a subaccount of this contract and adds exactly
 //! one function-call access key. The key's receiver is the heist contract and
@@ -6,7 +6,7 @@
 //! key on that subaccount. Platform caps live here. Games cannot write them.
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use fe26_core::{
+use fe2vi_core::{
     absolute_ceiling, authorize_cap_change, authorize_platform_spend, default_platform_caps,
     event_json, CapActor, PlatformCaps, MIN_AGENT_DEPOSIT_YOCTO, SCOPED_METHODS,
     SCOPED_METHOD_LIST,
@@ -274,7 +274,7 @@ mod tests {
     fn use_pred(predecessor: &str, deposit: u128) {
         let mut builder = VMContextBuilder::new();
         builder
-            .current_account_id("registry.fe26.testnet".parse().unwrap())
+            .current_account_id("registry.fe2vi.testnet".parse().unwrap())
             .predecessor_account_id(predecessor.parse().unwrap())
             .signer_account_id(predecessor.parse().unwrap())
             .attached_deposit(NearToken::from_yoctonear(deposit))
@@ -288,11 +288,11 @@ mod tests {
     }
 
     fn setup() -> ArenaRegistry {
-        use_pred("owner.fe26.testnet", 0);
+        use_pred("owner.fe2vi.testnet", 0);
         ArenaRegistry::new(
-            "owner.fe26.testnet".parse().unwrap(),
-            "heist.fe26.testnet".parse().unwrap(),
-            "factory.fe26.testnet".parse().unwrap(),
+            "owner.fe2vi.testnet".parse().unwrap(),
+            "heist.fe2vi.testnet".parse().unwrap(),
+            "factory.fe2vi.testnet".parse().unwrap(),
         )
     }
 
@@ -310,7 +310,7 @@ mod tests {
     fn game_cannot_raise_platform_caps() {
         let mut registry = setup();
         let original = registry.get_platform_caps();
-        use_pred("heist.fe26.testnet", 0);
+        use_pred("heist.fe2vi.testnet", 0);
         let raised = {
             let mut caps = original.clone();
             caps.max_per_agent_yocto += 1;
@@ -326,7 +326,7 @@ mod tests {
         );
         assert_eq!(registry.get_platform_caps(), original);
 
-        use_pred("owner.fe26.testnet", 0);
+        use_pred("owner.fe2vi.testnet", 0);
         let mut above = absolute_ceiling();
         above.max_pot_yocto += 1;
         let err = catch_unwind(AssertUnwindSafe(|| {
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn spend_over_cap_rejected() {
         let mut registry = setup();
-        use_pred("alice.fe26.testnet", MIN_AGENT_DEPOSIT_YOCTO);
+        use_pred("alice.fe2vi.testnet", MIN_AGENT_DEPOSIT_YOCTO);
         let agent = registry.register_agent("alpha".into(), test_key());
         let caps = registry.get_platform_caps();
         let err = catch_unwind(AssertUnwindSafe(|| {
@@ -367,9 +367,9 @@ mod tests {
     #[test]
     fn revoked_agent_cannot_act() {
         let mut registry = setup();
-        use_pred("alice.fe26.testnet", MIN_AGENT_DEPOSIT_YOCTO);
+        use_pred("alice.fe2vi.testnet", MIN_AGENT_DEPOSIT_YOCTO);
         let agent = registry.register_agent("alpha".into(), test_key());
-        use_pred("alice.fe26.testnet", 0);
+        use_pred("alice.fe2vi.testnet", 0);
         registry.revoke(agent.clone());
         assert!(registry.is_revoked(agent.clone()));
         let err = catch_unwind(AssertUnwindSafe(|| {
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn function_call_key_cannot_call_methods_outside_its_scope() {
         let mut registry = setup();
-        use_pred("alice.fe26.testnet", MIN_AGENT_DEPOSIT_YOCTO);
+        use_pred("alice.fe2vi.testnet", MIN_AGENT_DEPOSIT_YOCTO);
         let agent = registry.register_agent("alpha".into(), test_key());
 
         let mut scoped: Option<(Vec<String>, AccountId, Option<NearToken>)> = None;
@@ -411,7 +411,7 @@ mod tests {
             "agent subaccount must not receive a full-access key"
         );
         assert_eq!(methods, vec!["act", "bid", "transfer_item"]);
-        let expected: AccountId = "heist.fe26.testnet".parse().unwrap();
+        let expected: AccountId = "heist.fe2vi.testnet".parse().unwrap();
         assert_eq!(receiver, expected);
         assert!(
             allowance.is_some(),

@@ -6,8 +6,9 @@ pub const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 /// Balance forwarded to a new agent subaccount so its function-call key can pay gas.
 pub const MIN_AGENT_DEPOSIT_YOCTO: u128 = 100_000_000_000_000_000_000_000;
 
-/// The only template this foundation will instantiate.
+/// Templates the factory will instantiate. Heist Night and Trading Cup.
 pub const TEMPLATE_HEIST: &str = "heist-night";
+pub const TEMPLATE_CUP: &str = "trading-cup";
 
 /// Methods a registered agent function-call key is allowed to invoke.
 /// The NEAR protocol enforces this list on the key. Empty would mean "all methods",
@@ -86,6 +87,21 @@ pub fn default_platform_caps() -> PlatformCaps {
 pub fn heist_night_example() -> GameRules {
     GameRules {
         template_id: TEMPLATE_HEIST.to_string(),
+        max_players: 6,
+        duration_seconds: 3_600,
+        round_count: 4,
+        pot_yocto: 10 * ONE_NEAR,
+        per_agent_cap_yocto: 2 * ONE_NEAR,
+        per_action_cap_yocto: ONE_NEAR / 2,
+        entry_yocto: 0,
+    }
+}
+
+/// Trading Cup example. Same numeric caps as Heist Night so the only hash change
+/// is the template id. The tape is fake. No mainnet asset is priced.
+pub fn trading_cup_example() -> GameRules {
+    GameRules {
+        template_id: TEMPLATE_CUP.to_string(),
         max_players: 6,
         duration_seconds: 3_600,
         round_count: 4,

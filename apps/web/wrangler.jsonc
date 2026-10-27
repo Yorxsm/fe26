@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fe26-web",
+  "name": "fe2vi-web",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-01-15",
   "compatibility_flags": ["nodejs_compat"],
@@ -9,6 +9,6 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "FE26_NETWORK": "testnet"
+    "FE2VI_NETWORK": "testnet"
   }
 }

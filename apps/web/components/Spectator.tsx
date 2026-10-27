@@ -10,10 +10,18 @@ export function Spectator({ gameId, source }: { gameId: string; source: "relay" 
 
   useEffect(() => {
     const base = apiBase();
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!base || source === "fixture") {
       const script = fixtureFeed(gameId);
-      setStatus(source === "fixture" ? "local replay" : "no relay configured");
-      if (script.length === 0) return;
+      setStatus(source === "fixture" ? "fixture replay" : "no relay configured");
+      if (script.length === 0) {
+        setEvents([]);
+        return;
+      }
+      if (reduced) {
+        setEvents(script);
+        return;
+      }
       let index = 0;
       setEvents([script[0]]);
       const timer = window.setInterval(() => {
@@ -73,14 +81,17 @@ export function Spectator({ gameId, source }: { gameId: string; source: "relay" 
   return (
     <section>
       <div className="row">
-        <h2>Spectator feed</h2>
+        <h2>Play by play</h2>
         <span className="meta">{status}</span>
       </div>
       <div className="feed" aria-live="polite">
-        {events.length === 0 && <div className="line">Waiting for events.</div>}
+        {events.length === 0 && <div className="line">Waiting for the first event.</div>}
         {events.map((event) => (
-          <div className="line" key={event.id}>
-            <span className="meta">{event.kind}</span> {event.summary}
+          <div className={event.verified ? "line verified" : "line"} key={event.id}>
+            <span className="meta">
+              {event.kind} · {event.verified ? "verified" : event.source ?? "relay"}
+            </span>{" "}
+            {event.summary}
           </div>
         ))}
       </div>

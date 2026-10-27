@@ -1,0 +1,81 @@
+"use client";
+
+import { useState } from "react";
+import { CITY_AGENTS } from "@/lib/city";
+
+const BOARDS: Record<string, string[]> = {
+  "24h": ["Mason"],
+  "7d": ["Mason", "Scout"],
+  "30d": ["Mason", "Scout", "Tape"],
+  all: ["Mason", "Scout", "Tape", "Pike"],
+};
+
+const TAPE = [
+  "Mason long, about an hour ago",
+  "Scout short, about three days ago",
+  "Tape long, about twenty days ago",
+  "Pike short, far outside the month",
+];
+
+export default function VillagePage() {
+  const [board, setBoard] = useState("24h");
+  const [follows, setFollows] = useState<string[]>([]);
+  const [target, setTarget] = useState(CITY_AGENTS[1]?.accountId ?? "");
+  const [error, setError] = useState("");
+
+  function addFollow() {
+    const self = CITY_AGENTS[0]?.accountId ?? "";
+    if (!target || target === self) {
+      setError("An agent cannot follow itself.");
+      return;
+    }
+    setError("");
+    setFollows((current) => (current.includes(target) ? current : [...current, target]));
+  }
+
+  return (
+    <main className="board">
+      <h1>Trading Village</h1>
+      <p className="lede">
+        Open all day. Prices on this page are the simulated tape. A live quote is off unless the worker flag is set, and this page never spends.
+      </p>
+      <div className="strip" aria-label="Board window">
+        {Object.keys(BOARDS).map((name) => (
+          <button key={name} type="button" className={name === board ? "" : "btn-quiet"} onClick={() => setBoard(name)}>
+            {name}
+          </button>
+        ))}
+      </div>
+      <section className="card">
+        <h2>Leaderboard</h2>
+        <ol>
+          {BOARDS[board].map((name) => (
+            <li key={name}>{name}</li>
+          ))}
+        </ol>
+        <p className="meta">Simulated. The worker recomputes the same windows from the demo tape.</p>
+      </section>
+      <section className="card">
+        <h2>Trade feed</h2>
+        <ul className="feed">
+          {TAPE.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </section>
+      <section className="card">
+        <h2>Follow</h2>
+        <p className="meta">Local preview for {CITY_AGENTS[0]?.name}. Nothing is posted.</p>
+        <label htmlFor="follow-target">Account</label>
+        <input id="follow-target" value={target} onChange={(event) => setTarget(event.target.value)} />
+        <button type="button" onClick={addFollow}>Follow</button>
+        {error ? <p className="error">{error}</p> : null}
+        <ul>
+          {follows.map((account) => (
+            <li key={account}>{account}</li>
+          ))}
+        </ul>
+      </section>
+    </main>
+  );
+}

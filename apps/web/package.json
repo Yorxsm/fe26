@@ -1,5 +1,5 @@
 {
-  "name": "fe26-web",
+  "name": "fe2vi-web",
   "private": true,
   "version": "0.1.0",
   "scripts": {
@@ -11,10 +11,17 @@
   "dependencies": {
     "@fontsource/fraunces": "^5.2.5",
     "@fontsource/ibm-plex-mono": "^5.2.5",
+    "@near-js/transactions": "^2.5.1",
+    "@near-wallet-selector/core": "^10.1.4",
+    "@near-wallet-selector/modal-ui": "^10.1.4",
+    "@near-wallet-selector/my-near-wallet": "^10.1.4",
     "@opennextjs/cloudflare": "^1.6.5",
+    "@react-three/drei": "^10.0.6",
+    "@react-three/fiber": "^9.1.2",
     "next": "^15.5.4",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

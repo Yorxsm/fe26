@@ -1,17 +1,18 @@
 [package]
-name = "fe26-cli"
+name = "fe2vi-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "fe26 command line for the NEAR testnet arena."
+description = "fe2vi command line for the NEAR testnet arena."
 
 [[bin]]
-name = "fe26"
+name = "fe2vi"
 path = "src/main.rs"
 
 [dependencies]
-fe26-core = { path = "../fe26-core" }
+fe2vi-core = { path = "../fe2vi-core" }
+fe2vi-intents = { path = "../fe2vi-intents", features = ["live"] }
 clap = { version = "4.5", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true

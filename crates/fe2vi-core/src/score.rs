@@ -13,6 +13,10 @@ pub enum ActionKind {
     Steal,
     Sabotage,
     Hide,
+    /// Trading Cup only. Even rounds settle this side.
+    Long,
+    /// Trading Cup only. Odd rounds settle this side.
+    Short,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,13 +29,20 @@ pub struct SubmittedAction {
 /// Fixed prices derived from the game's per-action cap. The transaction must
 /// name this exact amount so the spend is visible in the arguments.
 pub fn action_price(kind: ActionKind, per_action_cap: u128) -> Result<u128, &'static str> {
-    if per_action_cap < 4 {
-        return Err("per-action cap too small");
-    }
     let price = match kind {
-        ActionKind::Scout | ActionKind::Hide => per_action_cap / 4,
-        ActionKind::Sabotage => per_action_cap / 2,
-        ActionKind::Steal => per_action_cap,
+        ActionKind::Scout | ActionKind::Hide => {
+            if per_action_cap < 4 {
+                return Err("per-action cap too small");
+            }
+            per_action_cap / 4
+        }
+        ActionKind::Sabotage => {
+            if per_action_cap < 2 {
+                return Err("per-action cap too small");
+            }
+            per_action_cap / 2
+        }
+        ActionKind::Steal | ActionKind::Long | ActionKind::Short => per_action_cap,
     };
     if price == 0 {
         Err("price is zero")
@@ -99,10 +110,21 @@ pub fn score_actions(actions: &[SubmittedAction]) -> BTreeMap<String, u128> {
                 Some(ActionKind::Steal) => 2,
                 _ => 0,
             },
+            ActionKind::Long | ActionKind::Short => 0,
         };
         *scores.entry(action.player.clone()).or_insert(0) += points;
     }
     scores
+}
+
+/// Public test tape. Even rounds settle long. Odd rounds settle short.
+/// This is not a price and not a mainnet asset.
+pub fn tape_winner(round: u32) -> ActionKind {
+    if round.is_multiple_of(2) {
+        ActionKind::Long
+    } else {
+        ActionKind::Short
+    }
 }
 
 /// Split `pot` by weights. The last non-zero weight receives the remainder.
@@ -159,6 +181,13 @@ mod tests {
         let shares = split_pot(10, &weights);
         let total: u128 = shares.iter().map(|(_, share)| *share).sum();
         assert_eq!(total, 10);
+    }
+
+    #[test]
+    fn trading_tape_is_deterministic() {
+        assert_eq!(tape_winner(0), ActionKind::Long);
+        assert_eq!(tape_winner(1), ActionKind::Short);
+        assert_eq!(tape_winner(4), ActionKind::Long);
     }
 
     #[test]

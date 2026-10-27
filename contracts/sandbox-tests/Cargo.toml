@@ -1,0 +1,25 @@
+[workspace]
+
+[package]
+name = "fe2vi-sandbox"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Optional near-workspaces tests. Not a workspace member, so default cargo test does not download a sandbox."
+
+[features]
+sandbox = ["dep:near-workspaces", "dep:tokio"]
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+# 0.24 needs Rust 1.95. 0.20.1 builds on 1.93 and downloads sandbox 2.9.0,
+# whose RPC omits `is_slashed`. The tests are ignored until those line up.
+near-workspaces = { version = "=0.20.1", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+
+[[test]]
+name = "security"
+path = "tests/security.rs"
+required-features = ["sandbox"]
