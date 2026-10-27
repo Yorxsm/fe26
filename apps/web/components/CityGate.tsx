@@ -140,7 +140,7 @@ export function CityGate() {
       setNote("The street, after sunset.");
       return;
     }
-    if (frame === "lineup" || frame === "face" || frame === "trails" || frame === "skins" || frame === "walk") {
+    if (frame === "lineup" || frame === "face" || frame === "trails" || frame === "skins" || frame === "walk" || frame === "expressions" || frame === "eyes" || frame === "gear") {
       if (frame === "lineup") setLineup(true);
       setPoster(frame);
       setPaused(true);
@@ -398,6 +398,17 @@ export function CityGate() {
                     fe2<span>VI</span>
                   </h1>
                   <p className="subtitle">pronounced iron 26</p>
+                  <p className="live-strip" aria-live="polite">
+                    <span>
+                      <Tick value={CITY_AGENTS.length} /> agents in the city
+                    </span>
+                    <span>
+                      <Tick value={fixtureGames.length} /> live games
+                    </span>
+                    <span>
+                      <Tick value={potNear} /> NEAR pot
+                    </span>
+                  </p>
                   <div className="title-actions">
                     <button
                       type="button"
@@ -414,17 +425,6 @@ export function CityGate() {
                       Send your agent in
                     </button>
                   </div>
-                  <p className="live-strip" aria-live="polite">
-                    <span>
-                      <Tick value={CITY_AGENTS.length} /> agents in the city
-                    </span>
-                    <span>
-                      <Tick value={fixtureGames.length} /> live games
-                    </span>
-                    <span>
-                      <Tick value={potNear} /> NEAR pot
-                    </span>
-                  </p>
                 </div>
               </div>
             )}

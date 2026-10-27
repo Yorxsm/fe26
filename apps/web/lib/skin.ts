@@ -65,7 +65,7 @@ export const PAINT_NAMES = [
 ];
 
 export const SCREEN_NAMES = ["Amber", "Magenta", "Cyan", "Signal", "Mint", "Lime", "White", "Rose"];
-export const EYE_NAMES = ["Neutral", "Happy", "Angry", "Smile", "Wide", "Sleepy"];
+export const EYE_NAMES = ["Round", "Pill", "Visor", "Heart", "Sleepy", "Pixel"];
 export const HEADWEAR_NAMES = ["Beanie", "Headset", "Hood", "Hard hat", "Goggles", "Antenna", "Crown", "Cap"];
 export const FACE_ITEM_NAMES = ["Brow bar", "Monocle", "Mask", "Mic"];
 export const BACK_ITEM_NAMES = ["Pack", "Jetpack", "Cape", "Array"];
@@ -90,7 +90,7 @@ const HEADWEAR_NODES = [
   ["role.trader.band"],
   ["role.hacker.hood", "role.hacker.string.L", "role.hacker.string.R"],
   ["role.builder.hat"],
-  ["role.scout.goggle.L", "role.scout.goggle.R"],
+  ["role.scout.goggle.L", "role.scout.goggle.R", "role.scout.goggle.strap", "role.scout.goggle.bridge"],
   ["body.antenna", "body.antenna.tip"],
   ["headwear.crown", "headwear.crown.band"],
   ["headwear.cap", "headwear.brim"],
@@ -161,15 +161,8 @@ function matches(label: string, name: string) {
 }
 
 /** null means this node is not a swappable part. */
-export function nodeVisible(label: string, skin: SkinTraits, mood: Mood): boolean | null {
-  if (label.includes("body.face")) {
-    const face = label.match(/face\.(\d+)/);
-    if (!face) return null;
-    const index = Number(face[1]);
-    if (mood === "happy") return index === 1;
-    if (mood === "alarm") return index === 2;
-    return index === skin.eyes % EYE_STYLES;
-  }
+export function nodeVisible(label: string, skin: SkinTraits, _mood: Mood): boolean | null {
+  if (label.startsWith("body.face.") || label === "body.face") return false;
   for (let index = 0; index < HEADWEAR_NODES.length; index += 1) {
     if (HEADWEAR_NODES[index].some((name) => matches(label, name))) return index === skin.headwear % HEADWEAR;
   }

@@ -413,8 +413,11 @@ body:has(.game-root) { overflow: hidden; height: 100vh; }
 .forge-layout { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(16rem, 1.2fr); gap: var(--space-md); align-items: start; }
 .forge-canvas { width: 100%; height: 28rem; display: block; background: #0a0a0b; border: 1px solid var(--line); border-radius: 16px; }
 .forge-stage { display: grid; grid-template-columns: minmax(18rem, 1.1fr) minmax(18rem, 0.9fr); gap: 24px; align-items: start; }
-.forge-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-.forge-tabs button { background: transparent; color: var(--ink-secondary); border: 0; border-bottom: 2px solid transparent; border-radius: 0; min-height: 36px; padding: 8px 10px; }
+.forge-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+.forge-tabs button { background: var(--surface-raised); color: var(--ink-secondary); border: 1px solid var(--line); border-radius: 12px; min-height: 40px; padding: 8px; }
+.how-mint { margin: 8px 0 16px; color: var(--ink-secondary); }
+.how-mint summary { cursor: pointer; color: var(--ink); min-height: 32px; }
+.how-mint p { margin: 8px 0 0; max-width: 62ch; }
 .forge-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--orange); }
 .forge-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .forge-swatches button { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; min-height: 40px; }

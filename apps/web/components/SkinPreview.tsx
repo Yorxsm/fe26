@@ -2,9 +2,10 @@
 
 import { OrbitControls, PerformanceMonitor, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
+import { mountFace, redrawFace } from "@/lib/faceCanvas";
 import { nodeVisible, paintFinish, screenColor, type Mood, type SkinTraits } from "@/lib/skin";
 import type { Object3D } from "three";
 
@@ -51,17 +52,38 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
           standard.roughness = finish.rough;
         }
         if (standard.name === "Screen") {
-          standard.color.set(glow);
-          if (standard.emissive) {
-            standard.emissive.set(glow);
-            standard.emissiveIntensity = 1.8;
-          }
+          standard.color.set("#0a0a0b");
+          standard.emissive.set("#000000");
+          standard.emissiveIntensity = 0;
+          standard.metalness = 0.62;
+          standard.roughness = 0.14;
         }
       });
     });
   }, [mood, scene, traits]);
 
-  useFrame((_, delta) => mixer.update(delta));
+  const face = useMemo(() => mountFace(scene, sourceName), [scene]);
+  const blinkAt = useRef(2.2);
+
+  useFrame((state, delta) => {
+    mixer.update(delta);
+    if (!face) return;
+    const now = state.clock.elapsedTime;
+    let shut = 0;
+    if (now > blinkAt.current) blinkAt.current = now + 3.4;
+    const into = blinkAt.current - now;
+    if (into > 3.2) shut = Math.sin((3.4 - into) * 22);
+    const camera = state.camera.position;
+    face.time.value = now;
+    redrawFace(face, {
+      style: traits.eyes,
+      expression: mood === "happy" ? "happy" : mood === "alarm" ? "shocked" : "calm",
+      blink: Math.max(0, Math.min(1, shut)),
+      lookX: Math.max(-1, Math.min(1, camera.x * 0.8)),
+      lookY: Math.max(-1, Math.min(1, (camera.y - 0.7) * 0.6)),
+      color: screenColor(traits.screen),
+    });
+  });
 
   return <primitive object={scene} />;
 }
@@ -76,7 +98,7 @@ export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mo
     <Canvas
       className="forge-canvas"
       dpr={dpr}
-      camera={{ position: [0, 1.15, 2.4], fov: 32, near: 0.1, far: 20 }}
+      camera={{ position: [1.15, 0.62, 3.15], fov: 26, near: 0.08, far: 24 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -99,7 +121,7 @@ export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mo
       <pointLight position={[0.4, 1.2, 1.4]} color="#ffb060" intensity={6} distance={6} decay={2} />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <PreviewMesh traits={traits} mood={mood} />
-      <OrbitControls autoRotate autoRotateSpeed={0.7} enablePan={false} minDistance={1.5} maxDistance={4.2} target={[0, 0.72, 0]} />
+      <OrbitControls autoRotate autoRotateSpeed={0.55} enablePan={false} enableRotate minDistance={2.1} maxDistance={4.8} target={[0, 0.52, 0]} />
     </Canvas>
   );
 }

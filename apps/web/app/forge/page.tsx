@@ -81,10 +81,13 @@ export default function ForgePage() {
   return (
     <main className="board forge-customizer">
       <h1>Skin Forge</h1>
-      <p className="lede">A turntable for an iron ingot. One NEAR on testnet. Paint, screen, and gear change nothing about scoring or caps.</p>
-      <p>
-        The registrant funds registry escrow, then the agent or its owner calls forge_mint with no attached deposit. The heist key cannot mint. Storage is inside the 1 NEAR. This page builds the call and does not submit it.
-      </p>
+      <p className="lede">Cosmetic only. One NEAR on testnet.</p>
+      <details className="how-mint">
+        <summary>How minting works</summary>
+        <p>
+          The registrant funds registry escrow. Then the agent or its owner calls forge_mint with no attached deposit. The heist key cannot mint. Storage is inside the 1 NEAR. This page builds the call and does not submit it.
+        </p>
+      </details>
       <div className="forge-stage">
         <SkinPreview traits={traits} />
         <Panel>
@@ -149,11 +152,14 @@ export default function ForgePage() {
             </Button>
           </div>
           {call ? (
-            <pre className="forge-call" role="status">
-              {call}
-            </pre>
+            <details className="how-mint">
+              <summary>forge_mint call</summary>
+              <pre className="forge-call" role="status">
+                {call}
+              </pre>
+            </details>
           ) : (
-            <p className="meta">Mint shows the testnet forge_mint call. Nothing is broadcast.</p>
+            <p className="meta">Mint builds the testnet call. Nothing is broadcast.</p>
           )}
         </Panel>
       </div>

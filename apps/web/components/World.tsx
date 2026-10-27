@@ -112,7 +112,7 @@ function GrassBlades() {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, 700]}>
       <coneGeometry args={[0.08, 0.7, 3]} />
-      <meshStandardMaterial color="#1d3a32" roughness={0.94} metalness={0} envMapIntensity={0.02} />
+      <meshStandardMaterial color="#3e6a50" emissive="#24543c" emissiveIntensity={0.7} roughness={0.94} metalness={0} envMapIntensity={0.02} />
     </instancedMesh>
   );
 }
@@ -160,7 +160,7 @@ function HorizonField() {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.55, 0]} receiveShadow>
       <circleGeometry args={[900, 64]} />
-      <meshStandardMaterial color="#101614" roughness={1} metalness={0} envMapIntensity={0.02} />
+      <meshStandardMaterial color="#2a4034" emissive="#1c3428" emissiveIntensity={0.55} roughness={1} metalness={0} envMapIntensity={0.02} />
     </mesh>
   );
 }
@@ -219,7 +219,7 @@ export function World() {
       <GroundMist />
       <Fireflies />
       <hemisphereLight args={["#a8b8d4", "#3a3228", 0.48]} />
-      <ambientLight intensity={0.3} color="#5a4c40" />
+      <ambientLight intensity={0.42} color="#5a4c40" />
       <directionalLight
         position={[78, 9, 18]}
         intensity={0.38}
@@ -235,10 +235,13 @@ export function World() {
         shadow-camera-top={120}
         shadow-camera-bottom={-120}
       />
-      <directionalLight position={[2, 14, 16]} intensity={1.45} color="#ffc49a" />
-      <pointLight position={[1, 3.4, 6]} color="#ffb060" intensity={14} distance={48} decay={1} />
-      <pointLight position={[0, 4.6, -2]} color="#ffc48a" intensity={12} distance={40} decay={1} />
-      <pointLight position={[-2, 4.2, -12]} color="#ffb070" intensity={12} distance={36} decay={1} />
+      <directionalLight position={[-32, 24, 58]} intensity={1.15} color="#ffc49a" />
+      <pointLight position={[-19, 5, 32]} color="#ffc48a" intensity={32} distance={26} decay={1} />
+      <pointLight position={[-28, 5, 44]} color="#ffb060" intensity={22} distance={58} decay={1} />
+      <pointLight position={[-8, 4.4, 40]} color="#ffc48a" intensity={22} distance={56} decay={1} />
+      <pointLight position={[10, 4.2, 32]} color="#ffb070" intensity={20} distance={52} decay={1} />
+      <pointLight position={[4, 4, 14]} color="#ffb060" intensity={16} distance={44} decay={1} />
+      <pointLight position={[-6, 3.8, 8]} color="#ffc48a" intensity={14} distance={40} decay={1} />
       <directionalLight position={[-40, 16, -36]} intensity={0.16} color="#8ea6d4" />
       <fog attach="fog" args={["#100e18", 70, 280]} />
     </>

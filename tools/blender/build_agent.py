@@ -79,6 +79,29 @@ def cyl(name, loc, radius, depth, mat, vertices=8, rot=(0, 0, 0)):
     return finish(ob, bevel=0.01, subdiv=0)
 
 
+def torus(name, loc, major, minor, mat, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_torus_add(
+        major_radius=major,
+        minor_radius=minor,
+        major_segments=28,
+        minor_segments=8,
+        location=loc,
+        rotation=rot,
+    )
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.data.materials.append(mat)
+    return finish(ob, bevel=0.0, subdiv=0)
+
+
+def plane(name, loc, size, mat, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_plane_add(size=size, location=loc, rotation=rot)
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.data.materials.append(mat)
+    return finish(ob, bevel=0.0, subdiv=0)
+
+
 def build_armature():
     bpy.ops.object.armature_add(enter_editmode=True, location=(0, 0, 0))
     arm = bpy.context.active_object
@@ -259,7 +282,7 @@ def verify_leg_axis(arm):
 def build_body(arm, parts, skinned):
     body = material("Body", (0.60, 0.63, 0.65), 0.3, 0.5)
     trim = material("Trim", (0.22, 0.22, 0.24), 0.45, 0.4)
-    screen = material("Screen", (1.0, 0.79, 0.16), 0.05, 0.18, emission=2.2)
+    screen = material("Screen", (0.039, 0.039, 0.043), 0.62, 0.16, emission=0.0)
     bezel = material("Bezel", (0.05, 0.05, 0.06), 0.6, 0.25)
     eye = material("Eye", (0.02, 0.02, 0.025), 0.1, 0.3)
     bolt = material("Bolt", (0.55, 0.5, 0.42), 0.8, 0.35)
@@ -286,6 +309,10 @@ def build_body(arm, parts, skinned):
     for ob in (bezel_mesh, screen_mesh):
         skinned.append((ob, "bone.head"))
         parts.append(ob)
+    glass = material("Face", (0.039, 0.039, 0.043), 0.4, 0.2)
+    plate = plane("body.faceplate", (0, front - 0.046, 0.64), 0.4, glass, rot=(math.pi / 2, 0, 0))
+    skinned.append((plate, "bone.head"))
+    parts.append(plate)
 
     # Expressions are separate meshes so the runtime can show one set.
     def eyes(prefix, z_scale, rot_l, rot_r, z=0.68):
@@ -334,67 +361,139 @@ def wear(parts, skinned, ob, bone):
 
 
 def build_roles(parts, skinned, front):
-    black = material("Knit", (0.04, 0.04, 0.05), 0.0, 0.85)
+    knit = material("Knit", (0.05, 0.05, 0.06), 0.0, 0.92)
+    rib = material("Rib", (0.09, 0.09, 0.1), 0.0, 0.84)
     gold = material("Gold", (0.85, 0.68, 0.22), 0.85, 0.28)
-    navy = material("Hood", (0.08, 0.1, 0.14), 0.05, 0.8)
+    navy = material("Hood", (0.07, 0.09, 0.13), 0.04, 0.82)
+    fold = material("Fold", (0.12, 0.14, 0.18), 0.04, 0.78)
     cyan = material("Glyph", (0.18, 0.9, 0.9), 0.1, 0.3, emission=1.6)
-    glass = material("Lens", (0.75, 0.86, 0.9), 0.15, 0.08)
-    hat = material("Hat", (0.95, 0.62, 0.16), 0.15, 0.45)
-    pack = material("Pack", (0.35, 0.22, 0.12), 0.05, 0.7)
-    lime = material("Compass", (0.61, 1.0, 0.23), 0.2, 0.35, emission=0.4)
+    lens = material("Lens", (0.72, 0.88, 0.95), 0.15, 0.05, emission=0.35)
+    hat = material("Hat", (0.95, 0.62, 0.16), 0.12, 0.48)
+    ridge = material("Ridge", (0.75, 0.42, 0.1), 0.2, 0.4)
+    pack = material("Pack", (0.32, 0.2, 0.11), 0.05, 0.72)
+    pocket = material("Pocket", (0.42, 0.26, 0.14), 0.08, 0.6)
+    strap = material("Strap", (0.18, 0.12, 0.08), 0.1, 0.55)
+    lime = material("Compass", (0.61, 1.0, 0.23), 0.2, 0.35, emission=0.55)
+    crown_mat = material("Crown", (0.93, 0.78, 0.32), 0.86, 0.22)
+    cloth = material("Cape", (0.42, 0.1, 0.12), 0.02, 0.78)
+    cloth_dark = material("CapeFold", (0.28, 0.06, 0.08), 0.02, 0.8)
+    jewel = material("Jewel", (0.35, 0.85, 0.95), 0.1, 0.08, emission=1.2)
 
-    wear(parts, skinned, ball("role.safecracker.beanie", (0, -0.02, 0.96), 0.2, black, scale=(1.35, 1.05, 0.55)), "bone.head")
-    wear(parts, skinned, cyl("role.safecracker.keyhole", (0, front - 0.02, 0.9), 0.035, 0.012, gold, vertices=10, rot=(math.pi / 2, 0, 0)), "bone.head")
+    # Knit beanie with a ribbed cuff, plus the safecracker keyhole.
+    wear(parts, skinned, ball("role.safecracker.beanie.cap", (0, -0.02, 1.0), 0.2, knit, scale=(1.28, 1.12, 0.62)), "bone.head")
+    for index in range(5):
+        wear(
+            parts,
+            skinned,
+            torus(
+                f"role.safecracker.beanie.rib.{index}",
+                (0, -0.02, 0.9 - index * 0.012),
+                0.175,
+                0.012,
+                rib if index % 2 else knit,
+                rot=(math.pi / 2, 0, 0),
+            ),
+            "bone.head",
+        )
+    wear(parts, skinned, cyl("role.safecracker.keyhole", (0, front - 0.02, 0.93), 0.028, 0.016, gold, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("role.safecracker.keyhole.slot", (0, front - 0.03, 0.91), (0.012, 0.01, 0.028), knit, bevel=0.0, subdiv=0), "bone.head")
 
-    wear(parts, skinned, cube("role.trader.band", (0, 0.0, 0.98), (0.46, 0.08, 0.05), gold, bevel=0.015, subdiv=0), "bone.head")
-    wear(parts, skinned, cyl("role.trader.mic", (0.16, front - 0.02, 0.58), 0.012, 0.16, gold, vertices=6, rot=(math.pi / 2.4, 0, 0.4)), "bone.head")
-    wear(parts, skinned, cube("role.trader.pad.L", (-0.36, -0.02, 0.74), (0.16, 0.16, 0.08), gold, bevel=0.02, subdiv=1), "bone.spine")
-    wear(parts, skinned, cube("role.trader.pad.R", (0.36, -0.02, 0.74), (0.16, 0.16, 0.08), gold, bevel=0.02, subdiv=1), "bone.spine")
+    # Headset band, ear cups, and a mic boom.
+    wear(parts, skinned, torus("role.trader.band.arch", (0, 0.0, 0.98), 0.2, 0.016, gold, rot=(0, math.pi / 2, 0)), "bone.head")
+    for label, x in (("L", -0.2), ("R", 0.2)):
+        wear(parts, skinned, cyl(f"role.trader.band.cup.{label}", (x, 0.0, 0.86), 0.055, 0.04, gold, vertices=16, rot=(0, math.pi / 2, 0)), "bone.head")
+        wear(parts, skinned, cyl(f"role.trader.band.pad.{label}", (x, front * 0.15, 0.86), 0.04, 0.02, navy, vertices=16, rot=(0, math.pi / 2, 0)), "bone.head")
+    wear(parts, skinned, cyl("role.trader.band.boom", (0.12, front - 0.04, 0.72), 0.008, 0.22, gold, vertices=8, rot=(math.pi / 2.6, 0, 0.5)), "bone.head")
+    wear(parts, skinned, ball("role.trader.band.mic", (0.18, front - 0.08, 0.6), 0.028, gold), "bone.head")
+    wear(parts, skinned, cube("role.trader.pad.L", (-0.36, -0.02, 0.74), (0.16, 0.14, 0.07), gold, bevel=0.02, subdiv=1), "bone.spine")
+    wear(parts, skinned, cube("role.trader.pad.R", (0.36, -0.02, 0.74), (0.16, 0.14, 0.07), gold, bevel=0.02, subdiv=1), "bone.spine")
 
-    wear(parts, skinned, ball("role.hacker.hood", (0, 0.06, 0.9), 0.26, navy, scale=(1.15, 1.05, 0.85)), "bone.head")
-    wear(parts, skinned, cyl("role.hacker.string.L", (-0.06, front - 0.03, 0.55), 0.008, 0.22, navy, vertices=6), "bone.spine")
-    wear(parts, skinned, cyl("role.hacker.string.R", (0.06, front - 0.03, 0.55), 0.008, 0.22, navy, vertices=6), "bone.spine")
-    wear(parts, skinned, cube("role.hacker.glyph", (0, front - 0.03, 0.5), (0.08, 0.012, 0.08), cyan, bevel=0.01, subdiv=0), "bone.spine")
+    # Hood shell with side folds and drawstrings.
+    wear(parts, skinned, ball("role.hacker.hood.shell", (0, 0.05, 0.92), 0.27, navy, scale=(1.18, 1.08, 0.9)), "bone.head")
+    wear(parts, skinned, ball("role.hacker.hood.brow", (0, front - 0.02, 0.84), 0.16, navy, scale=(1.5, 0.35, 0.28)), "bone.head")
+    for index, x, tilt in ((0, -0.16, 0.5), (1, 0.0, 0.15), (2, 0.16, -0.5)):
+        wear(
+            parts,
+            skinned,
+            cube(f"role.hacker.hood.fold.{index}", (x, 0.1, 0.78), (0.035, 0.08, 0.32), fold, bevel=0.01, subdiv=0, rot=(0.35, 0, tilt)),
+            "bone.head",
+        )
+    wear(parts, skinned, cyl("role.hacker.string.L", (-0.08, front - 0.02, 0.58), 0.007, 0.24, navy, vertices=8), "bone.spine")
+    wear(parts, skinned, cyl("role.hacker.string.R", (0.08, front - 0.02, 0.58), 0.007, 0.24, navy, vertices=8), "bone.spine")
+    wear(parts, skinned, cube("role.hacker.glyph", (0, front - 0.03, 0.5), (0.07, 0.012, 0.07), cyan, bevel=0.008, subdiv=0), "bone.spine")
 
-    wear(parts, skinned, cyl("role.auditor.glass", (0.34, front - 0.08, 0.4), 0.07, 0.015, glass, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.arm.R")
-    wear(parts, skinned, cyl("role.auditor.handle", (0.34, front - 0.05, 0.3), 0.012, 0.12, gold, vertices=6), "bone.arm.R")
-    wear(parts, skinned, cyl("role.auditor.shield", (0.1, front - 0.03, 0.48), 0.05, 0.014, gold, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
+    # Loupe on a strap, plus a rimmed shield.
+    wear(parts, skinned, torus("role.auditor.strap", (0, 0.02, 0.9), 0.2, 0.01, gold, rot=(math.pi / 2.4, 0.4, 0)), "bone.head")
+    wear(parts, skinned, torus("role.auditor.rim", (0.1, front - 0.05, 0.7), 0.045, 0.01, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cyl("role.auditor.glass", (0.1, front - 0.055, 0.7), 0.038, 0.012, lens, vertices=20, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cyl("role.auditor.handle", (0.16, front - 0.02, 0.58), 0.01, 0.14, gold, vertices=8, rot=(0.4, 0, 0.3)), "bone.head")
+    wear(parts, skinned, cyl("role.auditor.shield", (0.1, front - 0.02, 0.46), 0.055, 0.012, gold, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
+    wear(parts, skinned, cyl("role.auditor.shield.rim", (0.1, front - 0.012, 0.46), 0.07, 0.008, ridge, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
 
-    wear(parts, skinned, ball("role.builder.hat", (0, -0.02, 0.98), 0.22, hat, scale=(1.4, 1.2, 0.55)), "bone.head")
-    wear(parts, skinned, cube("role.builder.badge", (0, front - 0.03, 0.48), (0.12, 0.014, 0.08), hat, bevel=0.01, subdiv=0), "bone.spine")
+    # Hard hat: dome, brim, and a center ridge.
+    wear(parts, skinned, ball("role.builder.hat.dome", (0, -0.01, 0.98), 0.21, hat, scale=(1.35, 1.2, 0.55)), "bone.head")
+    wear(parts, skinned, cyl("role.builder.hat.brim", (0, -0.02, 0.9), 0.28, 0.018, hat, vertices=20), "bone.head")
+    wear(parts, skinned, cube("role.builder.hat.ridge", (0, -0.04, 1.05), (0.03, 0.16, 0.08), ridge, bevel=0.008, subdiv=0), "bone.head")
+    wear(parts, skinned, cube("role.builder.badge", (0, front - 0.03, 0.48), (0.12, 0.014, 0.07), hat, bevel=0.008, subdiv=0), "bone.spine")
 
-    wear(parts, skinned, cyl("role.scout.goggle.L", (-0.08, front - 0.02, 0.86), 0.045, 0.02, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, cyl("role.scout.goggle.R", (0.08, front - 0.02, 0.86), 0.045, 0.02, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, cube("role.scout.pack", (0, 0.28, 0.58), (0.28, 0.14, 0.32), pack, bevel=0.03, subdiv=1), "bone.spine")
-    wear(parts, skinned, cube("role.scout.strap", (0, 0.08, 0.7), (0.36, 0.03, 0.04), pack, bevel=0.008, subdiv=0), "bone.spine")
-    wear(parts, skinned, cyl("role.scout.compass", (0, 0.36, 0.62), 0.04, 0.012, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.spine")
+    # Goggles, a strap, and the scout compass. The pack lives on back.0.
+    for label, x in (("L", -0.08), ("R", 0.08)):
+        wear(parts, skinned, torus(f"role.scout.goggle.{label}", (x, front - 0.03, 0.78), 0.04, 0.01, lime, rot=(math.pi / 2, 0, 0)), "bone.head")
+        wear(parts, skinned, cyl(f"role.scout.goggle.{label}.lens", (x, front - 0.04, 0.78), 0.032, 0.01, lens, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, torus("role.scout.goggle.strap", (0, 0.02, 0.78), 0.2, 0.012, strap, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("role.scout.goggle.bridge", (0, front - 0.03, 0.78), (0.06, 0.016, 0.016), lime, bevel=0.004, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("role.scout.compass", (0.16, front - 0.03, 0.5), 0.038, 0.012, lime, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.spine")
+    wear(parts, skinned, cyl("role.scout.compass.ring", (0.16, front - 0.02, 0.5), 0.048, 0.008, gold, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.spine")
 
-    crown = material("Crown", (0.92, 0.76, 0.28), 0.8, 0.25)
-    cloth = material("Cape", (0.45, 0.12, 0.14), 0.05, 0.75)
-    wear(parts, skinned, cyl("headwear.crown.band", (0, -0.02, 0.98), 0.2, 0.05, crown, vertices=8), "bone.head")
+    # Crown with points and a jewel, and a cap with a stiff brim.
+    wear(parts, skinned, torus("headwear.crown.band", (0, -0.01, 0.96), 0.16, 0.022, crown_mat, rot=(math.pi / 2, 0, 0)), "bone.head")
     for index, x in enumerate((-0.1, 0.0, 0.1)):
-        wear(parts, skinned, cube(f"headwear.crown.point.{index}", (x, -0.02, 1.06), (0.04, 0.04, 0.08), crown, bevel=0.01, subdiv=0), "bone.head")
-    wear(parts, skinned, ball("headwear.cap", (0, -0.04, 0.96), 0.18, hat, scale=(1.3, 1.15, 0.5)), "bone.head")
-    wear(parts, skinned, cube("headwear.brim", (0, front - 0.02, 0.9), (0.28, 0.12, 0.025), hat, bevel=0.008, subdiv=0), "bone.head")
+        wear(parts, skinned, cube(f"headwear.crown.point.{index}", (x, -0.02, 1.06), (0.035, 0.03, 0.1), crown_mat, bevel=0.008, subdiv=0), "bone.head")
+    wear(parts, skinned, ball("headwear.crown.jewel", (0, front - 0.03, 0.96), 0.022, jewel), "bone.head")
+    wear(parts, skinned, ball("headwear.cap.crown", (0, -0.03, 0.98), 0.18, hat, scale=(1.25, 1.15, 0.48)), "bone.head")
+    wear(parts, skinned, cube("headwear.brim", (0, front - 0.06, 0.9), (0.32, 0.16, 0.02), hat, bevel=0.006, subdiv=0), "bone.head")
+    wear(parts, skinned, cube("headwear.cap.button", (0, -0.02, 1.08), (0.04, 0.04, 0.02), ridge, bevel=0.004, subdiv=0), "bone.head")
 
-    wear(parts, skinned, cube("faceitem.0.visor", (0, front - 0.045, 0.78), (0.28, 0.02, 0.035), black, bevel=0.004, subdiv=0), "bone.head")
-    wear(parts, skinned, cyl("faceitem.1.monocle", (0.09, front - 0.045, 0.68), 0.04, 0.012, gold, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
-    wear(parts, skinned, cube("faceitem.2.mask", (0, front - 0.04, 0.52), (0.22, 0.02, 0.08), navy, bevel=0.008, subdiv=0), "bone.head")
-    wear(parts, skinned, cyl("faceitem.3.mic", (-0.16, front - 0.02, 0.56), 0.012, 0.16, gold, vertices=6, rot=(math.pi / 2.4, 0, -0.4)), "bone.head")
+    # Face items sit around the glass, not across the drawn eyes.
+    wear(parts, skinned, cube("faceitem.0.visor", (0, front - 0.03, 0.9), (0.32, 0.025, 0.028), gold, bevel=0.006, subdiv=0), "bone.head")
+    wear(parts, skinned, torus("faceitem.1.monocle", (0.11, front - 0.05, 0.66), 0.04, 0.008, gold, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cyl("faceitem.1.chain", (0.16, 0.02, 0.78), 0.006, 0.16, gold, vertices=8, rot=(0.3, 0, 0.2)), "bone.head")
+    wear(parts, skinned, cube("faceitem.2.mask", (0, front - 0.035, 0.5), (0.24, 0.03, 0.1), navy, bevel=0.01, subdiv=0), "bone.head")
+    wear(parts, skinned, cube("faceitem.2.trim", (0, front - 0.05, 0.55), (0.26, 0.012, 0.016), gold, bevel=0.003, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("faceitem.3.mic", (-0.16, front - 0.02, 0.62), 0.01, 0.18, gold, vertices=8, rot=(math.pi / 2.5, 0, -0.45)), "bone.head")
+    wear(parts, skinned, ball("faceitem.3.head", (-0.2, front - 0.08, 0.52), 0.026, gold), "bone.head")
 
-    wear(parts, skinned, cube("back.0.pack", (0, 0.3, 0.58), (0.26, 0.12, 0.3), pack, bevel=0.03, subdiv=1), "bone.spine")
-    wear(parts, skinned, cyl("back.1.left", (-0.08, 0.28, 0.62), 0.05, 0.22, gold, vertices=10), "bone.spine")
-    wear(parts, skinned, cyl("back.1.right", (0.08, 0.28, 0.62), 0.05, 0.22, gold, vertices=10), "bone.spine")
-    wear(parts, skinned, cube("back.2.cape", (0, 0.22, 0.5), (0.42, 0.02, 0.55), cloth, bevel=0.01, subdiv=0), "bone.spine")
-    wear(parts, skinned, cyl("back.3.mast", (0, 0.16, 0.95), 0.012, 0.18, navy, vertices=6), "bone.spine")
-    wear(parts, skinned, ball("back.3.tip", (0, 0.16, 1.06), 0.03, cyan), "bone.spine")
+    # Back items: pack with straps and a pocket, tanks, a folded cape, an array.
+    wear(parts, skinned, cube("back.0.pack", (0, 0.32, 0.58), (0.3, 0.14, 0.34), pack, bevel=0.03, subdiv=1), "bone.spine")
+    wear(parts, skinned, cube("back.0.pocket", (0, 0.4, 0.5), (0.16, 0.04, 0.1), pocket, bevel=0.01, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.0.flap", (0, 0.36, 0.74), (0.22, 0.04, 0.06), pocket, bevel=0.008, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.0.strap.L", (-0.1, 0.16, 0.72), (0.04, 0.08, 0.28), strap, bevel=0.006, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.0.strap.R", (0.1, 0.16, 0.72), (0.04, 0.08, 0.28), strap, bevel=0.006, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.0.buckle", (0, 0.2, 0.62), (0.06, 0.02, 0.04), gold, bevel=0.004, subdiv=0), "bone.spine")
+    for label, x in (("L", -0.08), ("R", 0.08)):
+        wear(parts, skinned, cyl(f"back.1.tank.{label}", (x, 0.3, 0.62), 0.05, 0.26, gold, vertices=12), "bone.spine")
+        wear(parts, skinned, cyl(f"back.1.nozzle.{label}", (x, 0.3, 0.46), 0.02, 0.06, ridge, vertices=8), "bone.spine")
+    wear(parts, skinned, cube("back.1.strap", (0, 0.18, 0.7), (0.22, 0.02, 0.04), strap, bevel=0.004, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.2.cape", (0, 0.24, 0.48), (0.46, 0.02, 0.58), cloth, bevel=0.008, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.2.fold", (0.08, 0.27, 0.4), (0.16, 0.025, 0.36), cloth_dark, bevel=0.006, subdiv=0, rot=(0, 0, 0.08)), "bone.spine")
+    wear(parts, skinned, cube("back.2.collar", (0, 0.16, 0.78), (0.28, 0.04, 0.06), cloth, bevel=0.008, subdiv=0), "bone.spine")
+    wear(parts, skinned, cube("back.3.bar", (0, 0.2, 0.9), (0.22, 0.03, 0.03), navy, bevel=0.006, subdiv=0), "bone.spine")
+    for index, x in enumerate((-0.08, 0.0, 0.08)):
+        wear(parts, skinned, cyl(f"back.3.mast.{index}", (x, 0.2, 1.02), 0.01, 0.16, navy, vertices=8), "bone.spine")
+        wear(parts, skinned, ball(f"back.3.tip.{index}", (x, 0.2, 1.12), 0.022, cyan), "bone.spine")
 
-    emblem_colors = (gold, cyan, hat, lime, crown, cloth)
+    emblem_colors = (gold, cyan, hat, lime, crown_mat, cloth)
     for index, color in enumerate(emblem_colors):
         wear(
             parts,
             skinned,
-            cyl(f"emblem.{index}", (-0.12, front - 0.02, 0.42), 0.035, 0.012, color, vertices=6 + index, rot=(math.pi / 2, 0, 0)),
+            cyl(f"emblem.{index}.plate", (-0.12, front - 0.02, 0.4), 0.032, 0.01, color, vertices=6, rot=(math.pi / 2, 0, 0)),
+            "bone.spine",
+        )
+        wear(
+            parts,
+            skinned,
+            torus(f"emblem.{index}.rim", (-0.12, front - 0.028, 0.4), 0.032, 0.006, gold, rot=(math.pi / 2, 0, 0)),
             "bone.spine",
         )
 

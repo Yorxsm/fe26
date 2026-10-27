@@ -22,6 +22,7 @@ import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
@@ -39,9 +40,9 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
-/** Inside the north plaza, low enough that the streets fill the frame under the title. */
-const overviewEye = new THREE.Vector3(2, 7.2, 16);
-const overviewAim = new THREE.Vector3(0, 2.2, -18);
+/** Far enough that the title sits on sky, with the village below the buttons. */
+const overviewEye = new THREE.Vector3(-32, 16, 58);
+const overviewAim = new THREE.Vector3(0, 6, -4);
 
 const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
 const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
@@ -363,7 +364,16 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
     if (finish) {
       sources = sources.map((material) => {
         if (material.name === "Body" && material.color) return paintColor(material, finish);
-        if (screen && material.name === "Screen") return paintColor(material, { color: screen, metal: 0.05, rough: 0.2 }, true);
+        if (screen && material.name === "Screen") {
+          const glass = material.clone();
+          glass.name = "Screen";
+          glass.color.set("#0a0a0b");
+          glass.emissive.set("#000000");
+          glass.emissiveIntensity = 0;
+          glass.metalness = 0.62;
+          glass.roughness = 0.14;
+          return glass;
+        }
         return material;
       });
       mesh.material = Array.isArray(mesh.material) ? sources : sources[0];
@@ -380,7 +390,7 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
         const copy = material.clone();
         copy.color.set("#2c4a40");
         copy.emissive = new THREE.Color("#1c342c");
-        copy.emissiveIntensity = 0.55;
+        copy.emissiveIntensity = 1.15;
         return copy;
       });
       mesh.material = Array.isArray(mesh.material) ? lit : lit[0];
@@ -509,7 +519,13 @@ function tagLift(index: number, time: number, paused: boolean) {
 }
 
 function displaySkin(agent: CityAgent, index: number, poster: string | null): SkinTraits {
-  if (poster === "lineup" || poster === "face") return lineupSkin(index);
+  if (poster === "lineup" || poster === "face" || poster === "gear") return lineupSkin(index);
+  if (poster === "expressions") {
+    return { ...lineupSkin(0), eyes: 0, headwear: 5, face_item: 3, back_item: 1, screen: 0, paint: 0, role: 0 };
+  }
+  if (poster === "eyes") {
+    return { ...lineupSkin(0), eyes: index % 6, headwear: 5, face_item: 3, back_item: 1, screen: index % 8, paint: 0, role: 0 };
+  }
   if (poster === "trails") return { ...lineupSkin(index), trail: index % 4 };
   if (poster === "skins") {
     return {
@@ -598,6 +614,9 @@ function AgentMesh({
     applyLook(cloned, skin, "trait");
     return cloned;
   }, [gltf.scene, skin]);
+  const face = useMemo(() => mountFace(scene, sourceName), [scene]);
+  const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
+  const saccade = useRef({ next: 0.4 + (index % 4) * 0.3, x: 0, y: 0 });
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
@@ -606,6 +625,13 @@ function AgentMesh({
     if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
     else if ((poster === "lineup" || lineup) && index < LINEUP_SPOTS.length) {
       pose = { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 };
+    } else if (poster === "expressions") pose = { x: -6.3 + index * 4.2, y: 0, z: 0, rot: 0 };
+    else if (poster === "eyes") {
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      pose = { x: (col - 1) * 4.4, y: 0, z: row === 0 ? 1.4 : -3.4, rot: 0 };
+    } else if (poster === "gear" && index < LINEUP_SPOTS.length) {
+      pose = { x: -10.5 + index * 4.2, y: 0, z: 0, rot: 0.55 };
     } else if (poster === "trails") pose = { x: -6 + index * 4, y: 0, z: 0, rot: 0 };
     else if (poster === "walk") pose = { x: -7.5 + index * 5, y: 0, z: 0, rot: 0 };
     else if (poster === "skins") {
@@ -624,18 +650,21 @@ function AgentMesh({
     }
     const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
     const planted = !poster && speed < 0.4;
-    if (poster === "walk") {
-      if (clipName.current !== "walk-hold") {
+    if (poster === "walk" || poster === "expressions") {
+      const hold = poster === "expressions" ? ["idle", "walk", "celebrate", "caught"][index] ?? "idle" : "walk";
+      const token = `${hold}-hold`;
+      if (clipName.current !== token) {
         mixer.stopAllAction();
-        const clip = gltf.animations.find((entry) => entry.name === "walk");
+        const clip = gltf.animations.find((entry) => entry.name === hold);
         const action = clip ? mixer.clipAction(clip) : null;
         if (action && clip) {
           action.play();
           action.paused = true;
-          action.time = (index / 4) * clip.duration;
+          const mark = hold === "celebrate" ? 0.35 : hold === "walk" ? (poster === "walk" ? index / 4 : 0.25) : 0.1;
+          action.time = mark * clip.duration;
         }
         clipAction.current = action;
-        clipName.current = "walk-hold";
+        clipName.current = token;
       }
     } else {
       const nextClip = paused || lineup || poster || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
@@ -647,16 +676,11 @@ function AgentMesh({
       }
       if (clipAction.current) clipAction.current.timeScale = nextClip === "walk" ? Math.min(3.2, Math.max(0.25, speed / 1.7)) : 1;
     }
-    if (!paused || poster === "walk") mixer.update(poster === "walk" ? 0 : delta);
-    const blink = Math.sin(state.clock.elapsedTime * 2.1 + index * 1.3) > 0.92;
-    scene.traverse((node) => {
-      const label = sourceName(node);
-      if (!label.endsWith(".eye.L") && !label.endsWith(".eye.R")) return;
-      node.scale.y = blink ? 0.15 : 1;
-    });
+    if (!paused || poster === "walk" || poster === "expressions") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
       poster === "face" ? index === 0
-      : poster === "walk" || poster === "trails" ? index < 4
+      : poster === "expressions" || poster === "walk" || poster === "trails" ? index < 4
+      : poster === "eyes" ? index < 6
       : poster === "skins" ? index < 12
       : poster === "street" ? index < 8
       : !lineup || index < LINEUP_SPOTS.length;
@@ -666,8 +690,53 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails";
+      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
+    }
+    if (face && group.current?.visible) {
+      const now = state.clock.elapsedTime + index * 0.37;
+      if (now >= blink.current.next && blink.current.active <= 0) {
+        blink.current.active = 0.14;
+        blink.current.next = now + 3 + ((index * 1.7) % 3);
+      }
+      if (blink.current.active > 0) blink.current.active = Math.max(0, blink.current.active - delta);
+      const shut = poster === "expressions" || poster === "eyes" || blink.current.active <= 0 ? 0 : Math.sin((1 - blink.current.active / 0.14) * Math.PI);
+      if (now >= saccade.current.next) {
+        saccade.current.x = ((index * 13 + Math.floor(now * 2)) % 5) / 2 - 1;
+        saccade.current.y = ((index * 7 + Math.floor(now)) % 5) / 2 - 1;
+        saccade.current.next = now + 0.8 + (index % 3) * 0.4;
+      }
+      const cam = state.camera.position;
+      const origin = group.current.position;
+      let tx = cam.x;
+      let ty = cam.y;
+      let tz = cam.z;
+      let best = cam.distanceToSquared(origin);
+      if (!poster) {
+        for (let other = 0; other < CITY_AGENTS.length; other += 1) {
+          if (other === index) continue;
+          const there = placeAgent(other, state.clock.elapsedTime, paused);
+          const dx = there.x - origin.x;
+          const dz = there.z - origin.z;
+          const dist = dx * dx + dz * dz;
+          if (dist < best && dist > 1) {
+            best = dist;
+            tx = there.x;
+            ty = 3.3;
+            tz = there.z;
+          }
+        }
+      }
+      const fx = Math.sin(pose.rot);
+      const fz = Math.cos(pose.rot);
+      const side = (tx - origin.x) * fz - (tz - origin.z) * fx;
+      const ahead = (tx - origin.x) * fx + (tz - origin.z) * fz;
+      const lookX = Math.max(-1, Math.min(1, side / (Math.abs(ahead) + 6) * 4 + saccade.current.x * 0.25));
+      const lookY = Math.max(-1, Math.min(1, (ty - (origin.y + 3.4)) / 6 + saccade.current.y * 0.2));
+      const forced: FaceExpression[] = ["calm", "focused", "happy", "shocked"];
+      const expression: FaceExpression = poster === "expressions" ? forced[index] ?? "calm" : poster === "eyes" ? "calm" : expressionForClip(clipName.current.replace("-hold", ""));
+      face.time.value = now;
+      redrawFace(face, { style: skin.eyes, expression, blink: shut, lookX, lookY, color: screenColor(skin.screen) });
     }
   });
 
@@ -725,7 +794,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.28, luminanceThreshold: 0.86, luminanceSmoothing: 0.15, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.42, luminanceThreshold: 0.7, luminanceSmoothing: 0.18, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -849,6 +918,21 @@ function CameraDriver({
       aim.set(shot.target[0], shot.target[1], shot.target[2]);
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
       applyFov(beat < 4 ? 64 : 32);
+      drive = true;
+    } else if (poster === "expressions") {
+      eye.set(0, 3.9, 18);
+      aim.set(0, 3.15, 0);
+      applyFov(38);
+      drive = true;
+    } else if (poster === "eyes") {
+      eye.set(0, 7.2, 14);
+      aim.set(0, 2.6, -0.8);
+      applyFov(42);
+      drive = true;
+    } else if (poster === "gear") {
+      eye.set(9, 4.4, 18);
+      aim.set(0, 2.2, 0);
+      applyFov(42);
       drive = true;
     } else if (poster === "face") {
       eye.set(FACE_SHOT.eye[0], FACE_SHOT.eye[1], FACE_SHOT.eye[2]);
