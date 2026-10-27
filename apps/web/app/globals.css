@@ -893,7 +893,34 @@ button.enter {
 }
 .title-actions { justify-content: center; }
 button.enter { min-height: 48px; font-size: var(--type-small); }
-.skip-corner { position: absolute; top: 24px; right: 24px; z-index: 4; }
+.skip-corner { position: absolute; top: 16px; left: 24px; right: auto; z-index: 20; }
+.cine-sound { position: absolute; top: 16px; right: 16px; z-index: 6; pointer-events: auto; }
+.lower-third {
+  position: absolute;
+  left: 24px;
+  bottom: calc(12% + 16px);
+  z-index: 2;
+  width: min(520px, calc(100% - 48px));
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  text-align: left;
+  padding: 12px 16px;
+  background: #141416;
+  color: var(--ink);
+  border-radius: 8px;
+  pointer-events: auto;
+}
+.lower-third h2,
+.lower-third .caption {
+  margin: 0;
+  font-size: var(--type-h3);
+  line-height: 24px;
+  background: transparent;
+  padding: 0;
+}
+.lower-third p { margin: 0; }
+.lower-third .btn { margin-top: 4px; }
 .cutscene { justify-content: flex-end; align-items: center; padding: 24px; background: transparent; }
 .caption-card {
   width: min(560px, calc(100% - 48px));
@@ -928,11 +955,14 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
 .cine-alarm { background: transparent; color: var(--orange); }
 .letterbox::before, .letterbox::after { background: #0a0a0b; }
 .vantage, .dispatch {
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   background: rgba(10, 10, 11, 0.62);
-  padding: 24px;
+  padding: 16px 24px 24px;
+  gap: 8px;
 }
+.dispatch p, .dispatch pre, .dispatch h3 { margin: 0; }
+.dispatch pre { white-space: pre-wrap; font-size: var(--type-caption); line-height: 16px; }
 .vantage > *, .dispatch > * { width: min(720px, 100%); }
 .vantage h2, .dispatch h2 { font-size: var(--type-h1); line-height: 48px; }
 .vantage-grid button {
@@ -982,6 +1012,14 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
   /* The lobby is framed for a phone. The gate returns once play starts. */
   .game-root:has(.title-screen) .city-stage { display: block; }
   .game-root:has(.title-screen) .mobile-gate { display: none; }
+  .title-screen { padding-top: 88px; align-items: stretch; }
+  .title-lockup { padding: 0 16px 16px; width: 100%; }
+  .title-actions { flex-direction: column; width: 100%; }
+  .title-actions .btn { width: 100%; }
+  .lower-third { left: 12px; width: calc(100% - 24px); }
+  .cine-sound { top: 12px; right: 12px; max-width: 148px; }
+  .cine-sound .btn-quiet { display: none; }
+  .skip-corner { top: 12px; left: 12px; }
 }
 @media (min-width: 1280px) {
   .hud-tl, .hud-bl { left: 24px; }

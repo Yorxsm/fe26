@@ -22,7 +22,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -55,9 +55,9 @@ const titleAim = new THREE.Vector3(18, 11.1, -6);
 const titleEyeMobile = new THREE.Vector3(-22, 12.5, 36);
 const titleAimMobile = new THREE.Vector3(18, 14.9, -6);
 
-const BEAT_PREFIX = ["vault", "market", "war", "forge", "stadium"];
-const BEAT_IDS = ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
-const BEATS = BEAT_IDS.map((id) => INTERIOR_SHOTS[id]);
+const BEAT_PREFIX: Array<string | null> = [null, "vault", "market", "war", "forge", "stadium"];
+const BEAT_IDS: Array<string | null> = [null, "vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"];
+const BEATS = CUTSCENE_SHOTS;
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
 
@@ -846,6 +846,9 @@ function AgentMesh({
   lineup,
   poster,
   onFollow,
+  mode = "play",
+  beat = 0,
+  frameMode = "out",
   rim = true,
 }: {
   agent: CityAgent;
@@ -856,6 +859,9 @@ function AgentMesh({
   lineup: boolean;
   poster: string | null;
   onFollow: (index: number) => void;
+  mode?: "orbit" | "cutscene" | "play";
+  beat?: number;
+  frameMode?: "in" | "out";
   rim?: boolean;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
@@ -913,12 +919,14 @@ function AgentMesh({
       const spot = spots[index];
       pose = { x: spot[0], y: 0, z: spot[1], rot: 0 };
     }
+    const scripted = mode === "cutscene" ? (CUTSCENE_CAST[beat] ?? []).find((entry) => entry.index === index) : undefined;
+    if (scripted) pose = { x: scripted.x, y: 0, z: scripted.z, rot: scripted.rot };
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
       applyLook(scene, skin, nextMood);
     }
-    const speed = "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+    const speed = scripted ? scripted.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
     const planted = !poster && speed < 0.4;
     const fading = clipFade.current;
     if (fading.length) {
@@ -968,7 +976,8 @@ function AgentMesh({
     }
     if (!paused || poster === "walk" || poster === "expressions" || poster === "street") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
-      poster === "face" ? index === 0
+      mode === "cutscene" ? Boolean(scripted)
+      : poster === "face" ? index === 0
       : poster === "front6" || poster === "q34" ? index < 6
       : poster === "expressions" || poster === "walk" || poster === "trails" ? index < 4
       : poster === "eyes" ? index < 6
@@ -984,7 +993,7 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = shown && !underChip && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = shown && !underChip && mode !== "cutscene" && frameMode !== "in" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
       const chip = tagEl.current;
       if (chip && group.current) {
@@ -1802,7 +1811,7 @@ export default function CityMap({
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
       ) : (
         (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
-          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} />
+          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} mode={mode} beat={beat} frameMode={frameMode} />
         ))
       )}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}

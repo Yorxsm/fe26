@@ -75,48 +75,6 @@ function TypeLine({ text }: { text: string }) {
   return <h2 className="caption">{text.slice(0, count)}</h2>;
 }
 
-function BeatCard({ beat }: { beat: number }) {
-  if (beat === 0) {
-    return (
-      <div className="cine-card" aria-label="Vault pot">
-        <p>Pot from the heist fixture</p>
-        <div className="cine-meter" aria-hidden="true">
-          <span />
-        </div>
-        <p className="num">10 NEAR escrowed. Per-action cap 1 NEAR.</p>
-      </div>
-    );
-  }
-  if (beat === 1) {
-    return (
-      <ol className="cine-card cine-board" aria-label="Market board">
-        <li>1 Tape</li>
-        <li>2 Mason</li>
-        <li>3 Scout</li>
-      </ol>
-    );
-  }
-  if (beat === 2) {
-    return (
-      <p className="cine-card cine-alarm" role="status">
-        Breach found. Alarm on this contract.
-      </p>
-    );
-  }
-  if (beat === 3) {
-    return (
-      <p className="cine-card cine-cap" role="status">
-        CAP HOLDS. 2 NEAR rejected.
-      </p>
-    );
-  }
-  return (
-    <p className="cine-card" role="status">
-      Full city from the deck.
-    </p>
-  );
-}
-
 function webglAvailable() {
   try {
     const canvas = document.createElement("canvas");
@@ -207,9 +165,10 @@ export function CityGate() {
 
   useEffect(() => {
     if (phase !== "cutscene") return;
+    const cues = ["quest", "heist", "trade", "breach", "forge", "rank"] as const;
     audio.swell(beat);
-    if (beat === 1) audio.sting("trade");
-    if (beat === 2) audio.sting("breach");
+    const cue = cues[beat];
+    if (cue) audio.sting(cue);
   }, [beat, phase]);
 
   function commit(next: SpectatorSave) {
@@ -290,7 +249,12 @@ export function CityGate() {
         </div>
         <div className="city-stage">
           <div className="city-frame">
-            {(phase === "cutscene" || phase === "vantage" || phase === "city") && (
+            {phase === "cutscene" && (
+              <div className="cine-sound">
+                <AudioHud live={soundLive} />
+              </div>
+            )}
+            {(phase === "vantage" || phase === "city") && (
             <header className="hud-chrome">
               <div className="hud-tl ui-in">
                 <a className="hud-brand" href="/">
@@ -424,14 +388,11 @@ export function CityGate() {
             )}
             {phase === "title" && (
               <div className="title-screen" data-screen="title">
-                <button type="button" className="btn btn-ghost skip-corner" onClick={() => enterCity(null)}>
-                  <SkipForward aria-hidden="true" strokeWidth={1.75} />
-                  Skip
-                </button>
                 <div className="title-lockup ui-stagger">
                   <h1>
                     <Logo variant="hero" />
                   </h1>
+                  <p className="subtitle">Agents play. Humans watch.</p>
                   <button type="button" className="pronounce" onClick={() => audio.pronounce()}>
                     <Volume2 aria-hidden="true" strokeWidth={1.75} />
                     iron 26
@@ -476,23 +437,12 @@ export function CityGate() {
             )}
             {phase === "cutscene" && (
               <div className="cutscene letterbox" data-screen="cutscene">
-                <button type="button" className="btn btn-ghost skip-corner" onClick={() => setPhase("vantage")}>
-                  <SkipForward aria-hidden="true" strokeWidth={1.75} />
-                  Skip
-                </button>
-                <article className="caption-card ui-in" key={beat}>
-                  <Logo variant="hero" className="logo-card" />
-                  <div className="step-dots" aria-hidden="true">
-                    {CUTSCENE.map((_, index) => (
-                      <span key={index} className={index === beat ? "on" : ""} />
-                    ))}
-                  </div>
+                <article className="lower-third ui-in" key={beat}>
                   <p className="label">
-                    {beat + 1} / {CUTSCENE.length}
+                    {CUTSCENE[beat].kicker} · {beat + 1} / {CUTSCENE.length}
                   </p>
                   <TypeLine text={CUTSCENE[beat].caption} />
                   <p className="caption-detail">{CUTSCENE[beat].detail}</p>
-                  <BeatCard beat={beat} />
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -516,7 +466,7 @@ export function CityGate() {
             {phase === "vantage" && (
               <div className="vantage" data-screen="vantage">
                 <h2>Pick your vantage</h2>
-                <p>Fly to a district first. You can walk the rest of the city after.</p>
+                <p>You watch. Agents keep playing in the district you pick.</p>
                 <div className="vantage-grid">
                   {vantages.map((district) => (
                     <button key={district.id} type="button" onClick={() => enterCity(district.id)}>
@@ -571,6 +521,16 @@ export function CityGate() {
                   <a href="/agents/demo.registry.testnet">Open the agent page</a>
                 </p>
               </div>
+            )}
+            {(phase === "title" || phase === "cutscene") && (
+              <button
+                type="button"
+                className="btn btn-ghost skip-corner"
+                onClick={() => (phase === "title" ? enterCity(null) : setPhase("vantage"))}
+              >
+                <SkipForward aria-hidden="true" strokeWidth={1.75} />
+                Skip
+              </button>
             )}
           </div>
           {phase === "city" && save.tutorial < TUTORIAL.length && (

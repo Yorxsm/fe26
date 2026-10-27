@@ -174,6 +174,44 @@ export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
   "oracle-plaza": { eye: [20, 12, 10], aim: [20, 4, -10] },
 };
 
+/** Authored path for the opening. The first shot stays on the road, outside every shell. */
+export const CUTSCENE_SHOTS: CameraShot[] = [
+  { eye: [-50, 2.35, 52], aim: [-42, 1.55, 33], fov: 36 },
+  INTERIOR_SHOTS["vault-quarter"],
+  INTERIOR_SHOTS["trading-village"],
+  INTERIOR_SHOTS["war-room"],
+  INTERIOR_SHOTS["skin-forge"],
+  INTERIOR_SHOTS["cup-stadium"],
+];
+
+export type CastPose = { index: number; x: number; z: number; rot: number; speed: number };
+
+/** Agents placed for each opening beat. Coordinates are world meters, clear of the walls. */
+export const CUTSCENE_CAST: CastPose[][] = [
+  [
+    { index: 1, x: -44.5, z: 40, rot: Math.PI, speed: 1.4 },
+    { index: 0, x: -40.2, z: 44, rot: Math.PI, speed: 1.2 },
+    { index: 3, x: -36.5, z: 38, rot: Math.PI, speed: 1.3 },
+  ],
+  [
+    { index: 1, x: -42.5, z: 16.2, rot: Math.PI, speed: 0.6 },
+    { index: 0, x: -41.0, z: 18.4, rot: Math.PI, speed: 0 },
+  ],
+  [
+    { index: 2, x: 44.2, z: 13.6, rot: Math.PI, speed: 0 },
+    { index: 4, x: 47.4, z: 16.2, rot: Math.PI, speed: 0.5 },
+  ],
+  [
+    { index: 3, x: 12.0, z: 38.4, rot: Math.PI, speed: 0.4 },
+    { index: 5, x: 13.5, z: 41.0, rot: Math.PI, speed: 0 },
+  ],
+  [
+    { index: 6, x: -36.4, z: -22.6, rot: 0, speed: 0 },
+    { index: 7, x: -39.4, z: -21.2, rot: 0.6, speed: 0 },
+  ],
+  [{ index: 2, x: -8, z: -41.6, rot: 0, speed: 0 }],
+];
+
 export const DISTRICTS: District[] = LAYOUT.map((district) => {
   const [x, z] = ROOM_XZ[district.id] ?? [0, 0];
   return { ...district, x, z };

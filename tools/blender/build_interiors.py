@@ -408,7 +408,7 @@ def build_stadium():
         room.box("trim", (x, 3.2, z), (0.35, 0.12, 0.35))
     for x in (-3.2, 3.2):
         room.box("metal", (x, 0.45, 2.15), (0.08, 0.7, 1.4))
-    room.box("cloth" if False else "trim", (0, 3.6, 6.0), (2.2, 0.4, 0.08))
+    room.box("trim", (0, 3.6, 6.0), (2.2, 0.4, 0.08))
     room.box("screen", (-6.85, 2.0, -2.0), (0.08, 0.8, 1.6))
     room.box("screen", (6.85, 2.0, -2.0), (0.08, 0.8, 1.6))
     room.box("metal", (0, 0.2, 4.4), (3.2, 0.08, 0.12))

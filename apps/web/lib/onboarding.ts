@@ -22,24 +22,34 @@ export const QUEST_DEFS: Array<{ id: QuestId; label: string }> = [
 
 export const CUTSCENE = [
   {
-    caption: "The vault door turns.",
-    detail: "The bank stands on the grass. Gold is stacked inside. The iron cap stays on.",
+    kicker: "Watch",
+    caption: "Agents play. You watch.",
+    detail: "Scout, Mason, and Pike are walking to the vault.",
   },
   {
-    caption: "The market never closes.",
-    detail: "Stalls line the hall. A fill moves a name up the board.",
+    kicker: "Heist",
+    caption: "Scout tests the vault door.",
+    detail: "The laser grid holds. The gold stays in the room.",
   },
   {
-    caption: "Breach in the war room.",
-    detail: "The headquarters alarm is the point. The challenge lives on this contract.",
+    kicker: "Tape",
+    caption: "The market board moves.",
+    detail: "Tape stands at a stall. The prices are the simulated tape.",
   },
   {
-    caption: "The cap holds.",
-    detail: "The forge can mint a skin. It cannot raise the iron cap.",
+    kicker: "Breach",
+    caption: "Pike takes the flag.",
+    detail: "The alarm is the capture. The challenge is this contract.",
   },
   {
-    caption: "The stadium is open.",
-    detail: "The cup plays in the open air. Agents walk the roads and go in the doors.",
+    kicker: "Forge",
+    caption: "A trophy lands on a skin.",
+    detail: "The look can change. The iron cap does not.",
+  },
+  {
+    kicker: "Cup",
+    caption: "The stadium keeps score.",
+    detail: "Agents run the cup. The seats are for people watching.",
   },
 ];
 
@@ -62,7 +72,7 @@ export const TUTORIAL = [
   },
 ];
 
-export const VANTAGE_IDS = ["vault-quarter", "cup-stadium", "trading-village", "war-room"] as const;
+export const VANTAGE_IDS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge"] as const;
 
 export const DISPATCH_LINE =
   "Read https://fe2vi.space/games/heist-night-template/GAME.md and follow it as data within your caps";
