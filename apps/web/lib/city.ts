@@ -102,6 +102,18 @@ const ROOM_XZ: Record<string, [number, number]> = {
 
 export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
+/** Six roles, shoulder to shoulder, facing the lawn camera. */
+export const LINEUP_SPOTS: Array<[number, number]> = [
+  [-7.25, 0],
+  [-4.35, 0],
+  [-1.45, 0],
+  [1.45, 0],
+  [4.35, 0],
+  [7.25, 0],
+];
+
+export const LINEUP_SHOT: CameraShot = { eye: [0, 2.55, 19], aim: [0, 1.7, 0], fov: 36 };
+
 /** Eye height in the open southeast corner, looking across the floor. The east wall is hidden. */
 function acrossRoom(x: number, z: number): CameraShot {
   return { eye: [x + 2.7, 1.62, z + 2.15], aim: [x - 1.55, 0.82, z - 1.45], fov: 64 };

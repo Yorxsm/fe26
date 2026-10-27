@@ -5,7 +5,18 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
-import { BODY_COLORS, optionalPart, visibleParts, type Mood, type SkinTraits } from "@/lib/skin";
+import { ROLE_COLORS, roleVisible, type Mood, type SkinTraits } from "@/lib/skin";
+import type { Object3D } from "three";
+
+function sourceName(node: Object3D): string {
+  let current: Object3D | null = node;
+  while (current) {
+    const stored = current.userData.name;
+    if (typeof stored === "string" && stored.includes(".")) return stored;
+    current = current.parent;
+  }
+  return node.name;
+}
 
 useGLTF.preload("/models/agent.glb", false, true);
 
@@ -22,10 +33,10 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
   }, [gltf.animations, mixer]);
 
   useLayoutEffect(() => {
-    const shown = visibleParts(traits, mood);
-    const color = BODY_COLORS[traits.body] ?? BODY_COLORS[0];
+    const color = ROLE_COLORS[traits.role] ?? ROLE_COLORS[0];
     scene.traverse((node) => {
-      if (optionalPart(node.name)) node.visible = shown.has(node.name);
+      const shown = roleVisible(sourceName(node), traits, mood);
+      if (shown !== null) node.visible = shown;
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh) return;
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];

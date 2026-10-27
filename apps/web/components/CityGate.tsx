@@ -107,6 +107,7 @@ export function CityGate() {
   const [beat, setBeat] = useState(0);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [frameMode, setFrameMode] = useState<"in" | "out">("in");
+  const [lineup, setLineup] = useState(false);
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [soundLive, setSoundLive] = useState(false);
@@ -117,6 +118,13 @@ export function CityGate() {
     const loaded = loadSpectator();
     setSave(loaded);
     const frame = new URLSearchParams(window.location.search).get("frame");
+    if (frame === "lineup") {
+      setLineup(true);
+      setPaused(true);
+      setPhase("city");
+      setNote("Six roles, on the lawn.");
+      return;
+    }
     if (frame) {
       const outside = frame.endsWith("-out");
       const id = outside ? frame.slice(0, -4) : frame;
@@ -294,6 +302,7 @@ export function CityGate() {
                 focusId={phase === "city" ? focusId : null}
                 followIndex={phase === "city" ? followIndex : null}
                 frameMode={frameMode}
+                lineup={lineup}
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}

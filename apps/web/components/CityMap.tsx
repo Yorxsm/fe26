@@ -21,8 +21,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
-import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
-import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
+import { CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { ROLE_COLORS, roleVisible, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
 useGLTF.preload("/models/station.glb", false, true);
@@ -394,10 +394,12 @@ function moodFor(x: number, z: number): Mood {
   return "trait";
 }
 
-function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
-  const shown = visibleParts(agent.skin, mood);
+function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood, role: number) {
+  const skin = { ...agent.skin, role };
   root.traverse((node) => {
-    if (optionalPart(node.name)) node.visible = shown.has(node.name);
+    const shown = roleVisible(sourceName(node), skin, mood);
+    if (shown === null) return;
+    node.visible = shown;
   });
 }
 
@@ -493,6 +495,7 @@ function AgentMesh({
   paused,
   audit,
   focusId,
+  lineup,
   onFollow,
 }: {
   agent: CityAgent;
@@ -500,6 +503,7 @@ function AgentMesh({
   paused: boolean;
   audit: boolean;
   focusId: string | null;
+  lineup: boolean;
   onFollow: (index: number) => void;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
@@ -507,20 +511,24 @@ function AgentMesh({
   const tag = useRef<THREE.Group>(null);
   const clipName = useRef("");
   const mood = useRef<Mood>("trait");
+  const role = lineup && index < LINEUP_SPOTS.length ? index : index % ROLE_COLORS.length;
   const scene = useMemo(() => {
     const cloned = SkeletonUtils.clone(gltf.scene);
-    dress(cloned, BODY_COLORS[agent.skin.body] ?? BODY_COLORS[0]);
-    applyMood(cloned, agent, "trait");
+    dress(cloned, ROLE_COLORS[role] ?? ROLE_COLORS[0]);
+    applyMood(cloned, agent, "trait", role);
     return cloned;
-  }, [agent, gltf.scene]);
+  }, [agent, gltf.scene, role]);
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
-    const pose = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
-    const nextMood = moodFor(pose.x, pose.z);
+    const walking = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
+    const pose = lineup && index < LINEUP_SPOTS.length
+      ? { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 }
+      : walking;
+    const nextMood = lineup ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
-      applyMood(scene, agent, nextMood);
+      applyMood(scene, agent, nextMood, role);
     }
     const nextClip = paused ? "idle" : nextMood === "happy" ? "celebrate" : "walk";
     if (clipName.current !== nextClip) {
@@ -532,10 +540,12 @@ function AgentMesh({
     if (!paused) mixer.update(delta);
     const blink = Math.sin(state.clock.elapsedTime * 2.1 + index * 1.3) > 0.92;
     scene.traverse((node) => {
-      if (node.name !== "eye.L" && node.name !== "eye.R") return;
+      const label = sourceName(node);
+      if (!label.endsWith(".eye.L") && !label.endsWith(".eye.R")) return;
       node.scale.y = blink ? 0.15 : 1;
     });
     if (group.current) {
+      group.current.visible = !lineup || index < LINEUP_SPOTS.length;
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.rotation.y = pose.rot;
     }
@@ -646,6 +656,7 @@ function CameraDriver({
   followIndex,
   paused,
   frameMode,
+  lineup,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
@@ -653,6 +664,7 @@ function CameraDriver({
   followIndex: number | null;
   paused: boolean;
   frameMode: "in" | "out";
+  lineup: boolean;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
@@ -666,7 +678,7 @@ function CameraDriver({
   useFrame((state, delta) => {
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
-    const driving = mode === "cutscene" || (mode === "play" && (followIndex !== null || Boolean(focusId)));
+    const driving = mode === "cutscene" || lineup || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
     rig.autoRotate = false;
@@ -705,6 +717,11 @@ function CameraDriver({
       aim.set(shot.target[0], shot.target[1], shot.target[2]);
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
       applyFov(beat < 4 ? 64 : 32);
+      drive = true;
+    } else if (lineup) {
+      eye.set(LINEUP_SHOT.eye[0], LINEUP_SHOT.eye[1], LINEUP_SHOT.eye[2]);
+      aim.set(LINEUP_SHOT.aim[0], LINEUP_SHOT.aim[1], LINEUP_SHOT.aim[2]);
+      applyFov(LINEUP_SHOT.fov ?? 36);
       drive = true;
     } else if (followIndex !== null) {
       applyFov(32);
@@ -751,6 +768,7 @@ export default function CityMap({
   focusId,
   followIndex,
   frameMode,
+  lineup,
   onPick,
   onFollow,
   onUnavailable,
@@ -762,6 +780,7 @@ export default function CityMap({
   focusId: string | null;
   followIndex: number | null;
   frameMode: "in" | "out";
+  lineup: boolean;
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
@@ -833,14 +852,14 @@ export default function CityMap({
       <pointLight position={[-38, 2.4, -24]} intensity={5} color="#ff6a1a" distance={12} decay={2} />
       <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} />
       {CITY_AGENTS.map((agent, index) => (
-        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
+        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused || lineup} audit={audit} focusId={focusId} lineup={lineup} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault
-        enabled={!focusId && followIndex === null && mode !== "cutscene"}
+        enabled={!focusId && followIndex === null && mode !== "cutscene" && !lineup}
         enablePan={false}
         autoRotate={false}
         minPolarAngle={0.35}

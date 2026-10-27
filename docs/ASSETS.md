@@ -17,7 +17,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 | File | Bytes | What it is |
 | --- | ---: | --- |
 | `apps/web/public/models/station.glb` | 3930396 | Village with textured buildings, asphalt roads, plazas, and full-size trees |
-| `apps/web/public/models/agent.glb` | 62692 | Ingot with arms, blinking eyes, stubby legs, a hexagonal core, and the catalog parts below |
+| `apps/web/public/models/agent.glb` | 382064 | Six original ingot bodies (Safecracker, Trader, Hacker, Auditor, Builder, Scout) on one rig with idle, walk, and celebrate. Not a downloaded character. |
 | `apps/web/public/models/nature.glb` | 86592 | Kenney round and detailed trees, plus Quaternius bushes, flowers, rocks, grass, and a plant. Instanced. Cone trees in `station.glb` stay hidden. |
 | `apps/web/public/models/kits.glb` | 1679132 | Kenney building shells plus stands, floodlights, flags, string lights, fences, scaffolding, cones, a chimney, a roof dish, and a Poly Haven crane. WebP textures, meshopt. The block shells in `station.glb` are hidden. |
 | `apps/web/public/models/interior-vault.glb` | 81648 | Vault room: desk, chair, shelves, books, lamp, plant, crate, metal door, gold bars, rug, poster. Loaded only while the vault interior shot is active. |

@@ -27,39 +27,17 @@ export const BODY_COLORS = [
   "#6e4b3a",
 ];
 
-const HAT_NODES: Record<number, string[]> = {
-  1: ["hat.1"],
-  2: ["hat.2"],
-  3: ["hat.3"],
-  4: ["hat.4"],
-  5: ["hat.5", "hat.5.tip"],
-};
+/** Safecracker, Trader, Hacker, Auditor, Builder, Scout. Baked into each body. */
+export const ROLE_COLORS = ["#9aa0a6", "#7a4fc4", "#1d2a3a", "#e7e4dc", "#e0742a", "#6b7a3a"];
 
-const ACCESSORY_NODES: Record<number, string[]> = {
-  1: ["acc.1.L", "acc.1.R", "acc.1.band"],
-  2: ["acc.2", "acc.2.handle"],
-  3: ["acc.3.L", "acc.3.R", "acc.3.strap"],
-  4: ["acc.4", "acc.4.strap"],
-  5: ["acc.5"],
-};
-
-const ROLE_NODES: Record<number, string[]> = {
-  0: ["hat.1"],
-  1: ["hat.2", "acc.1.L", "acc.1.R", "acc.1.band"],
-  2: ["hat.3", "hat.5", "hat.5.tip"],
-  3: ["acc.2", "acc.2.handle"],
-  4: ["hat.4"],
-  5: ["acc.3.L", "acc.3.R", "acc.3.strap", "acc.4", "acc.4.strap"],
-};
-
-const OPTIONAL = new Set<string>([
-  "face.0",
-  "face.1",
-  "face.2",
-  "face.3",
-  ...Object.values(HAT_NODES).flat(),
-  ...Object.values(ACCESSORY_NODES).flat(),
-]);
+export const ROLE_BODIES = [
+  "role.safecracker",
+  "role.trader",
+  "role.hacker",
+  "role.auditor",
+  "role.builder",
+  "role.scout",
+];
 
 export type Mood = "trait" | "happy" | "alarm";
 
@@ -79,15 +57,13 @@ export function defaultSkin(accountId: string): SkinTraits {
   };
 }
 
-export function visibleParts(skin: SkinTraits, mood: Mood): Set<string> {
-  const face = mood === "happy" ? 1 : mood === "alarm" ? 2 : skin.face;
-  const shown = new Set<string>([`face.${face}`]);
-  for (const name of HAT_NODES[skin.hat] ?? []) shown.add(name);
-  for (const name of ACCESSORY_NODES[skin.accessory] ?? []) shown.add(name);
-  for (const name of ROLE_NODES[skin.role] ?? []) shown.add(name);
-  return shown;
-}
-
-export function optionalPart(name: string): boolean {
-  return OPTIONAL.has(name);
+/** null means the node is not a role part. Otherwise whether this authored name should show. */
+export function roleVisible(label: string, skin: SkinTraits, mood: Mood): boolean | null {
+  if (!label.startsWith("role.")) return null;
+  const body = ROLE_BODIES[skin.role] ?? ROLE_BODIES[0];
+  if (!label.startsWith(`${body}.`)) return false;
+  const face = label.match(/\.face\.(\d+)$/);
+  if (!face) return true;
+  const want = mood === "happy" ? 1 : mood === "alarm" ? 2 : skin.face % FACE_STYLES;
+  return Number(face[1]) === want;
 }
