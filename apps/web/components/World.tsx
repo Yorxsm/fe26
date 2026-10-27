@@ -161,14 +161,14 @@ function StreetLamps() {
       </instancedMesh>
       <instancedMesh ref={heads} args={[undefined, undefined, LAMP_SPOTS.length]} castShadow>
         <sphereGeometry args={[0.22, 8, 6]} />
-        <meshStandardMaterial color="#ffd7a0" emissive="#ffb15a" emissiveIntensity={2.4} roughness={0.4} />
+        <meshStandardMaterial color="#ffd7a0" emissive="#ffb15a" emissiveIntensity={0.55} roughness={0.45} />
       </instancedMesh>
       <instancedMesh ref={pools} args={[undefined, undefined, LAMP_SPOTS.length]}>
         <circleGeometry args={[5.2, 20]} />
         <meshBasicMaterial color="#ffb56a" transparent opacity={0.38} depthWrite={false} />
       </instancedMesh>
       {LAMP_SPOTS.map(([x, z]) => (
-        <pointLight key={`${x}-${z}`} position={[x, 4.6, z]} color="#ffb060" intensity={14} distance={26} decay={2} />
+        <pointLight key={`${x}-${z}`} position={[x, 4.2, z]} color="#ffb060" intensity={6} distance={22} decay={2} />
       ))}
     </group>
   );

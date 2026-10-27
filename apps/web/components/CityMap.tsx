@@ -77,6 +77,64 @@ const FULL_CAP = 24;
 const CULL_DISTANCE = 140;
 /** Composer passes, filled when the grade is built. Shadow maps are not in this list. */
 const postBudget = { composerPasses: 0 };
+
+type ScreenRect = { left: number; right: number; top: number; bottom: number };
+const projectPoint = new THREE.Vector3();
+const hudCover = { stamp: -1, bottom: [] as ScreenRect[], tags: [] as ScreenRect[], canvas: null as DOMRect | null };
+
+function readHudRects(selector: string) {
+  const rects: ScreenRect[] = [];
+  document.querySelectorAll(selector).forEach((node) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    rects.push({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+  });
+  return rects;
+}
+
+function hudRects(stamp: number, canvas: HTMLCanvasElement) {
+  if (hudCover.stamp !== stamp) {
+    hudCover.stamp = stamp;
+    hudCover.bottom = readHudRects(".hud-br, .live-feed, .minimap");
+    hudCover.tags = readHudRects(".hud-tl, .hud-tr, .hud-bl, .hud-br, .hud-bc, .live-feed, .minimap, .audio-hud, .quest-hint, .stress-readout");
+    hudCover.canvas = canvas.getBoundingClientRect();
+  }
+  return hudCover;
+}
+
+function rectsOverlap(a: ScreenRect, b: ScreenRect) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+/** Screen box of a standing agent, in viewport pixels. Null when the body is behind the camera. */
+function agentOnScreen(x: number, z: number, camera: THREE.Camera, canvas: DOMRect) {
+  const half = 0.3;
+  const samples: Array<[number, number]> = [
+    [0, 0.02],
+    [0, AGENT_SCALE],
+    [-half, AGENT_SCALE * 0.45],
+    [half, AGENT_SCALE * 0.45],
+  ];
+  let left = Infinity;
+  let right = -Infinity;
+  let top = Infinity;
+  let bottom = -Infinity;
+  let seen = false;
+  for (const [ox, oy] of samples) {
+    projectPoint.set(x + ox, oy, z);
+    projectPoint.project(camera);
+    if (projectPoint.z < 0 || projectPoint.z > 1) continue;
+    const sx = canvas.left + (projectPoint.x * 0.5 + 0.5) * canvas.width;
+    const sy = canvas.top + (1 - (projectPoint.y * 0.5 + 0.5)) * canvas.height;
+    left = Math.min(left, sx);
+    right = Math.max(right, sx);
+    top = Math.min(top, sy);
+    bottom = Math.max(bottom, sy);
+    seen = true;
+  }
+  if (!seen) return null;
+  return { left, right, top, bottom };
+}
 const impostorDummy = new THREE.Object3D();
 const impostorColor = new THREE.Color();
 const projected = new THREE.Vector3();
@@ -914,28 +972,23 @@ function AgentMesh({
       : poster === "skins" ? index < 12
       : poster === "street" ? index < 4
       : !lineup || index < LINEUP_SPOTS.length;
+    const cover = hudRects(state.clock.elapsedTime, state.gl.domElement);
+    const bodyBox = cover.canvas ? agentOnScreen(pose.x, pose.z, state.camera, cover.canvas) : null;
+    const underChip = Boolean(bodyBox && cover.bottom.some((rect) => rectsOverlap(bodyBox, rect)));
     if (group.current) {
-      group.current.visible = shown;
+      group.current.visible = shown && !underChip;
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = shown && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = shown && !underChip && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
       const chip = tagEl.current;
       if (chip && group.current) {
         const dist = state.camera.position.distanceTo(group.current.position);
         chip.classList.toggle("far", dist > 16);
         const rect = chip.getBoundingClientRect();
-        const blockers = document.querySelectorAll(".hud-tl, .hud-tr, .hud-bl, .hud-br, .hud-bc, .audio-hud, .quest-hint, .stress-readout");
-        let covered = false;
-        blockers.forEach((blocker) => {
-          if (covered) return;
-          const hud = blocker.getBoundingClientRect();
-          if (hud.width < 2 || hud.height < 2) return;
-          const overlaps = rect.left < hud.right && rect.right > hud.left && rect.top < hud.bottom && rect.bottom > hud.top;
-          if (overlaps) covered = true;
-        });
+        const covered = cover.tags.some((hud) => rectsOverlap(rect, hud));
         chip.style.visibility = covered || !tag.current.visible ? "hidden" : "visible";
       }
     }
@@ -1046,7 +1099,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
         camera,
         ssao,
         dof,
-        new BloomEffect({ intensity: 0.42, luminanceThreshold: 0.7, luminanceSmoothing: 0.18, mipmapBlur: true }),
+        new BloomEffect({ intensity: 0.22, luminanceThreshold: 0.48, luminanceSmoothing: 0.2, mipmapBlur: true }),
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
@@ -1367,7 +1420,10 @@ function ImpostorCrowd({ count, hide, paused }: { count: number; hide: readonly 
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       projected.set(pose.x, AGENT_HEAD, pose.z).project(camera);
       const outside = projected.z < 0 || projected.z > 1 || Math.abs(projected.x) > 1.15 || Math.abs(projected.y) > 1.15;
-      const culled = full.has(index) || dist > CULL_DISTANCE || (outside && dist > 18);
+      const cover = hudRects(state.clock.elapsedTime, state.gl.domElement);
+      const body = cover.canvas ? agentOnScreen(pose.x, pose.z, camera, cover.canvas) : null;
+      const underChip = Boolean(body && cover.bottom.some((rect) => rectsOverlap(body, rect)));
+      const culled = full.has(index) || dist > CULL_DISTANCE || (outside && dist > 18) || underChip;
       impostorDummy.position.set(pose.x, 0, pose.z);
       impostorDummy.rotation.set(0, pose.rot, 0);
       impostorDummy.scale.setScalar(culled ? 0 : AGENT_SCALE);
@@ -1556,7 +1612,7 @@ function WindowGlow() {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, spots.length]}>
       <planeGeometry args={[1.5, 1.15]} />
-      <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={3.4} roughness={0.35} />
+      <meshStandardMaterial color="#ffd7a2" emissive="#ffc56a" emissiveIntensity={0.7} roughness={0.35} />
     </instancedMesh>
   );
 }
@@ -1662,7 +1718,7 @@ export default function CityMap({
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
-          <meshStandardMaterial color="#e2b340" metalness={0.6} roughness={0.32} emissive="#ffc14a" emissiveIntensity={1.4} />
+          <meshStandardMaterial color="#e2b340" metalness={0.35} roughness={0.48} emissive="#ffc14a" emissiveIntensity={0.32} />
         </mesh>
         <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
           VAULT
@@ -1689,7 +1745,7 @@ export default function CityMap({
       ))}
       <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
-        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 8]} color="#ffb060" intensity={18} distance={22} decay={2} />
+        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 9.6]} color="#ffb060" intensity={5} distance={18} decay={2} />
       ))}
       <mesh position={[12, 16.2, 40]}>
         <sphereGeometry args={[0.32, 10, 8]} />
