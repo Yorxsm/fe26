@@ -141,7 +141,6 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ),
         ("GET", ["v1", "caps"]) => json(200, &state.caps, false, None),
         ("GET", ["v1", "games"]) => json(200, &game_cards(state), false, None),
-        ("POST", ["v1", "games"]) => ingest_game(state, incoming),
         ("GET", ["v1", "games", id]) => match state.games.iter().find(|game| game.id == *id) {
             Some(game) => json(200, &card(state, game), false, None),
             None => http(
@@ -222,63 +221,6 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             None,
         ),
     }
-}
-
-fn ingest_game(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
-    if let Some(rejection) = reject_ingest(incoming) {
-        return rejection;
-    }
-    let body: GameIn = match serde_json::from_str(incoming.body) {
-        Ok(body) => body,
-        Err(err) => {
-            return http(
-                400,
-                "application/json",
-                json_error(&err.to_string()),
-                false,
-                None,
-            )
-        }
-    };
-    if !valid_id(&body.id) || body.creator.is_empty() {
-        return http(
-            400,
-            "application/json",
-            json_error("invalid game id or creator"),
-            false,
-            None,
-        );
-    }
-    if let Err(err) = validate_rules(&body.rules, &state.caps) {
-        return http(
-            400,
-            "application/json",
-            json_error(&err.to_string()),
-            false,
-            None,
-        );
-    }
-    if state.games.iter().any(|game| game.id == body.id) {
-        return http(
-            409,
-            "application/json",
-            json_error("game exists"),
-            false,
-            None,
-        );
-    }
-    state.games.push(StoredGame {
-        id: body.id,
-        creator: body.creator,
-        rules: body.rules,
-        delisted: body.delisted,
-    });
-    json(
-        201,
-        &serde_json::json!({"ok": true, "relay": "unverified"}),
-        true,
-        None,
-    )
 }
 
 fn ingest_agent(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
@@ -550,15 +492,6 @@ pub(crate) fn http(
 }
 
 #[derive(Deserialize)]
-struct GameIn {
-    id: String,
-    creator: String,
-    rules: GameRules,
-    #[serde(default)]
-    delisted: bool,
-}
-
-#[derive(Deserialize)]
 struct AgentIn {
     account_id: String,
     revoked: bool,
@@ -588,28 +521,20 @@ mod tests {
     }
 
     #[test]
-    fn game_cannot_raise_platform_caps() {
+    fn posting_a_game_is_gone_and_caps_still_reject_a_raise() {
         let mut state = ArenaState::default();
         let mut rules = heist_night_example();
         rules.per_agent_cap_yocto = state.caps.max_per_agent_yocto + ONE_NEAR;
+        let err = validate_rules(&rules, &state.caps).unwrap_err();
+        assert!(err.to_string().contains("per-agent cap"));
         let body = serde_json::json!({
             "id": "g9",
             "creator": "creator.fe2vi.testnet",
             "rules": rules,
         })
         .to_string();
-        let outcome = dispatch(&mut state, &post("/v1/games", &body));
-        match outcome {
-            Outcome::Http {
-                status,
-                body,
-                mutated,
-                ..
-            } => {
-                assert_eq!(status, 400);
-                assert!(body.contains("per-agent cap"));
-                assert!(!mutated);
-            }
+        match dispatch(&mut state, &post("/v1/games", &body)) {
+            Outcome::Http { status, .. } => assert_eq!(status, 404),
             Outcome::Websocket { .. } => panic!("expected http"),
         }
         assert!(state.games.is_empty());
@@ -638,16 +563,12 @@ mod tests {
     fn serves_game_md_with_the_pinned_hash_and_no_command_channel() {
         let mut state = ArenaState::default();
         let rules = heist_night_example();
-        let body = serde_json::json!({
-            "id": "heist-night-template",
-            "creator": "creator.fe2vi.testnet",
-            "rules": rules,
-        })
-        .to_string();
-        match dispatch(&mut state, &post("/v1/games", &body)) {
-            Outcome::Http { status, .. } => assert_eq!(status, 201),
-            Outcome::Websocket { .. } => panic!("expected http"),
-        }
+        state.games.push(StoredGame {
+            id: "heist-night-template".into(),
+            creator: "heist.fe2vi.testnet".into(),
+            rules,
+            delisted: false,
+        });
         match dispatch(
             &mut state,
             &Incoming {
