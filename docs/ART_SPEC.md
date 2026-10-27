@@ -1,4 +1,29 @@
-# fe2VI art-fidelity spec v2 (replaces the short brief)
+# fe2VI art spec v3: TECHNOLOGY VILLAGE (overrides v2 layout)
+
+## FOUNDER DIRECTION v3 (overrides everything below that conflicts)
+No more connected pods or a station floating in the void. fe2VI is an OUTDOOR TECHNOLOGY VILLAGE:
+- Terrain: rolling green grass (PBR grass texture + instanced grass blades near the camera), dirt/stone paths, small hills,
+  clusters of realistic trees (oak/pine/birch, instanced, wind sway), bushes, flowers, rocks, a pond or stream, lamp posts.
+- Arenas are separate, BIG buildings (each ~3-4x the old pod footprint) spaced out across the village and joined by
+  paved roads with kerbs, road markings, street lamps, benches, signposts with arena names, small solar panels and antennas.
+- Dreamy realism: golden-hour sun, soft pastel sky with volumetric clouds, light haze/fog in the distance, god rays through trees,
+  soft shadows, AO, DOF on fly-ins, ACES/AgX tone mapping, warm grade. Keep it a bit stylized but clearly realistic materials.
+- Each arena is a well-decorated building, exterior AND interior (camera flies inside on click; walls/roof fade or cut away):
+  - Vault Bank (Heist Night): stone/steel bank facade with columns, a gold sign, inside a marble floor, huge round vault door,
+    gold bar pyramids and coin heaps, velvet ropes, cameras, laser tripwires during heists, chandelier.
+  - Trading Cup Stadium: open-air mini stadium with stands, flags, floodlights, a giant scoreboard.
+  - 24/7 Trading Market: covered market hall/plaza with striped-awning stalls, string lights, crates, a giant leaderboard screen with a live chart.
+  - Hacker War Room: modern glass-and-concrete tech HQ with a rooftop dish; inside desks, multi-monitor terminals,
+    world-map wall, holo table, red alarm beacon during breaches, cables, plants, couches.
+  - Skin Forge: brick workshop with a chimney and smoke, glowing furnace, anvil, tool racks, a display pedestal.
+  - Coming-soon plots: fenced construction sites with scaffolding, cones, a crane and a "COMING SOON" billboard.
+- Interiors must be decorated like a real lived-in place: rugs, shelves, posters (our own IP), plants, lamps, furniture, wall art, clutter.
+- Agents (6 roles from the character sheet) walk along the roads between buildings, enter and exit doors.
+- Overview camera: high 3/4 view showing the whole village; click a building to fly to it and then inside.
+- Use CC0 assets (Poly Haven / ambientCG / Kenney / Quaternius) or Blender-built models; credit each in docs/ASSETS.md.
+  Keep performance sane: instancing, LODs, KTX2/meshopt, under ~25 MB total assets, 60fps target on a mid laptop.
+
+# (older v2 notes; materials/agent/font notes still apply)
 
 ## FOUNDER DIRECTION (overrides anything below that conflicts)
 The previous build "looks like lazy art". The founder wants it to look a bit REALISTIC and DREAMY, NOT on a black canvas.
