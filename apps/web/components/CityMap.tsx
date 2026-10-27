@@ -506,9 +506,29 @@ function materialSignature(material: THREE.Material) {
   ].join("|");
 }
 
-function geometrySignature(geometry: THREE.BufferGeometry) {
-  const names = Object.keys(geometry.attributes).sort();
-  return `${names.join(",")}${geometry.index ? ":i" : ""}`;
+function geometrySignature(mesh: THREE.Mesh) {
+  const geometry = mesh.geometry;
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial;
+  const ignore = new Set<string>();
+  if (!material.aoMap && !material.lightMap) ignore.add("uv2");
+  const names = Object.keys(geometry.attributes)
+    .filter((name) => !ignore.has(name))
+    .sort();
+  const typed = names.map((name) => {
+    const attribute = geometry.getAttribute(name);
+    const array = attribute.array;
+    return `${name}:${array.constructor.name}:${attribute.itemSize}`;
+  });
+  const index = geometry.index ? `:i:${geometry.index.array.constructor.name}` : "";
+  return `${typed.join(",")}${index}`;
+}
+
+function bakeGeometry(mesh: THREE.Mesh, relative: THREE.Matrix4) {
+  const geometry = mesh.geometry.clone();
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial;
+  if (!material.aoMap && !material.lightMap && geometry.getAttribute("uv2")) geometry.deleteAttribute("uv2");
+  geometry.applyMatrix4(relative);
+  return geometry;
 }
 
 /**
@@ -527,7 +547,7 @@ function mergeStatic(root: THREE.Object3D, skip: (mesh: THREE.Mesh) => boolean, 
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     if (materials.length !== 1 || mesh.renderOrder !== 0) return;
     const district = perDistrict ? districtOf(mesh) : "";
-    const key = `${district}|${materialSignature(materials[0])}|${geometrySignature(mesh.geometry)}`;
+    const key = `${district}|${materialSignature(materials[0])}|${geometrySignature(mesh)}`;
     const list = groups.get(key);
     if (list) list.push(mesh);
     else groups.set(key, [mesh]);
@@ -538,10 +558,8 @@ function mergeStatic(root: THREE.Object3D, skip: (mesh: THREE.Mesh) => boolean, 
     if (list.length < 2) continue;
     const geometries: THREE.BufferGeometry[] = [];
     for (const mesh of list) {
-      const geometry = mesh.geometry.clone();
       relative.multiplyMatrices(inverse, mesh.matrixWorld);
-      geometry.applyMatrix4(relative);
-      geometries.push(geometry);
+      geometries.push(bakeGeometry(mesh, relative));
     }
     let merged: THREE.BufferGeometry | null = null;
     try {
