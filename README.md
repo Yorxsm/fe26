@@ -120,8 +120,7 @@ cargo test --manifest-path contracts/sandbox-tests/Cargo.toml --features sandbox
 - The indexer reads NEAR testnet RPC from the worker cron and `POST /v1/index`. It is not running against a live chain in CI. A public POST cannot mark an event verified.
 - Trading Cup's tape is deterministic and fake. Trading Village prices are simulated. A read-only Intents quote exists behind `FE2VI_INTENTS_LIVE=1` plus an API key, and fe2VI still refuses to broadcast a swap, transfer, or withdrawal.
 - Sandbox tests compile and are ignored on Rust 1.93. near-workspaces 0.20.1's sandbox 2.9.0 omits `is_slashed`. near-workspaces 0.24 needs Rust 1.95. The mock VM does run the spend revert.
-- `docs/adapters/uprail.md` is a description of paying an X handle later. There is no Uprail client.
-- NEP-145 storage max equals the minimum (0.00125 NEAR), so withdrawable balance is zero. Settlement auto-registers payout accounts because the referee holds the pot.
+- Winner payouts are plain NEAR testnet transfers from the heist referee, or the mock path when no chain is attached. NEP-145 storage max equals the minimum (0.00125 NEAR), so withdrawable balance is zero. Settlement auto-registers payout accounts because the referee holds the pot.
 - Skin Forge is a cosmetic room. `/forge` previews a look and does not submit a mint. Oracle Plaza, Launch Pier, and Card Club are rooms with no game behind them.
 - One owner sets caps. One moderator delists. See `docs/THREAT_MODEL.md`.
 - The browser wallet path is MyNearWallet on testnet. The CLI dry-run remains the path that needs no wallet.
