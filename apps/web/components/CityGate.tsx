@@ -120,10 +120,12 @@ export function CityGate() {
     if (frame) {
       const outside = frame.endsWith("-out");
       const id = outside ? frame.slice(0, -4) : frame;
-      if (DISTRICTS.some((district) => district.id === id)) {
+      const framed = DISTRICTS.find((district) => district.id === id);
+      if (framed) {
         setFrameMode(outside ? "out" : "in");
         setFocusId(id);
         setPhase("city");
+        setNote(outside ? `${framed.name}, from the lawn.` : `${framed.name}, inside.`);
         return;
       }
     }

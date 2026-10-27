@@ -116,14 +116,14 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
 
 /** Front lawn, looking at the facade. */
 export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": { eye: [-34, 7, 40], aim: [-42, 3, 18] },
-  "trading-village": { eye: [54, 7, 36], aim: [46, 3, 14] },
-  "war-room": { eye: [20, 8, 62], aim: [12, 3, 40] },
-  "skin-forge": { eye: [-30, 7, -8], aim: [-38, 3, -24] },
-  "cup-stadium": { eye: [2, 8, -22], aim: [-8, 2, -42] },
-  "launch-pier": { eye: [62, 8, -12], aim: [50, 2, -28] },
-  "card-club": { eye: [-42, 8, 12], aim: [-54, 2, -2] },
-  "oracle-plaza": { eye: [32, 8, 4], aim: [20, 2, -10] },
+  "vault-quarter": { eye: [-42, 10, 54], aim: [-42, 6, 18] },
+  "trading-village": { eye: [46, 10, 50], aim: [46, 6, 14] },
+  "war-room": { eye: [12, 12, 72], aim: [12, 8, 40] },
+  "skin-forge": { eye: [-38, 9, -2], aim: [-38, 4, -24] },
+  "cup-stadium": { eye: [-8, 14, -14], aim: [-8, 4, -42] },
+  "launch-pier": { eye: [50, 12, -4], aim: [50, 4, -28] },
+  "card-club": { eye: [-54, 12, 18], aim: [-54, 4, -2] },
+  "oracle-plaza": { eye: [20, 12, 10], aim: [20, 4, -10] },
 };
 
 export const DISTRICTS: District[] = LAYOUT.map((district) => {

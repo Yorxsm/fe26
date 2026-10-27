@@ -149,6 +149,32 @@ function paintWarMap(ctx: CanvasRenderingContext2D, width: number, height: numbe
   }
 }
 
+function Smoke({ position }: { position: [number, number, number] }) {
+  const group = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    const puffs = group.current?.children ?? [];
+    const time = state.clock.elapsedTime;
+    puffs.forEach((puff, index) => {
+      const rise = (time * 0.18 + index * 0.34) % 1;
+      puff.position.y = rise * 5.5;
+      const scale = 0.35 + rise * 1.5;
+      puff.scale.setScalar(scale);
+      const mat = (puff as THREE.Mesh).material as THREE.MeshStandardMaterial;
+      mat.opacity = 0.28 * (1 - rise);
+    });
+  });
+  return (
+    <group ref={group} position={position}>
+      {[0, 1, 2, 3].map((index) => (
+        <mesh key={index}>
+          <sphereGeometry args={[0.42, 8, 6]} />
+          <meshStandardMaterial color="#efe8dc" transparent opacity={0.2} depthWrite={false} roughness={1} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function Kits({ onPick }: { onPick: (district: District) => void }) {
   const gltf = useGLTF("/models/kits.glb", false, true);
   const scene = useMemo(() => {
@@ -161,6 +187,18 @@ function Kits({ onPick }: { onPick: (district: District) => void }) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
+      if (/lights|flood|gantry/.test(node.name) && mesh.material) {
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const copies = source.map((mat) => {
+          const copy = mat.clone();
+          if (copy instanceof THREE.MeshStandardMaterial) {
+            copy.emissive = new THREE.Color("#ffe6b0");
+            copy.emissiveIntensity = 0.7;
+          }
+          return copy;
+        });
+        mesh.material = Array.isArray(mesh.material) ? copies : copies[0];
+      }
     });
     return cloned;
   }, [gltf.scene]);
@@ -570,9 +608,14 @@ function CameraDriver({
     }
     if (!drive) return;
     const blend = reduce.current || camera.position.distanceTo(eye) > 18 ? 1 : 1 - Math.exp(-delta * 6);
-    rig.target.lerp(aim, blend);
-    camera.position.lerp(eye, blend);
-    camera.lookAt(rig.target);
+    if (blend === 1) {
+      rig.target.copy(aim);
+      camera.position.copy(eye);
+    } else {
+      rig.target.lerp(aim, blend);
+      camera.position.lerp(eye, blend);
+    }
+    camera.lookAt(aim);
   });
   return null;
 }
@@ -629,6 +672,16 @@ export default function CityMap({
       <World />
       <Nature />
       <Kits onPick={onPick} />
+      <group position={[-42, 6.4, 33]}>
+        <mesh>
+          <boxGeometry args={[7.2, 1.35, 0.16]} />
+          <meshStandardMaterial color="#e2b340" metalness={0.82} roughness={0.28} emissive="#6a4a10" emissiveIntensity={0.18} />
+        </mesh>
+        <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
+          VAULT
+        </Text>
+      </group>
+      <Smoke position={[-34, 13.4, -26]} />
       {DISTRICTS.filter((district) => district.status === "soon").map((district) => (
         <group key={district.id} position={[district.x, 5.2, district.z + 9]}>
           <mesh>
@@ -661,6 +714,7 @@ export default function CityMap({
       <Grade focusId={focusId} />
       <OrbitControls
         makeDefault
+        enabled={!focusId && followIndex === null && mode !== "cutscene"}
         enablePan={false}
         autoRotate={false}
         minPolarAngle={0.35}
