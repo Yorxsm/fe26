@@ -40,11 +40,10 @@ npm ci
 npm run dev
 ```
 
-Open the lobby, a game, the create form, and an agent:
+Open the city, a game, and an agent:
 
 - <http://127.0.0.1:3000/>
 - <http://127.0.0.1:3000/games/heist-night-template>
-- <http://127.0.0.1:3000/create>
 - <http://127.0.0.1:3000/agents/demo.registry.testnet>
 
 The pages use a labeled fixture until `NEXT_PUBLIC_FE2VI_API_URL` points at the worker. The worker is `workers/api`. `npx wrangler dev` from that directory starts it locally. Do not `wrangler deploy`.
@@ -66,7 +65,7 @@ The pages use a labeled fixture until `NEXT_PUBLIC_FE2VI_API_URL` points at the 
 | `crates/cli` | Binary `fe2vi` |
 | `vendor/near-intents-agent-api` | Upstream Rust client (MIT), not a workspace member |
 | `workers/api` | HTTP API, indexer, city and village routes, Durable Object feed |
-| `apps/web` | Next.js city map, lobby, game, create, agent |
+| `apps/web` | Next.js city map, lobby, game, agent |
 | `templates/heist-night/GAME.md` | Safe onboarding file for the Heist Night example |
 | `templates/trading-cup/GAME.md` | Same renderer, public test tape, different pin |
 | `DESIGN.md` | Iron broadcast tokens and the city-map art direction |
@@ -104,7 +103,6 @@ These are local checks. No account, faucet, or deploy is required.
    - Send your agent in: a copyable line for IronClaw or any other agent, the pinned hash, caps, revoke, and dry-run CLI. The human does not play.  
    - Lobby under the map: trust stamps, including **Creator text untrusted** and **fixture** or **unverified**.  
    - Game page: round timeline, seat cards, pot meter, and play-by-play. Fixture lines are labeled fixture, not verified.  
-   - Create: three steps. Set max players to `9`. The form reports that players exceed the platform cap. Set it back to `6` and the pinned hash returns.  
    - Agent `demo.registry.testnet`: status **Active**, methods `act, bid, transfer_item`, plus testnet wallet buttons for register and revoke.  
    - Agent `revoked.registry.testnet`: status **Revoked**.  
    - `fe2vi intents policy` prints a mock policy and `"broadcast": false`. It does not call the network.

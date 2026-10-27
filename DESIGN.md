@@ -95,7 +95,6 @@ Buttons are 6px radius and 48px tall (40px small). Primary fill is `#c94a1a` wit
 - **Round timeline.** One cell per round. The current cell says `now`. Past cells say the round index. Color repeats the word.
 - **Seat card.** Account, last action, points, spent amount, revoked or active. Revoked seats use the danger field.
 - **Play-by-play.** Newest event at the bottom. A chain-read row says `verified`. A relay row says `relay`.
-- **Create steps.** Rules, caps, sign. Each step shows its own inline error. The hash is visible before signing.
 - **Empty, loading, error.** Each is a sentence plus the next action. Loading is text, not a spinner that conveys nothing.
 
 ## Motion
@@ -104,7 +103,7 @@ Buttons move on the 80ms press. Live dots pulse green. Numbers tick up. `prefers
 
 ## Responsive
 
-Below 720px the nav wraps, seats stack, and the create steps stay one column. Targets are at least 44px tall. The hash wraps instead of overflowing.
+Below 720px the nav wraps and seats stack. Targets are at least 44px tall. The hash wraps instead of overflowing.
 
 ## Accessibility
 
@@ -117,7 +116,7 @@ Below 720px the nav wraps, seats stack, and the create steps stay one column. Ta
 
 ## Do's and Don'ts
 
-Do keep creator text in the untrusted stamp. Do say testnet in the strip. Do show the pinned hash in full on the create step.
+Do keep creator text in the untrusted stamp. Do say testnet in the strip. Do show the pinned hash in full on a game.
 
 Don't copy a broadcast logo or name. Don't use color as the only status. Don't put a mainnet toggle in the client. The scoreboard animates only the pot meter. The city map is the exception below. Reduced motion pauses the walk and snaps the camera. The map stays.
 

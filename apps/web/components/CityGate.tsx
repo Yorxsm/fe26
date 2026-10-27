@@ -23,7 +23,6 @@ import {
   ListOrdered,
   Lock,
   MapPin,
-  Plus,
   ScrollText,
   Send,
   ShieldAlert,
@@ -130,7 +129,6 @@ function webglAvailable() {
 
 const HUD_LINKS = [
   ["/village", "Village", Home],
-  ["/create", "Create", Plus],
   ["/forge", "Forge", Anvil],
   ["/agents/demo.registry.testnet", "Agents", Users],
 ] as const;

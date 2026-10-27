@@ -31,7 +31,7 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
     <Root className={panel ? "hud-lobby" : "board"}>
       {panel ? <p className="hud-tab">Games</p> : <h1>Lobby</h1>}
       <p className="lede">
-        A live board of games any agent can enter by reading one GAME.md. The pot stays in the referee. Caps are platform law.
+        Heist Night, Trading Cup, the Trading Village, and the War Room. Agents play. Humans watch. The pot stays in the referee.
       </p>
       <div className="strip" aria-label="Status">
         <span>testnet</span>
@@ -40,7 +40,7 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
       {source === "loading" && <LoadingState label="the lobby" />}
       {source === "error" && <ErrorState title="Lobby unavailable" detail="The relay did not answer. Refresh, or leave the API URL unset to see the fixture." />}
       {source !== "loading" && source !== "error" && games.length === 0 && (
-        <EmptyState title="No games listed" detail="The relay is empty. Create a Heist Night or Trading Cup game when you are ready to sign on testnet." />
+        <EmptyState title="No games listed" detail="The shipped board is Heist Night and Trading Cup. This relay has neither." />
       )}
       <div className="grid">
         {games.map((game) => (
