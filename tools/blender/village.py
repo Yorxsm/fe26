@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 2
+ART_STEP = 3
 
 # three.js (x, z). Blender y is -z.
 SITES = [
@@ -82,6 +82,113 @@ def build_terrain(kit, mats):
         kit.cylinder(f"{prefix}.pad", (cx, cy, 0.04), 11, 0.08, mats["dirt"], vertices=20)
 
 
+def box(kit, name, loc, size, mat, rot_z=0.0):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+    ob = bpy.context.active_object
+    ob.name = name
+    ob.scale = size
+    ob.rotation_euler = (0, 0, rot_z)
+    core.apply_xform(ob)
+    ob.data.materials.append(mat)
+    core.shade_flat(ob)
+    return kit.keep(ob)
+
+
+def road_points():
+    order = ["card-club", "skin-forge", "cup-stadium", "launch-pier", "oracle-plaza", "trading-village", "war-room", "vault-quarter"]
+    by_id = {site[0]: blender_xy(site[3], site[4]) for site in SITES}
+    return [by_id[key] for key in order]
+
+
+def build_roads(kit, mats):
+    points = road_points()
+    lamp = 0
+    for index, start in enumerate(points):
+        end = points[(index + 1) % len(points)]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length < 1:
+            continue
+        angle = math.atan2(dy, dx)
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        mid = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
+        box(kit, f"road.asphalt.{index}", (mid[0], mid[1], 0.06), (length, 6.0, 0.08), mats["asphalt"], angle)
+        box(kit, f"road.kerb.L.{index}", (mid[0] + px * 3.15, mid[1] + py * 3.15, 0.12), (length, 0.28, 0.12), mats["kerb"], angle)
+        box(kit, f"road.kerb.R.{index}", (mid[0] - px * 3.15, mid[1] - py * 3.15, 0.12), (length, 0.28, 0.12), mats["kerb"], angle)
+        dashes = int(length // 4)
+        for dash in range(dashes):
+            dist = 2 + dash * 4
+            if dist > length - 2:
+                break
+            box(
+                kit,
+                f"road.dash.{index}.{dash}",
+                (start[0] + ux * dist, start[1] + uy * dist, 0.12),
+                (1.2, 0.12, 0.02),
+                mats["paint"],
+                angle,
+            )
+        for step in range(2, int(length) - 2, 16):
+            lx = start[0] + ux * step + px * 4.2
+            ly = start[1] + uy * step + py * 4.2
+            kit.cylinder(f"road.lamp.{lamp}", (lx, ly, 1.6), 0.06, 3.2, mats["iron"], vertices=6)
+            kit.cylinder(f"road.lamphead.{lamp}", (lx, ly, 3.25), 0.16, 0.12, mats["amber"], vertices=6)
+            lamp += 1
+    for index, (district, _name, prefix, tx, tz) in enumerate(SITES):
+        cx, cy = blender_xy(tx, tz)
+        kit.cylinder(f"{prefix}.post", (cx + 6, cy + 4, 1.1), 0.08, 2.2, mats["iron"], vertices=6)
+        box(kit, f"{prefix}.bench", (cx - 5, cy + 5, 0.35), (1.3, 0.45, 0.12), mats["wood"], 0.4)
+        if prefix not in ("pier", "club", "oracle"):
+            box(kit, f"{prefix}.solar", (cx + 7, cy - 3, 1.6), (1.1, 0.7, 0.06), mats["glass"], 0.5)
+            kit.cylinder(f"{prefix}.antenna", (cx - 6, cy - 4, 2.2), 0.04, 3.4, mats["iron"], vertices=6)
+
+
+def blocked(x, y, points):
+    for _district, _name, _prefix, tx, tz in SITES:
+        cx, cy = blender_xy(tx, tz)
+        if math.hypot(x - cx, y - cy) < 14:
+            return True
+    for index, start in enumerate(points):
+        end = points[(index + 1) % len(points)]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy) or 1
+        t = max(0, min(1, ((x - start[0]) * dx + (y - start[1]) * dy) / (length * length)))
+        px, py = start[0] + dx * t, start[1] + dy * t
+        if math.hypot(x - px, y - py) < 6:
+            return True
+    return False
+
+
+def build_trees(kit, mats):
+    points = road_points()
+    kinds = ("pine", "oak", "birch")
+    placed = 0
+    for n in range(240):
+        if placed >= 42:
+            break
+        angle = n * 2.399
+        radius = 28 + (n * 3) % 55
+        x, y = math.cos(angle) * radius, math.sin(angle) * radius
+        if abs(x) > 95 or abs(y) > 95 or blocked(x, y, points):
+            continue
+        kind = kinds[placed % 3]
+        z = terrain_height(x, y)
+        kit.cylinder(f"tree.{kind}.trunk.{placed}", (x, y, z + 0.8), 0.12 if kind != "oak" else 0.18, 1.6, mats["birch"] if kind == "birch" else mats["bark"], vertices=6)
+        if kind == "pine":
+            kit.cone(f"tree.pine.crown.{placed}", (x, y, z + 2.4), 1.1, 2.4, mats["needle"])
+        elif kind == "oak":
+            kit.ico(f"tree.oak.crown.{placed}", (x, y, z + 2.3), 1.15, mats["leaf"])
+        else:
+            kit.ico(f"tree.birch.crown.{placed}", (x, y, z + 2.1), 0.75, mats["leaf"])
+        placed += 1
+    for index in range(10):
+        angle = index * 0.9
+        x, y = 22 + math.cos(angle) * 6, -18 + math.sin(angle) * 4
+        kit.ico(f"tree.bush.{index}", (x, y, 0.35), 0.45, mats["leaf"])
+        kit.cone(f"tree.flower.{index}", (x + 1.2, y + 0.4, 0.15), 0.12, 0.2, mats["flower"])
+
+
 def build_village():
     core.reset_scene()
     kit = core.Kit()
@@ -90,8 +197,23 @@ def build_village():
         "dirt": core.material("dirt", "#8a6a42", metallic=0.0, roughness=0.95),
         "water": core.material("water", "#7eb6c9", "#cfe7ef", 0.15, 0.05, 0.08),
         "rock": core.material("rock", "#8d8680", metallic=0.05, roughness=0.86),
+        "asphalt": core.material("asphalt", "#3a3e44", metallic=0.05, roughness=0.82),
+        "kerb": core.material("kerb", "#c8c2b4", metallic=0.0, roughness=0.7),
+        "paint": core.material("paint", "#f3e6c8", metallic=0.0, roughness=0.5),
+        "iron": core.material("iron", "#6e757c", metallic=0.7, roughness=0.4),
+        "amber": core.material("amber", "#ffb347", "#ffb347", 3.0, 0.05, 0.4),
+        "wood": core.material("wood", "#8a5a32", metallic=0.02, roughness=0.72),
+        "glass": core.material("glass", "#2f4f6a", "#9fd0ff", 0.4, 0.2, 0.15),
+        "bark": core.material("bark", "#5c4030", metallic=0.0, roughness=0.9),
+        "birch": core.material("birch", "#efe8dc", metallic=0.0, roughness=0.7),
+        "needle": core.material("needle", "#2f6a38", metallic=0.0, roughness=0.85),
+        "leaf": core.material("leaf", "#3e8a44", metallic=0.0, roughness=0.8),
+        "flower": core.material("flower", "#e07a9a", "#ffd0dc", 0.2, 0.0, 0.5),
     }
     build_terrain(kit, mats)
+    if ART_STEP >= 3:
+        build_roads(kit, mats)
+        build_trees(kit, mats)
     rooms = []
     for district, name, _prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)
