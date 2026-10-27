@@ -32,6 +32,11 @@ function RoomMesh({ url }: { url: string }) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      materials.forEach((material) => {
+        const standard = material as THREE.MeshStandardMaterial;
+        if (standard.emissiveIntensity > 1.05) standard.emissiveIntensity = 1.05;
+      });
     });
     return cloned;
   }, [gltf.scene]);
@@ -124,13 +129,13 @@ function RoomCopy({ id }: { id: string }) {
     return (
       <>
         <Tape position={[0, 2.35, -5.72]} />
-        <Text position={[5.28, 2.7, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+        <Text position={[-2.6, 2.55, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
           1 TAPE
         </Text>
-        <Text position={[5.28, 2.25, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+        <Text position={[-2.6, 2.15, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
           2 MASON
         </Text>
-        <Text position={[5.28, 1.8, -1.2]} rotation={[0, -Math.PI / 2, 0]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
+        <Text position={[-2.6, 1.75, -5.62]} font={DISPLAY_FONT} fontSize={0.2} color="#d4d2cc" anchorX="center">
           3 SCOUT
         </Text>
       </>
@@ -145,7 +150,7 @@ function RoomCopy({ id }: { id: string }) {
   }
   if (id === "skin-forge") {
     return (
-      <Text position={[5.4, 1.85, -4.6]} font={DISPLAY_FONT} fontSize={0.16} color="#e2b340" anchorX="center">
+      <Text position={[3.4, 2.35, -5.58]} font={DISPLAY_FONT} fontSize={0.16} color="#e2b340" anchorX="center">
         TROPHIES
       </Text>
     );
@@ -165,7 +170,7 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
       <group position={room.position}>
         <RoomMesh key={room.url} url={room.url} />
         {LAMPS.map(([x, y, z, color], index) => (
-          <pointLight key={index} position={[x, y, z]} color={color} intensity={8} distance={8} decay={2} />
+          <pointLight key={index} position={[x, y, z]} color={color} intensity={110} distance={12} decay={2} />
         ))}
         <RoomCopy id={focusId} />
         {focusId === "cup-stadium" ? <SeatCrowd /> : null}

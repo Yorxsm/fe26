@@ -411,8 +411,8 @@ function Kits({
         const copies = source.map((mat) => {
           const copy = mat.clone();
           if (isStandard(copy)) {
-            copy.emissive = new THREE.Color("#ff8a2a");
-            copy.emissiveIntensity = 0.48;
+            copy.emissive = new THREE.Color("#d85a14");
+            copy.emissiveIntensity = 0.26;
           }
           return copy;
         });
@@ -1624,7 +1624,7 @@ function WindowGlow() {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, spots.length]}>
       <planeGeometry args={[1.5, 1.15]} />
-      <meshStandardMaterial color="#e08a3a" emissive="#ff7a28" emissiveIntensity={0.62} roughness={0.42} />
+      <meshStandardMaterial color="#c45a1c" emissive="#d85a14" emissiveIntensity={0.28} roughness={0.42} />
     </instancedMesh>
   );
 }
@@ -1783,7 +1783,7 @@ export default function CityMap({
       ))}
       <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
-        <pointLight key={`${district.id}-window`} position={[district.x, 6.2, district.z + 9.6]} color="#ff8a32" intensity={4.5} distance={16} decay={2} />
+        <pointLight key={`${district.id}-window`} position={[district.x, 5.4, district.z + 12.4]} color="#ff7a28" intensity={70} distance={18} decay={2} />
       ))}
       <mesh position={[12, 16.2, 40]}>
         <sphereGeometry args={[0.32, 10, 8]} />
@@ -1795,10 +1795,11 @@ export default function CityMap({
         <meshStandardMaterial color="#ff6a1a" emissive="#ff5a12" emissiveIntensity={2.4} />
       </mesh>
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <pointLight position={[-42, 2.4, 18]} intensity={6} color="#ffb060" distance={14} decay={2} />
-      <pointLight position={[46, 2.4, 14]} intensity={5} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[12, 2.4, 40]} intensity={4} color="#9fd0ff" distance={12} decay={2} />
-      <pointLight position={[-38, 2.4, -24]} intensity={5} color="#ff6a1a" distance={12} decay={2} />
+      <pointLight position={[-42, 2.4, 18]} intensity={80} color="#ffb060" distance={14} decay={2} />
+      <pointLight position={[46, 2.4, 14]} intensity={70} color="#ff9a4a" distance={14} decay={2} />
+      <pointLight position={[12, 2.4, 40]} intensity={80} color="#ff9a4a" distance={14} decay={2} />
+      <pointLight position={[-38, 2.4, -24]} intensity={70} color="#ff6a1a" distance={14} decay={2} />
+      <pointLight position={[-8, 3.2, -30]} intensity={90} color="#ff9a4a" distance={20} decay={2} />
       {lineup ? (
         <mesh position={[0, 4.2, -3.5]}>
           <planeGeometry args={[52, 16]} />
