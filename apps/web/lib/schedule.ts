@@ -73,7 +73,8 @@ export function formatCountdown(secs: number) {
 
 export function localRange(start: number, end: number) {
   const fmt = new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
+    month: "short",
+    day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
