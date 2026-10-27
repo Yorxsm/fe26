@@ -844,13 +844,13 @@ function AgentMesh({
       pose = { x: (col - 1.5) * 7, y: 0, z: (1 - row) * 7, rot: 0 };
     } else if (poster === "street" && index < 4) {
       const spots: Array<[number, number]> = [
-        [-48.2, 34.4],
-        [-45.4, 34.9],
-        [-39.2, 34.6],
-        [-36.4, 35.1],
+        [-45.4, 34.2],
+        [-43.5, 34.7],
+        [-40.6, 34.3],
+        [-38.7, 34.8],
       ];
       const spot = spots[index];
-      pose = { x: spot[0], y: 0, z: spot[1], rot: 0.15 };
+      pose = { x: spot[0], y: 0, z: spot[1], rot: 0 };
     }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
@@ -884,7 +884,7 @@ function AgentMesh({
         clipName.current = token;
       }
     } else {
-      const holdStill = paused || lineup || (poster !== null && poster !== "street");
+      const holdStill = lineup || (poster !== null && poster !== "street") || (paused && poster !== "street");
       const nextClip = holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
       if (clipName.current !== nextClip) {
         const prev = clipAction.current;
@@ -920,7 +920,7 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = shown && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
       const chip = tagEl.current;
       if (chip && group.current) {
@@ -1437,8 +1437,22 @@ function StressCrowd({
   );
 }
 
-function boundsOf(root: THREE.Object3D) {
-  const box = new THREE.Box3().setFromObject(root);
+function boundsOf(root: THREE.Object3D, includeHidden: boolean, accept?: (mesh: THREE.Mesh) => boolean) {
+  root.updateWorldMatrix(true, true);
+  const box = new THREE.Box3();
+  let any = false;
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    if (!includeHidden && !chainShown(mesh)) return;
+    if (accept && !accept(mesh)) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const local = mesh.geometry.boundingBox;
+    if (!local) return;
+    box.union(local.clone().applyMatrix4(mesh.matrixWorld));
+    any = true;
+  });
+  if (!any || !Number.isFinite(box.min.y)) return null;
   return { height: box.max.y - box.min.y, top: box.max.y, bottom: box.min.y };
 }
 
@@ -1451,39 +1465,56 @@ function findNamed(root: THREE.Object3D, name: string): THREE.Object3D | null {
   return hits[0] ?? null;
 }
 
-/** One world-space height log, so the street frame can be checked against the doorway. */
+/** One world-space height log, after the street camera has settled. */
 function ScaleProbe() {
   const logged = useRef(false);
   const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
   useFrame(() => {
-    if (logged.current) return;
     const agent = findNamed(scene, "AgentRig");
     if (!agent) return;
     agent.updateWorldMatrix(true, true);
-    const head = new THREE.Vector3();
-    let headFound = false;
-    agent.traverse((node) => {
-      if (node.name !== "bone.head") return;
-      node.getWorldPosition(head);
-      headFound = true;
-    });
-    if (!headFound) return;
-    const agentBox = boundsOf(agent);
+    const boneY = (name: string) => {
+      const point = new THREE.Vector3();
+      let found = false;
+      agent.traverse((node) => {
+        if (found || sourceName(node) !== name) return;
+        node.getWorldPosition(point);
+        found = true;
+      });
+      return found ? point.y : null;
+    };
+    const headY = boneY("bone.head");
+    const rootY = boneY("bone.root");
+    if (headY === null) return;
+    const agentBox = boundsOf(agent, false);
+    const bodyBox = boundsOf(agent, false, (mesh) => sourceName(mesh).startsWith("body."));
     const sign = findNamed(scene, "kit.vault.sign");
     const portico = findNamed(scene, "kit.vault.portico");
     const lamp = findNamed(scene, "road.lamp.18");
-    const signBox = sign ? boundsOf(sign) : null;
-    const porticoBox = portico ? boundsOf(portico) : null;
-    const lampBox = lamp ? boundsOf(lamp) : null;
+    const signBox = sign ? boundsOf(sign, true) : null;
+    const porticoBox = portico ? boundsOf(portico, true) : null;
+    const lampBox = lamp ? boundsOf(lamp, true) : null;
+    const eye = camera.position;
+    const subject = new THREE.Vector3(-42, 1.2, 34.5);
+    const stood = rootY === null ? headY : headY - rootY;
     const text = [
-      `agent ${agentBox.height.toFixed(2)}`,
-      `head ${head.y.toFixed(2)}`,
-      `sign ${signBox ? signBox.height.toFixed(2) : "missing"}`,
-      `lamp ${lampBox ? lampBox.height.toFixed(2) : "missing"}`,
-      `portico ${porticoBox ? porticoBox.height.toFixed(2) : "missing"}`,
+      `stood ${stood.toFixed(2)}`,
+      `head ${headY.toFixed(2)}`,
+      `root ${rootY === null ? "missing" : rootY.toFixed(2)}`,
+      `meshTop ${bodyBox ? bodyBox.top.toFixed(2) : "missing"}`,
+      `sign ${signBox ? `${signBox.height.toFixed(2)} top ${signBox.top.toFixed(2)}` : "missing"}`,
+      `lamp ${lampBox ? `${lampBox.height.toFixed(2)} top ${lampBox.top.toFixed(2)}` : "missing"}`,
+      `portico ${porticoBox ? `${porticoBox.height.toFixed(2)} top ${porticoBox.top.toFixed(2)}` : "missing"}`,
       `scale ${AGENT_SCALE.toFixed(2)}`,
+      `fov ${(camera as THREE.PerspectiveCamera).fov.toFixed(1)}`,
+      `eye ${eye.x.toFixed(1)} ${eye.y.toFixed(1)} ${eye.z.toFixed(1)}`,
+      `dist ${eye.distanceTo(subject).toFixed(2)}`,
     ].join(" · ");
-    console.log(text);
+    if (!logged.current && Math.abs((camera as THREE.PerspectiveCamera).fov - (STREET_SHOT.fov ?? 35)) < 1) {
+      console.log(text);
+      logged.current = true;
+    }
     let node = document.getElementById("scale-readout");
     if (!node) {
       node = document.createElement("p");
@@ -1492,7 +1523,6 @@ function ScaleProbe() {
       document.body.appendChild(node);
     }
     node.textContent = text;
-    logged.current = true;
   });
   return null;
 }

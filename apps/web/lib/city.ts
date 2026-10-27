@@ -128,7 +128,7 @@ export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8 / 1.5, 18], aim: [0, 2.7 /
  * vault doorway, 30° vertical field, so the portico, the sign, and a lamp
  * stay in frame with the four bodies.
  */
-export const STREET_SHOT: CameraShot = { eye: [-43.5, 1.6, 45.6], aim: [-42.2, 2.2, 33.2], fov: 30 };
+export const STREET_SHOT: CameraShot = { eye: [-43.6, 1.65, 46.2], aim: [-42.0, 2.55, 32.8], fov: 35 };
 
 export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: [0, 3.35 / 1.5, 0], fov: 28 };
 
