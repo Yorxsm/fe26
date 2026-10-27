@@ -28,6 +28,65 @@ const CityMap = dynamic(() => import("@/components/CityMap"), {
 
 type Phase = "boot" | "title" | "cutscene" | "vantage" | "dispatch" | "city";
 
+function TypeLine({ text }: { text: string }) {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      setCount(text.length);
+      return;
+    }
+    setCount(1);
+    const id = window.setInterval(() => {
+      setCount((value) => (value >= text.length ? value : value + 1));
+    }, 34);
+    return () => window.clearInterval(id);
+  }, [text]);
+  return <h2 className="caption">{text.slice(0, count)}</h2>;
+}
+
+function BeatCard({ beat }: { beat: number }) {
+  if (beat === 0) {
+    return (
+      <div className="cine-card" aria-label="Vault pot">
+        <p>Pot from the heist fixture</p>
+        <div className="cine-meter" aria-hidden="true">
+          <span />
+        </div>
+        <p className="meta">10 NEAR escrowed. Per-action cap 1 NEAR.</p>
+      </div>
+    );
+  }
+  if (beat === 1) {
+    return (
+      <ol className="cine-card cine-board" aria-label="Market board">
+        <li>1 Tape</li>
+        <li>2 Mason</li>
+        <li>3 Scout</li>
+      </ol>
+    );
+  }
+  if (beat === 2) {
+    return (
+      <p className="cine-card cine-alarm" role="status">
+        Breach found. Alarm on this contract.
+      </p>
+    );
+  }
+  if (beat === 3) {
+    return (
+      <p className="cine-card cine-cap" role="status">
+        CAP HOLDS. 2 NEAR rejected.
+      </p>
+    );
+  }
+  return (
+    <p className="cine-card" role="status">
+      Full city from the deck.
+    </p>
+  );
+}
+
 function webglAvailable() {
   try {
     const canvas = document.createElement("canvas");
@@ -64,6 +123,13 @@ export function CityGate() {
     if (phase === "cutscene" || phase === "vantage") audio.theme();
     if (phase === "city") audio.city();
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "cutscene") return;
+    audio.swell(beat);
+    if (beat === 1) audio.sting("trade");
+    if (beat === 2) audio.sting("breach");
+  }, [beat, phase]);
 
   function commit(next: SpectatorSave) {
     setSave(next);
@@ -217,12 +283,13 @@ export function CityGate() {
               </div>
             )}
             {phase === "cutscene" && (
-              <div className="cutscene" data-screen="cutscene">
+              <div className="cutscene letterbox" data-screen="cutscene">
                 <p className="caption-kicker">
                   {beat + 1} / {CUTSCENE.length}
                 </p>
-                <h2 className="caption">{CUTSCENE[beat].caption}</h2>
+                <TypeLine text={CUTSCENE[beat].caption} />
                 <p className="caption-detail">{CUTSCENE[beat].detail}</p>
+                <BeatCard beat={beat} />
                 <div className="title-actions">
                   <button
                     type="button"

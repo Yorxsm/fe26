@@ -93,6 +93,12 @@ class CityAudio {
     this.applyMaster();
   }
 
+  swell(beat: number) {
+    if (!this.themeGain || !this.ctx) return;
+    const level = Math.min(0.85, 0.28 + beat * 0.12);
+    this.themeGain.gain.setTargetAtTime(this.prefs.quiet ? level * 0.35 : level, this.ctx.currentTime, 0.25);
+  }
+
   theme() {
     this.bed = "theme";
     if (!this.ctx) return;
@@ -216,7 +222,7 @@ class CityAudio {
     let step = 0;
     const play = () => {
       if (!this.ctx || !this.themeGain) return;
-      this.tone(this.ctx.currentTime, THEME[step % THEME.length], 0.45, 0.05, "sine");
+      this.tone(this.ctx.currentTime, THEME[step % THEME.length], 0.48, 0.45, "sine", undefined, undefined, undefined, this.themeGain);
       step += 1;
     };
     play();
@@ -246,6 +252,7 @@ class CityAudio {
     x?: number,
     y?: number,
     z?: number,
+    dest?: AudioNode,
   ) {
     const ctx = this.ctx;
     const master = this.master;
@@ -257,6 +264,7 @@ class CityAudio {
     gain.gain.setValueAtTime(level, when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
     osc.connect(gain);
+    const output = dest ?? master;
     if (x !== undefined && y !== undefined && z !== undefined) {
       const panner = ctx.createPanner();
       panner.panningModel = "HRTF";
@@ -265,9 +273,9 @@ class CityAudio {
       panner.positionX.value = x;
       panner.positionY.value = y;
       panner.positionZ.value = z;
-      gain.connect(panner).connect(master);
+      gain.connect(panner).connect(output);
     } else {
-      gain.connect(master);
+      gain.connect(output);
     }
     osc.start(when);
     osc.stop(when + duration + 0.02);

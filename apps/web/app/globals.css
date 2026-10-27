@@ -281,6 +281,38 @@ pre {
 }
 .title-screen button, .title-screen a,
 .cutscene button, .vantage button, .dispatch button, .dispatch a { pointer-events: auto; }
+.letterbox::before, .letterbox::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 12%;
+  background: #07090c;
+  pointer-events: none;
+}
+.letterbox::before { top: 0; }
+.letterbox::after { bottom: 0; }
+.letterbox > * { position: relative; z-index: 1; }
+.cine-card {
+  align-self: flex-start;
+  max-width: 24rem;
+  margin: 0;
+  padding: var(--space-sm);
+  background: var(--stamp-paper);
+  color: var(--stamp-ink);
+}
+.cine-meter { height: 0.7rem; background: #2a241c; margin: var(--space-xs) 0; }
+.cine-meter span {
+  display: block;
+  height: 100%;
+  width: 18%;
+  background: var(--forge);
+  animation: pot-fill 2.8s ease-out forwards;
+}
+@keyframes pot-fill { to { width: 86%; } }
+.cine-alarm { background: #3a1218; color: #ffd6dc; }
+.cine-cap { letter-spacing: 0.06em; font-weight: 700; }
+.cine-board { padding-left: 1.6rem; }
 .title-screen h1, .vantage h2, .dispatch h2 {
   font-size: clamp(3rem, 8vw, 5.5rem);
   margin: 0;
@@ -403,4 +435,5 @@ button.enter {
     transition: none !important;
   }
   .meter-fill { width: var(--fill, 20%); }
+  .cine-meter span { width: 86%; }
 }

@@ -25,10 +25,11 @@ const ROOM_PREFIX: Record<string, string> = {
 };
 
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: [18, 14, 18], target: [0, 1.2, 0] },
-  { position: [-4.6, 5.4, -0.4], target: [-8.8, 1.2, -5.2] },
-  { position: [12.4, 5.2, 9.2], target: [8.8, 1.2, 5.2] },
-  { position: [-4.8, 5.6, 9.4], target: [-8.8, 1.2, 5.2] },
+  { position: [-5.8, 3.2, -1.6], target: [-8.8, 1.15, -5.2] },
+  { position: [12.2, 3.5, 8.6], target: [8.8, 1.2, 5.2] },
+  { position: [-5.6, 3.3, 8.6], target: [-8.8, 1.2, 5.2] },
+  { position: [4, 6.5, 8], target: [0, 1.2, 0] },
+  { position: [0, 4.2, -11.2], target: [0, 1.4, 2] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
