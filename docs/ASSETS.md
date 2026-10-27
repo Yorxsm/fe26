@@ -16,7 +16,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 
 | File | Bytes | What it is |
 | --- | ---: | --- |
-| `apps/web/public/models/station.glb` | 565464 | Village with bank, market, stadium, and the war room headquarters |
+| `apps/web/public/models/station.glb` | 606780 | Village with bank, market, stadium, war room, forge, and construction plots |
 | `apps/web/public/models/agent.glb` | 53576 | Beveled ingot with stubby legs, a hexagonal core, and the catalog parts below |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 

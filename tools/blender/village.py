@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 7
+ART_STEP = 8
 
 # three.js (x, z). Blender y is -z.
 SITES = [
@@ -363,6 +363,42 @@ def build_war_room(kit, mats):
         box(kit, f"war.cable.{cable}", (cx - 4 + cable * 2.2, cy + 3.5, 0.08), (0.06, 3.5, 0.04), mats["iron"], 0.4)
 
 
+def build_forge(kit, mats):
+    cx, cy = blender_xy(-38.0, -24.0)
+    sx, sy, height = 18.0, 14.0, 6.5
+    front_shell(kit, mats, "forge", cx, cy, sx, sy, height, mats["brick"], mats["stone"], mats["brick"], mats["molten"])
+    kit.cylinder("forge.chimney", (cx + 5, cy + 4, height + 2.2), 0.55, 4.4, mats["brick"], vertices=8)
+    for puff, z in enumerate((0.6, 1.3, 2.0)):
+        kit.ico(f"forge.smoke.{puff}", (cx + 5.3, cy + 4.2, height + 4.2 + z), 0.45 + puff * 0.15, mats["smoke"])
+    box(kit, "forge.furnace", (cx + 3.5, cy + 2, 1.1), (2.4, 1.6, 1.8), mats["trim"], 0)
+    box(kit, "forge.mouth", (cx + 3.5, cy + 1.1, 0.9), (0.9, 0.1, 0.7), mats["molten"], 0)
+    box(kit, "forge.anvil", (cx - 2.5, cy + 0.5, 0.55), (1.3, 0.55, 0.7), mats["iron"], 0.2)
+    kit.cylinder("forge.pedestal", (cx, cy - 2, 0.4), 0.7, 0.6, mats["trim"], vertices=8)
+    kit.cylinder("forge.ingot", (cx, cy - 2, 0.85), 0.22, 0.35, mats["gold"], vertices=6)
+    for index, height_z in enumerate((1.4, 1.8, 2.2, 2.5)):
+        box(kit, f"forge.tool.{index}", (cx - 6, cy - 1 + index * 0.35, height_z), (0.08, 0.08, 0.7), mats["iron"], 0.3)
+    box(kit, "forge.rack", (cx - 6.2, cy - 0.4, 1.3), (0.12, 1.8, 2.2), mats["wood"], 0)
+
+
+def build_plot(kit, mats, prefix, tx, tz):
+    cx, cy = blender_xy(tx, tz)
+    for index, (ox, oy) in enumerate(((-6, -4), (6, -4), (6, 4), (-6, 4), (0, -4), (0, 4), (-6, 0), (6, 0))):
+        kit.cylinder(f"{prefix}.post.{index}", (cx + ox, cy + oy, 0.7), 0.06, 1.4, mats["wood"], vertices=5)
+    box(kit, f"{prefix}.rail.n", (cx, cy + 4, 0.9), (12, 0.08, 0.08), mats["hazard"], 0)
+    box(kit, f"{prefix}.rail.s", (cx, cy - 4, 0.9), (12, 0.08, 0.08), mats["hazard"], 0)
+    box(kit, f"{prefix}.rail.e", (cx + 6, cy, 0.9), (0.08, 8, 0.08), mats["hazard"], 0)
+    box(kit, f"{prefix}.rail.w", (cx - 6, cy, 0.9), (0.08, 8, 0.08), mats["hazard"], 0)
+    for bay in range(3):
+        box(kit, f"{prefix}.scaffold.{bay}", (cx - 3 + bay * 3, cy + 1, 1.6), (0.15, 2.4, 3.0), mats["iron"], 0)
+        box(kit, f"{prefix}.plank.{bay}", (cx - 3 + bay * 3, cy + 1, 2.4), (2.2, 0.8, 0.08), mats["wood"], 0)
+    for cone, ox in enumerate((-2, 1, 3.5)):
+        kit.cone(f"{prefix}.cone.{cone}", (cx + ox, cy - 5.2, 0.35), 0.28, 0.7, mats["cone"])
+    kit.cylinder(f"{prefix}.crane", (cx + 4, cy - 1, 3.2), 0.12, 6.2, mats["iron"], vertices=6)
+    box(kit, f"{prefix}.jib", (cx + 1.2, cy - 1, 6.2), (6.0, 0.12, 0.12), mats["iron"], 0)
+    box(kit, f"{prefix}.billboard", (cx - 1, cy - 5.6, 2.2), (4.4, 0.12, 1.6), mats["cloth"], 0)
+    box(kit, f"{prefix}.soon", (cx - 1, cy - 5.75, 2.2), (3.6, 0.06, 0.7), mats["cone"], 0)
+
+
 def build_village():
     core.reset_scene()
     kit = core.Kit()
@@ -405,6 +441,11 @@ def build_village():
         "trim": core.material("trim", "#2a2e33", metallic=0.4, roughness=0.45),
         "concrete": core.material("concrete", "#c9c3b8", metallic=0.04, roughness=0.72),
         "cyan": core.material("cyan", "#12343a", "#7dfff0", 1.4, 0.15, 0.28),
+        "brick": core.material("brick", "#8c4a3a", metallic=0.02, roughness=0.78),
+        "molten": core.material("molten", "#ff6a1a", "#ffb347", 2.4, 0.2, 0.35),
+        "smoke": core.material("smoke", "#d9d3cc", metallic=0.0, roughness=0.9),
+        "hazard": core.material("hazard", "#f2b227", metallic=0.05, roughness=0.5),
+        "cone": core.material("cone", "#e85d04", metallic=0.0, roughness=0.55),
     }
     build_terrain(kit, mats)
     if ART_STEP >= 3:
@@ -418,6 +459,11 @@ def build_village():
         build_stadium(kit, mats)
     if ART_STEP >= 7:
         build_war_room(kit, mats)
+    if ART_STEP >= 8:
+        build_forge(kit, mats)
+        build_plot(kit, mats, "pier", 50.0, -28.0)
+        build_plot(kit, mats, "club", -54.0, -2.0)
+        build_plot(kit, mats, "oracle", 20.0, -10.0)
     rooms = []
     for district, name, _prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)
