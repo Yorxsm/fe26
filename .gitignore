@@ -1,0 +1,37 @@
+# Secrets and local credentials. Examples are re-included below.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.seed
+near-credentials/
+.near-credentials/
+**/.near-credentials/
+neardev/
+.dev.vars
+!.dev.vars.example
+**/.dev.vars
+!**/.dev.vars.example
+
+# Rust
+target/
+**/*.rs.bk
+
+# Node, Next.js, Cloudflare
+node_modules/
+.next/
+.open-next/
+*.tsbuildinfo
+.wrangler/
+dist/
+build/
+worker/build/
+
+# OS and editor
+.DS_Store
+*.log
+.idea/
+.vscode/
