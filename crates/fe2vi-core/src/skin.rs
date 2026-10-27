@@ -45,7 +45,7 @@ pub fn unknown_trait(traits: &SkinTraits) -> Option<&'static str> {
     }
 }
 
-/// Free look derived from the account id. Same FNV mix the web avatar uses.
+/// Free look derived from the account id. `apps/web/lib/skin.ts` uses this mix.
 /// Calling this does not store anything and does not cost NEAR.
 pub fn default_skin(account_id: &str) -> SkinTraits {
     let mut acc: u32 = 2_166_136_261;
@@ -74,6 +74,18 @@ mod tests {
         assert_eq!(first, again);
         assert!(unknown_trait(&first).is_none());
         assert!(unknown_trait(&default_skin("pike.war.fe2vi.testnet")).is_none());
+        let scout = default_skin("scout.vault.fe2vi.testnet");
+        assert_eq!(
+            (
+                scout.body,
+                scout.face,
+                scout.role,
+                scout.hat,
+                scout.accessory,
+                scout.trail
+            ),
+            (0, 2, 5, 4, 4, 2)
+        );
     }
 
     #[test]

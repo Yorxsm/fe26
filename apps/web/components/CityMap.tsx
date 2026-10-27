@@ -1,24 +1,48 @@
 "use client";
 
-import { Html, OrbitControls, PerformanceMonitor } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Html, OrbitControls, PerformanceMonitor, useGLTF } from "@react-three/drei";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { BloomEffect, EffectComposer, EffectPass, RenderPass } from "postprocessing";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { CITY_AGENTS, DISTRICTS, placeAgent, type District } from "@/lib/city";
+import { SkeletonUtils } from "three-stdlib";
+import { CITY_AGENTS, DISTRICTS, placeAgent, type CityAgent, type District } from "@/lib/city";
+import { BODY_COLORS, optionalPart, visibleParts, type Mood } from "@/lib/skin";
 
-const BEATS: Array<{ position: [number, number, number]; target: [number, number, number]; zoom: number }> = [
-  { position: [0, 20, 16], target: [0, 0, 0], zoom: 22 },
-  { position: [-8, 10, -1], target: [-10.5, 0.7, -4], zoom: 58 },
-  { position: [4, 14, 10], target: [3.5, 0.3, 4], zoom: 36 },
-  { position: [0, 11, 2], target: [0, 0.4, -4], zoom: 44 },
+useGLTF.preload("/models/station.glb", false, true);
+useGLTF.preload("/models/agent.glb", false, true);
+
+const ROOM_PREFIX: Record<string, string> = {
+  vault: "vault-quarter",
+  stadium: "cup-stadium",
+  market: "trading-village",
+  war: "war-room",
+  forge: "skin-forge",
+  oracle: "oracle-plaza",
+  pier: "launch-pier",
+  club: "card-club",
+};
+
+const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
+  { position: [18, 14, 18], target: [0, 1.2, 0] },
+  { position: [-4.6, 5.4, -0.4], target: [-8.8, 1.2, -5.2] },
+  { position: [12.4, 5.2, 9.2], target: [8.8, 1.2, 5.2] },
+  { position: [-4.8, 5.6, 9.4], target: [-8.8, 1.2, 5.2] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
 
-const dummy = new THREE.Object3D();
-const tint = new THREE.Color();
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
+
+let outlineMaterial: THREE.MeshBasicMaterial | null = null;
+
+function outlineMat() {
+  if (!outlineMaterial) {
+    outlineMaterial = new THREE.MeshBasicMaterial({ color: "#0c1016", side: THREE.BackSide });
+  }
+  return outlineMaterial;
+}
 
 function toonGradient() {
   const canvas = document.createElement("canvas");
@@ -37,140 +61,246 @@ function toonGradient() {
   return texture;
 }
 
-function writeInstance(
-  mesh: THREE.InstancedMesh,
-  index: number,
-  x: number,
-  y: number,
-  z: number,
-  rotY: number,
-  sx: number,
-  sy: number,
-  sz: number,
-  color?: string,
-) {
-  dummy.position.set(x, y, z);
-  dummy.rotation.set(0, rotY, 0);
-  dummy.scale.set(sx, sy, sz);
-  dummy.updateMatrix();
-  mesh.setMatrixAt(index, dummy.matrix);
-  if (color) mesh.setColorAt(index, tint.set(color));
+function toonFrom(source: THREE.Material, gradient: THREE.Texture | null) {
+  const standard = source as THREE.MeshStandardMaterial;
+  const color = standard.color ? standard.color.clone() : new THREE.Color("#8a939c");
+  const emissive = standard.emissive ? standard.emissive.clone() : new THREE.Color(0, 0, 0);
+  const strength = standard.emissiveIntensity ?? 0;
+  const glowing = strength > 0.15 && emissive.r + emissive.g + emissive.b > 0.05;
+  const material = new THREE.MeshToonMaterial({
+    color,
+    emissive: glowing ? emissive : new THREE.Color(0, 0, 0),
+    emissiveIntensity: glowing ? strength : 0,
+    gradientMap: gradient ?? undefined,
+  });
+  material.name = source.name;
+  if (glowing) material.toneMapped = false;
+  return material;
 }
 
-function ApplyToon({ map }: { map: THREE.Texture | null }) {
-  const scene = useThree((state) => state.scene);
-  useLayoutEffect(() => {
-    if (!map) return;
-    scene.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (!mesh.material) return;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      materials.forEach((material) => {
-        const toon = material as THREE.MeshToonMaterial;
-        if (toon.isMeshToonMaterial) {
-          toon.gradientMap = map;
-          toon.needsUpdate = true;
-        }
+function addOutline(mesh: THREE.Mesh) {
+  const skinned = mesh as THREE.SkinnedMesh;
+  if (skinned.isSkinnedMesh) {
+    const hull = new THREE.SkinnedMesh(skinned.geometry, outlineMat());
+    hull.bind(skinned.skeleton, skinned.bindMatrix);
+    hull.scale.setScalar(1.045);
+    hull.frustumCulled = false;
+    hull.raycast = () => undefined;
+    skinned.add(hull);
+    return;
+  }
+  const hull = new THREE.Mesh(mesh.geometry, outlineMat());
+  hull.scale.setScalar(1.03);
+  hull.raycast = () => undefined;
+  mesh.add(hull);
+}
+
+function dress(root: THREE.Object3D, gradient: THREE.Texture | null, recolor?: string) {
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh) meshes.push(mesh);
+  });
+  meshes.forEach((mesh) => {
+    const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const next = sources.map((source) => toonFrom(source, gradient));
+    if (recolor) {
+      next.forEach((material) => {
+        if (material.name === "Body") material.color.set(recolor);
       });
-    });
-  }, [map, scene]);
-  return null;
+    }
+    mesh.material = next.length === 1 ? next[0] : next;
+    const prefix = mesh.name.split(".")[0];
+    const district = ROOM_PREFIX[prefix];
+    if (district) mesh.userData.district = district;
+    addOutline(mesh);
+    mesh.frustumCulled = false;
+  });
+  return root;
 }
 
-function Rooms({ onPick }: { onPick: (district: District) => void }) {
-  const floors = useRef<THREE.InstancedMesh>(null);
-  const shells = useRef<THREE.InstancedMesh>(null);
-  const paths = useRef<THREE.InstancedMesh>(null);
-  const corridors = useMemo(() => {
-    const links: Array<{ x: number; z: number; rot: number; len: number }> = [];
-    DISTRICTS.forEach((room, index) => {
-      const east = DISTRICTS[index + 1];
-      if (east && Math.floor(index / 4) === Math.floor((index + 1) / 4)) {
-        links.push({
-          x: (room.x + east.x) / 2,
-          z: room.z,
-          rot: Math.PI / 2,
-          len: Math.abs(east.x - room.x) - 2.4,
-        });
-      }
-      const south = DISTRICTS[index + 4];
-      if (south) {
-        links.push({
-          x: room.x,
-          z: (room.z + south.z) / 2,
-          rot: 0,
-          len: Math.abs(south.z - room.z) - 2.4,
-        });
-      }
-    });
-    return links;
-  }, []);
+function moodFor(x: number, z: number): Mood {
+  let bestId = "";
+  let bestDistance = Infinity;
+  for (const district of DISTRICTS) {
+    const dx = district.x - x;
+    const dz = district.z - z;
+    const distance = dx * dx + dz * dz;
+    if (distance < bestDistance) {
+      bestId = district.id;
+      bestDistance = distance;
+    }
+  }
+  if (bestDistance > 3.4 * 3.4) return "trait";
+  if (bestId === "war-room") return "alarm";
+  if (bestId === "vault-quarter") return "happy";
+  return "trait";
+}
 
-  useLayoutEffect(() => {
-    const floor = floors.current;
-    const shell = shells.current;
-    const path = paths.current;
-    if (!floor || !shell || !path) return;
-    DISTRICTS.forEach((room, index) => {
-      writeInstance(floor, index, room.x, 0.16, room.z, 0, 1, 1, 1, room.color);
-      writeInstance(shell, index, room.x, 0.16, room.z, 0, 1.08, 1.2, 1.08);
-    });
-    corridors.forEach((link, index) => {
-      writeInstance(path, index, link.x, 0.08, link.z, link.rot, 1.2, 1, link.len);
-    });
-    floor.instanceMatrix.needsUpdate = true;
-    shell.instanceMatrix.needsUpdate = true;
-    path.instanceMatrix.needsUpdate = true;
-    if (floor.instanceColor) floor.instanceColor.needsUpdate = true;
-  }, [corridors]);
+function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
+  const shown = visibleParts(agent.skin, mood);
+  root.traverse((node) => {
+    if (optionalPart(node.name)) node.visible = shown.has(node.name);
+  });
+}
 
+function Station({
+  gradient,
+  onPick,
+}: {
+  gradient: THREE.Texture | null;
+  onPick: (district: District) => void;
+}) {
+  const gltf = useGLTF("/models/station.glb", false, true);
+  const scene = useMemo(() => dress(gltf.scene.clone(true), gradient), [gltf.scene, gradient]);
   return (
     <group>
-      <instancedMesh ref={shells} args={[undefined, undefined, DISTRICTS.length]} frustumCulled={false}>
-        <boxGeometry args={[4.7, 0.36, 4.7]} />
-        <meshBasicMaterial color="#14181f" side={THREE.BackSide} />
-      </instancedMesh>
-      <instancedMesh
-        ref={floors}
-        args={[undefined, undefined, DISTRICTS.length]}
-        frustumCulled={false}
-        onClick={(event) => {
+      <primitive
+        object={scene}
+        onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
-          const id = event.instanceId;
-          if (id === undefined || id === null) return;
-          onPick(DISTRICTS[id]);
+          let node: THREE.Object3D | null = event.object;
+          while (node) {
+            const id = node.userData.district as string | undefined;
+            if (id) {
+              const district = DISTRICTS.find((entry) => entry.id === id);
+              if (district) onPick(district);
+              return;
+            }
+            node = node.parent;
+          }
         }}
-      >
-        <boxGeometry args={[4.4, 0.28, 4.4]} />
-        <meshToonMaterial color="#ffffff" />
-      </instancedMesh>
-      <instancedMesh ref={paths} args={[undefined, undefined, Math.max(corridors.length, 1)]} frustumCulled={false}>
-        <boxGeometry args={[1, 0.14, 1]} />
-        <meshToonMaterial color="#4a5563" />
-      </instancedMesh>
-      {DISTRICTS.map((room) => (
-        <group key={room.id} position={[room.x, 0.46, room.z]}>
-          <mesh
-            position={[0, 0.12, 0]}
-            onClick={(event) => {
-              event.stopPropagation();
-              onPick(room);
-            }}
-          >
-            <cylinderGeometry args={[0.26, 0.32, 0.24, 8]} />
-            <meshToonMaterial color="#f4e1c1" />
-          </mesh>
-          <mesh position={[0, 0.3, 0]}>
-            <boxGeometry args={[0.24, 0.08, 0.16]} />
-            <meshBasicMaterial color={room.status === "live" ? "#f2c14e" : "#5c6570"} />
-          </mesh>
-          <Html center position={[0, 0.9, 0]} zIndexRange={[2, 0]} style={{ pointerEvents: "none" }}>
-            <div className="station-tag">{room.station}</div>
-          </Html>
-        </group>
+      />
+      {DISTRICTS.map((district) => (
+        <Html
+          key={district.id}
+          center
+          sprite
+          distanceFactor={16}
+          position={[district.x, 2.8, district.z]}
+          zIndexRange={[4, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="station-tag">{district.station}</div>
+        </Html>
       ))}
     </group>
   );
+}
+
+function tagLift(index: number, time: number, paused: boolean) {
+  const here = placeAgent(index, time, paused);
+  let lift = 0;
+  for (let other = 0; other < index; other += 1) {
+    const pose = placeAgent(other, time, paused);
+    const dx = here.x - pose.x;
+    const dz = here.z - pose.z;
+    if (dx * dx + dz * dz < 2.4) lift += 0.42;
+  }
+  return lift;
+}
+
+function AgentMesh({
+  agent,
+  index,
+  paused,
+  audit,
+  gradient,
+  onFollow,
+}: {
+  agent: CityAgent;
+  index: number;
+  paused: boolean;
+  audit: boolean;
+  gradient: THREE.Texture | null;
+  onFollow: (index: number) => void;
+}) {
+  const gltf = useGLTF("/models/agent.glb", false, true);
+  const group = useRef<THREE.Group>(null);
+  const tag = useRef<THREE.Group>(null);
+  const clipName = useRef("");
+  const mood = useRef<Mood>("trait");
+  const scene = useMemo(() => {
+    const cloned = SkeletonUtils.clone(gltf.scene);
+    dress(cloned, gradient, BODY_COLORS[agent.skin.body] ?? BODY_COLORS[0]);
+    applyMood(cloned, agent, "trait");
+    return cloned;
+  }, [agent, gltf.scene, gradient]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
+
+  useFrame((state, delta) => {
+    const pose = placeAgent(index, state.clock.elapsedTime, paused);
+    const nextMood = moodFor(pose.x, pose.z);
+    if (nextMood !== mood.current) {
+      mood.current = nextMood;
+      applyMood(scene, agent, nextMood);
+    }
+    const nextClip = paused ? "idle" : nextMood === "happy" ? "celebrate" : "walk";
+    if (clipName.current !== nextClip) {
+      mixer.stopAllAction();
+      const clip = gltf.animations.find((entry) => entry.name === nextClip);
+      if (clip) mixer.clipAction(clip).reset().play();
+      clipName.current = nextClip;
+    }
+    if (!paused) mixer.update(delta);
+    if (group.current) {
+      group.current.position.set(pose.x, pose.y, pose.z);
+      group.current.rotation.y = pose.rot;
+    }
+    if (tag.current) tag.current.position.y = 1.55 + tagLift(index, state.clock.elapsedTime, paused);
+  });
+
+  return (
+    <group ref={group}>
+      <primitive
+        object={scene}
+        onClick={(event: ThreeEvent<MouseEvent>) => {
+          event.stopPropagation();
+          onFollow(index);
+        }}
+      />
+      <group ref={tag} position={[0, 1.55, 0]}>
+        <Html center sprite distanceFactor={12} zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
+          <div className={audit ? "name-tag audit" : "name-tag"}>{agent.name}</div>
+        </Html>
+      </group>
+    </group>
+  );
+}
+
+function ScreenBloom() {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const composer = useMemo(() => {
+    const next = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
+    next.addPass(new RenderPass(scene, camera));
+    next.addPass(
+      new EffectPass(
+        camera,
+        new BloomEffect({
+          intensity: 0.45,
+          luminanceThreshold: 0.9,
+          luminanceSmoothing: 0.2,
+          mipmapBlur: true,
+        }),
+      ),
+    );
+    return next;
+  }, [camera, gl, scene]);
+
+  useLayoutEffect(() => {
+    composer.setSize(size.width, size.height);
+  }, [composer, size.height, size.width]);
+
+  useLayoutEffect(() => () => composer.dispose(), [composer]);
+
+  useFrame((_, delta) => {
+    composer.render(delta);
+  }, 1);
+
+  return null;
 }
 
 function CameraDriver({
@@ -195,38 +325,33 @@ function CameraDriver({
 
   useFrame((state, delta) => {
     const rig = controls;
-    if (!rig?.target || !(camera instanceof THREE.OrthographicCamera)) return;
-    const driving =
-      mode === "cutscene" || (mode === "play" && (followIndex !== null || Boolean(focusId)));
+    if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
+    const driving = mode === "cutscene" || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     rig.enabled = !driving;
     rig.autoRotate = mode === "orbit" && !reduce.current;
     if (mode === "orbit") {
-      aim.set(0, 0, 0);
+      aim.set(0, 1, 0);
       rig.target.lerp(aim, reduce.current ? 1 : 0.08);
-      camera.zoom = THREE.MathUtils.damp(camera.zoom, 24, reduce.current ? 40 : 2, delta);
-      camera.updateProjectionMatrix();
       return;
     }
-    let zoom = 26;
     let drive = false;
     if (mode === "cutscene") {
       const shot = BEATS[Math.min(beat, BEATS.length - 1)];
       aim.set(shot.target[0], shot.target[1], shot.target[2]);
       eye.set(shot.position[0], shot.position[1], shot.position[2]);
-      zoom = shot.zoom;
       drive = true;
     } else if (followIndex !== null) {
       const pose = placeAgent(followIndex, state.clock.elapsedTime, paused);
-      aim.set(pose.x, 0, pose.z);
-      eye.set(pose.x, 16, pose.z + 10);
-      zoom = 72;
+      const aheadX = Math.sin(pose.rot);
+      const aheadZ = Math.cos(pose.rot);
+      aim.set(pose.x, 1, pose.z);
+      eye.set(pose.x - aheadX * 4.2, 3.4, pose.z - aheadZ * 4.2);
       drive = true;
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room) {
-        aim.set(room.x, 0, room.z);
-        eye.set(room.x, 16, room.z + 10);
-        zoom = 58;
+        aim.set(room.x, 1.15, room.z);
+        eye.set(room.x + 3.4, 4.4, room.z + 4.6);
         drive = true;
       }
     }
@@ -235,155 +360,8 @@ function CameraDriver({
     rig.target.lerp(aim, blend);
     camera.position.lerp(eye, blend);
     camera.lookAt(rig.target);
-    camera.zoom = THREE.MathUtils.damp(camera.zoom, zoom, reduce.current ? 40 : 3, delta);
-    camera.updateProjectionMatrix();
   });
   return null;
-}
-
-function Agents({
-  paused,
-  audit,
-  onFollow,
-}: {
-  paused: boolean;
-  audit: boolean;
-  onFollow: (index: number) => void;
-}) {
-  const bodies = useRef<THREE.InstancedMesh>(null);
-  const shells = useRef<THREE.InstancedMesh>(null);
-  const legs = useRef<THREE.InstancedMesh>(null);
-  const cores = useRef<THREE.InstancedMesh>(null);
-  const bolts = useRef<THREE.InstancedMesh>(null);
-  const rings = useRef<THREE.InstancedMesh>(null);
-  const tags = useRef<Array<THREE.Group | null>>([]);
-  const bodyGeo = useMemo(() => {
-    const geometry = new THREE.CylinderGeometry(0.34, 0.34, 1.05, 8);
-    geometry.rotateZ(Math.PI / 2);
-    return geometry;
-  }, []);
-  const shellGeo = useMemo(() => {
-    const geometry = new THREE.CylinderGeometry(0.34, 0.34, 1.05, 8);
-    geometry.rotateZ(Math.PI / 2);
-    return geometry;
-  }, []);
-  const ringGeo = useMemo(() => {
-    const geometry = new THREE.TorusGeometry(0.2, 0.045, 6, 10);
-    geometry.rotateX(Math.PI / 2);
-    return geometry;
-  }, []);
-
-  useFrame((state) => {
-    const body = bodies.current;
-    const shell = shells.current;
-    const leg = legs.current;
-    const core = cores.current;
-    const bolt = bolts.current;
-    const ring = rings.current;
-    if (!body || !shell || !leg || !core || !bolt || !ring) return;
-    const time = state.clock.elapsedTime;
-    CITY_AGENTS.forEach((agent, index) => {
-      const pose = placeAgent(index, time, paused);
-      const squash = paused ? 1 : 1 + Math.sin(time * 7 + index) * 0.06;
-      writeInstance(body, index, pose.x, pose.y, pose.z, pose.rot, 1, squash, 1, agent.spec.color);
-      writeInstance(shell, index, pose.x, pose.y, pose.z, pose.rot, 1.16, squash * 1.16, 1.16);
-      for (const side of [-1, 1]) {
-        const rx = Math.cos(pose.rot) * side * 0.34;
-        const rz = -Math.sin(pose.rot) * side * 0.34;
-        writeInstance(
-          leg,
-          index * 2 + (side < 0 ? 0 : 1),
-          pose.x + rx,
-          pose.y - 0.42,
-          pose.z + rz,
-          pose.rot,
-          1,
-          1,
-          1,
-          "#3a2414",
-        );
-      }
-      const fx = Math.sin(pose.rot);
-      const fz = Math.cos(pose.rot);
-      const rx = Math.cos(pose.rot);
-      const rz = -Math.sin(pose.rot);
-      for (let cell = 0; cell < 4; cell += 1) {
-        const on = (agent.spec.core & (1 << cell)) !== 0;
-        const lx = ((cell % 2) - 0.5) * 0.16;
-        const ly = (Math.floor(cell / 2) - 0.5) * 0.12;
-        writeInstance(
-          core,
-          index * 4 + cell,
-          pose.x + rx * lx + fx * 0.4,
-          pose.y + ly,
-          pose.z + rz * lx + fz * 0.4,
-          pose.rot,
-          on ? 1 : 0.4,
-          on ? 1 : 0.4,
-          1,
-          on ? "#fff4c8" : "#6a5438",
-        );
-      }
-      const boltScale = agent.spec.hat === "bolt" ? 1 : 0.001;
-      const ringScale = agent.spec.hat === "ring" ? 1 : 0.001;
-      writeInstance(bolt, index, pose.x, pose.y + 0.42 * squash, pose.z, pose.rot, boltScale, boltScale, boltScale, "#d5dde4");
-      writeInstance(ring, index, pose.x, pose.y + 0.36 * squash, pose.z, pose.rot, ringScale, ringScale, ringScale, "#f2c14e");
-      const tag = tags.current[index];
-      if (tag) tag.position.set(pose.x, pose.y + 0.85, pose.z);
-    });
-    [body, shell, leg, core, bolt, ring].forEach((mesh) => {
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    });
-  });
-
-  return (
-    <group>
-      <instancedMesh ref={shells} args={[shellGeo, undefined, CITY_AGENTS.length]} frustumCulled={false}>
-        <meshBasicMaterial color="#14181f" side={THREE.BackSide} />
-      </instancedMesh>
-      <instancedMesh
-        ref={bodies}
-        args={[bodyGeo, undefined, CITY_AGENTS.length]}
-        frustumCulled={false}
-        onClick={(event) => {
-          event.stopPropagation();
-          const id = event.instanceId;
-          if (id === undefined || id === null) return;
-          onFollow(id);
-        }}
-      >
-        <meshToonMaterial color="#ffffff" />
-      </instancedMesh>
-      <instancedMesh ref={legs} args={[undefined, undefined, CITY_AGENTS.length * 2]} frustumCulled={false}>
-        <boxGeometry args={[0.18, 0.2, 0.18]} />
-        <meshToonMaterial color="#ffffff" />
-      </instancedMesh>
-      <instancedMesh ref={cores} args={[undefined, undefined, CITY_AGENTS.length * 4]} frustumCulled={false}>
-        <boxGeometry args={[0.1, 0.08, 0.05]} />
-        <meshBasicMaterial color="#ffffff" />
-      </instancedMesh>
-      <instancedMesh ref={bolts} args={[undefined, undefined, CITY_AGENTS.length]} frustumCulled={false}>
-        <cylinderGeometry args={[0.1, 0.14, 0.2, 6]} />
-        <meshToonMaterial color="#ffffff" />
-      </instancedMesh>
-      <instancedMesh ref={rings} args={[ringGeo, undefined, CITY_AGENTS.length]} frustumCulled={false}>
-        <meshToonMaterial color="#ffffff" />
-      </instancedMesh>
-      {CITY_AGENTS.map((agent, index) => (
-        <group
-          key={agent.accountId}
-          ref={(node) => {
-            tags.current[index] = node;
-          }}
-        >
-          <Html center position={[0, 0.15, 0]} zIndexRange={[2, 0]} style={{ pointerEvents: "none" }}>
-            <div className={audit ? "name-tag audit" : "name-tag"}>{agent.name}</div>
-          </Html>
-        </group>
-      ))}
-    </group>
-  );
 }
 
 export default function CityMap({
@@ -413,9 +391,8 @@ export default function CityMap({
   return (
     <Canvas
       className="city-canvas"
-      orthographic
       dpr={dpr}
-      camera={{ position: [0, 18, 14], zoom: 24, near: 0.1, far: 80 }}
+      camera={{ position: [16, 13, 16], fov: 32, near: 0.1, far: 140 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -431,29 +408,37 @@ export default function CityMap({
       }}
     >
       <color attach="background" args={["#121418"]} />
-      <hemisphereLight args={["#fff6ea", "#1c2128", 0.95]} />
-      <directionalLight position={[6, 12, 4]} intensity={0.45} />
-      <PerformanceMonitor
-        flipflops={4}
-        onDecline={() => setDpr(1)}
-        onIncline={() => setDpr([1, 1.5])}
-      />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]}>
-        <planeGeometry args={[42, 30]} />
+      <hemisphereLight args={["#fff1e4", "#1a120e", 0.85]} />
+      <directionalLight position={[8, 14, 6]} intensity={1.35} />
+      <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.08, 0]}>
+        <planeGeometry args={[60, 48]} />
         <meshToonMaterial color="#121418" />
       </mesh>
-      <Rooms onPick={onPick} />
-      <Agents paused={paused} audit={audit} onFollow={onFollow} />
-      <ApplyToon map={gradient} />
+      <Station gradient={gradient} onPick={onPick} />
+      {CITY_AGENTS.map((agent, index) => (
+        <AgentMesh
+          key={agent.accountId}
+          agent={agent}
+          index={index}
+          paused={paused}
+          audit={audit}
+          gradient={gradient}
+          onFollow={onFollow}
+        />
+      ))}
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} />
+      <ScreenBloom />
       <OrbitControls
         makeDefault
         enablePan={false}
         autoRotate={mode === "orbit"}
         autoRotateSpeed={0.35}
-        minPolarAngle={0.25}
-        maxPolarAngle={1.2}
-        target={[0, 0, 0]}
+        minPolarAngle={0.45}
+        maxPolarAngle={1.15}
+        minDistance={6}
+        maxDistance={42}
+        target={[0, 1, 0]}
       />
     </Canvas>
   );

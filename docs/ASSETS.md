@@ -35,7 +35,7 @@ Trait indexes match `crates/fe2vi-core/src/skin.rs`. The scene shows one face an
 
 The hip kit is a side satchel. The body stays a boxy ingot.
 
-TODO: `apps/web/components/CityMap.tsx` still draws the primitive city. The next scene pass instances these GLBs. Until then the files are unused by the page.
+`apps/web/components/CityMap.tsx` loads both files with drei `useGLTF` and three-stdlib's meshopt decoder. Draco stays off so the page does not fetch a decoder.
 
 Kenney's CC0 kits stay vendored and unused as characters, so the silhouette stays the ingot.
 

@@ -1,4 +1,5 @@
-import { avatarSpec, displayName, type AvatarSpec } from "./avatar";
+import { displayName } from "./avatar";
+import { defaultSkin, type SkinTraits } from "./skin";
 
 export type District = {
   id: string;
@@ -50,13 +51,13 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     color: "#ef476f",
   },
   {
-    id: "hack-hall",
-    name: "Hack Hall",
-    summary: "Coming soon.",
-    status: "soon",
+    id: "skin-forge",
+    name: "Skin Forge",
+    summary: "Cosmetic skins. One NEAR. No effect on the game.",
+    status: "live",
     href: "",
-    station: "Soon",
-    color: "#c77dff",
+    station: "Forge",
+    color: "#ff7a1a",
   },
   {
     id: "oracle-plaza",
@@ -87,16 +88,27 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
   },
 ];
 
-export const DISTRICTS: District[] = LAYOUT.map((district, index) => {
-  const col = index % 4;
-  const row = Math.floor(index / 4);
-  return { ...district, x: (col - 1.5) * 7, z: (row - 0.5) * 8 };
+/** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
+const ROOM_XZ: Record<string, [number, number]> = {
+  "vault-quarter": [-8.8, -5.2],
+  "cup-stadium": [8.8, -5.2],
+  "trading-village": [8.8, 5.2],
+  "war-room": [-8.8, 5.2],
+  "skin-forge": [0, 5.2],
+  "oracle-plaza": [0, -5.2],
+  "launch-pier": [16.4, 0],
+  "card-club": [-16.4, 0],
+};
+
+export const DISTRICTS: District[] = LAYOUT.map((district) => {
+  const [x, z] = ROOM_XZ[district.id] ?? [0, 0];
+  return { ...district, x, z };
 });
 
 export type CityAgent = {
   accountId: string;
   name: string;
-  spec: AvatarSpec;
+  skin: SkinTraits;
 };
 
 export const CITY_AGENTS: CityAgent[] = [
@@ -107,19 +119,28 @@ export const CITY_AGENTS: CityAgent[] = [
 ].map((accountId) => ({
   accountId,
   name: displayName(accountId),
-  spec: avatarSpec(accountId),
+  skin: defaultSkin(accountId),
 }));
 
-/** Room centers in a loop, so agents walk door to door. */
+/** Door-to-door loop around the concourse. Side rooms stay off the path. */
 export const WALK_LOOP: Array<[number, number]> = [
-  0, 1, 2, 3, 7, 6, 5, 4,
-].map((index) => [DISTRICTS[index].x, DISTRICTS[index].z]);
+  "vault-quarter",
+  "oracle-plaza",
+  "cup-stadium",
+  "trading-village",
+  "skin-forge",
+  "war-room",
+].map((id) => {
+  const room = DISTRICTS.find((district) => district.id === id);
+  if (!room) return [0, 0];
+  return [room.x, room.z];
+});
 
 export function placeAgent(index: number, time: number, paused: boolean) {
   const phase = index * 1.7;
   const home = WALK_LOOP[index % WALK_LOOP.length];
   if (paused) {
-    return { x: home[0], y: 0.78, z: home[1], rot: 0 };
+    return { x: home[0], y: 0, z: home[1], rot: 0 };
   }
   const travel = time * 0.28 + phase;
   const span = WALK_LOOP.length;
@@ -129,12 +150,11 @@ export function placeAgent(index: number, time: number, paused: boolean) {
   const smooth = t * t * (3 - 2 * t);
   const from = WALK_LOOP[slot];
   const to = WALK_LOOP[(slot + 1) % span];
-  const bob = Math.sin(time * 7 + phase) * 0.07;
   const dx = to[0] - from[0];
   const dz = to[1] - from[1];
   return {
     x: from[0] + dx * smooth,
-    y: 0.78 + bob,
+    y: 0,
     z: from[1] + dz * smooth,
     rot: Math.atan2(dx, dz),
   };

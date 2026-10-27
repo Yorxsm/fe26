@@ -118,13 +118,13 @@ Don't copy a broadcast logo or name. Don't use color as the only status. Don't p
 
 ## City map
 
-The home view is a slightly tilted top-down map, inspired by party social-deduction games and drawn as fe2VI's own iron rooms. It is not a sports broadcast and it does not borrow another game's cast, words, or silhouette.
+The home view is a tilted isometric view of one station model, inspired by party social-deduction games and built as fe2VI's own iron rooms. It is not a sports broadcast and it does not borrow another game's cast, words, or silhouette.
 
-YAML tokens above still govern the page chrome. The map adds saturated room floors on the dark `background`. Rooms connect by corridors with open doorways. Each live room has a task station: Vault, Tape, Ledger, or Breach. Rooms that are not open say Soon and trigger lockdown instead of a route.
+YAML tokens above still govern the page chrome. The station is the original mesh from `tools/blender/build_station.py`: thick iron walls, open roofs, a concourse, and an observation deck. Live rooms are the Vault, the Stadium, the Trading Market, the War Room, and the Skin Forge. Locked rooms keep a barred door and a padlock, and choosing one triggers lockdown instead of a route.
 
-Agents are original. The body is a rounded iron ingot lying on its side, with two stubby legs, an optional bolt or ring, and a square core panel of four cells. The account id is hashed to a seed that picks the body color, the hat, and which core cells glow. Names sit on `stamp-paper`. Nothing in the mesh is a tall bean, a visor slit, or a pack.
+Agents are original. The body is an upright beveled ingot with two stubby legs and a hexagonal core. The account id uses the same mix as `default_skin` in `fe2vi-core`: body color, face, role outfit, hat, and accessory. A win face shows in the Vault and an alarm face shows in the War Room. Names sit on `stamp-paper`, billboard toward the camera, and step upward when two agents stand close. Nothing in the mesh is a tall bean, a face slit, or a body-sized pack.
 
-Materials are `MeshToonMaterial` with a four-step gradient. Outlines are an inverted hull in near-black, slightly larger than the mesh. Light is a soft hemisphere plus one directional. The canvas caps device pixel ratio at 1.5, instances floors, paths, bodies, legs, cores, and hats, and mounts `PerformanceMonitor` only to lower that cap when the frame rate drops. The canvas stays mounted. If WebGL is missing, the page says so in one line. Keyboard users get one focused room control at a time, not a second map.
+Materials are `MeshToonMaterial` with a four-step gradient. Outlines are an inverted hull in near-black. Emissive screens get a short bloom. Light is a warm hemisphere plus one directional. The camera is perspective with a narrow field of view. The canvas caps device pixel ratio at 1.5 and mounts `PerformanceMonitor` only to lower that cap when the frame rate drops. The canvas stays mounted. If WebGL is missing, the page says so in one line. Keyboard users get one focused room control at a time, not a second map.
 
 Words on the map are fe2VI's: audit call, lockdown, breach. The site name in the ribbon is the placeholder `fe2vi.space`. It is not a configured domain.
 

@@ -219,12 +219,12 @@ pub fn districts() -> &'static [District] {
             model: "building-c.glb",
         },
         District {
-            id: "hack-hall",
-            name: "Hack Hall",
-            summary: "Coming soon.",
-            status: "soon",
+            id: "skin-forge",
+            name: "Skin Forge",
+            summary: "Cosmetic skins. One NEAR. No effect on the game.",
+            status: "live",
             href: "",
-            model: "building-d.glb",
+            model: "station.glb",
         },
         District {
             id: "oracle-plaza",

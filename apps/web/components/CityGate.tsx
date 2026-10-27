@@ -77,9 +77,13 @@ export function CityGate() {
     if (district.id === "vault-quarter") quests.heist = true;
     if (district.id === "war-room") quests.breach = true;
     commit({ ...save, quests });
-    if (district.status === "soon" || !district.href) {
+    if (district.status === "soon") {
       setPaused(true);
       setNote(`Lockdown. ${district.name} is not open.`);
+      return;
+    }
+    if (!district.href) {
+      setNote("Skin Forge is cosmetic. The mint is an agent spend, one NEAR, and it does not change the game.");
       return;
     }
     router.push(district.href);
