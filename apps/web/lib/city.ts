@@ -116,26 +116,39 @@ export const CITY_AGENTS: CityAgent[] = [
   "scout.vault.fe2vi.testnet",
   "tape.cup.fe2vi.testnet",
   "pike.war.fe2vi.testnet",
+  "quill.forge.fe2vi.testnet",
+  "nori.market.fe2vi.testnet",
+  "brim.stadium.fe2vi.testnet",
+  "kiln.forge.fe2vi.testnet",
+  "wren.scout.fe2vi.testnet",
+  "soot.vault.fe2vi.testnet",
 ].map((accountId) => ({
   accountId,
   name: displayName(accountId),
   skin: defaultSkin(accountId),
 }));
 
-/** Door-to-door loop around the concourse. Side rooms stay off the path. */
+/** Road ring, with a step through each live doorway (the +z face). */
 export const WALK_LOOP: Array<[number, number]> = [
-  "vault-quarter",
-  "skin-forge",
-  "cup-stadium",
-  "skin-forge",
-  "trading-village",
-  "skin-forge",
-  "war-room",
-].map((id) => {
-  const room = DISTRICTS.find((district) => district.id === id);
-  if (!room) return [0, 0];
-  return [room.x, room.z];
-});
+  [-54, -2],
+  [-38, -24],
+  [-38, -16],
+  [-38, -24],
+  [-8, -42],
+  [-8, -32],
+  [-8, -42],
+  [50, -28],
+  [20, -10],
+  [46, 14],
+  [46, 22],
+  [46, 14],
+  [12, 40],
+  [12, 48],
+  [12, 40],
+  [-42, 18],
+  [-42, 26],
+  [-42, 18],
+];
 
 export function placeAgent(index: number, time: number, paused: boolean) {
   const phase = index * 1.7;

@@ -314,6 +314,11 @@ function AgentMesh({
       clipName.current = nextClip;
     }
     if (!paused) mixer.update(delta);
+    const blink = Math.sin(state.clock.elapsedTime * 2.1 + index * 1.3) > 0.92;
+    scene.traverse((node) => {
+      if (node.name !== "eye.L" && node.name !== "eye.R") return;
+      node.scale.y = blink ? 0.15 : 1;
+    });
     if (group.current) {
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.rotation.y = pose.rot;

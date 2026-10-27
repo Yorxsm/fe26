@@ -17,7 +17,7 @@ Blender 4.0 builds Z-up. The exporter writes glTF Y-up. `layout.json` is in glTF
 | File | Bytes | What it is |
 | --- | ---: | --- |
 | `apps/web/public/models/station.glb` | 606780 | Village with bank, market, stadium, war room, forge, and construction plots |
-| `apps/web/public/models/agent.glb` | 53576 | Beveled ingot with stubby legs, a hexagonal core, and the catalog parts below |
+| `apps/web/public/models/agent.glb` | 62692 | Ingot with arms, blinking eyes, stubby legs, a hexagonal core, and the catalog parts below |
 | `apps/web/public/models/layout.json` |  | Room ids and glTF positions for the scene |
 
 Both GLBs use `EXT_meshopt_compression` (plus `KHR_mesh_quantization` and `KHR_materials_emissive_strength`). Draco is not used: this Blender build has no Draco encoder, and a CDN decoder is the wrong trade. The scene loads them with three's `MeshoptDecoder`.

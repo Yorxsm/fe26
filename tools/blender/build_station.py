@@ -692,6 +692,11 @@ def build_armature():
         leg.head = (x, 0, 0.36)
         leg.tail = (x, 0, 0.02)
         leg.parent = root
+    for label, x in (("L", -0.4), ("R", 0.4)):
+        limb = bones.new(f"bone.arm.{label}")
+        limb.head = (x, 0, 0.98)
+        limb.tail = (x, 0, 0.55)
+        limb.parent = body
     bpy.ops.object.mode_set(mode="OBJECT")
     return arm
 
@@ -748,6 +753,8 @@ def animate_agent(arm):
         key_loc(arm, "bone.root", frame, (0, 0.03 if frame == 8 else 0.0, 0))
         key_rot(arm, "bone.leg.L", frame, (swing, 0, 0))
         key_rot(arm, "bone.leg.R", frame, (-swing, 0, 0))
+        key_rot(arm, "bone.arm.L", frame, (-swing, 0, 0))
+        key_rot(arm, "bone.arm.R", frame, (swing, 0, 0))
         key_rot(arm, "bone.body", frame, (0.08 if swing > 0 else -0.08, 0, 0))
     stash_action(arm, "walk")
 
@@ -755,6 +762,8 @@ def animate_agent(arm):
     for frame, lift, twist in ((1, 0.0, 0.0), (8, 0.16, 0.25), (16, 0.02, -0.2), (24, 0.14, 0.2), (32, 0.0, 0.0)):
         key_loc(arm, "bone.root", frame, (0, lift, 0))
         key_rot(arm, "bone.body", frame, (0, 0, twist))
+        key_rot(arm, "bone.arm.L", frame, (-1.1 if lift > 0.05 else 0.0, 0, 0.3))
+        key_rot(arm, "bone.arm.R", frame, (-1.1 if lift > 0.05 else 0.0, 0, -0.3))
     stash_action(arm, "celebrate")
 
 
@@ -822,6 +831,10 @@ def build_agent():
     satchel = agent_mesh("acc.4", (-0.42, 0.05, 0.62), (0.18, 0.22, 0.28), m["cloth"], 0.03)
     satchel_strap = agent_mesh("acc.4.strap", (-0.28, 0.02, 0.9), (0.06, 0.06, 0.4), m["iron_trim"], 0.0)
     bolt = agent_mesh("acc.5", (0.34, -0.22, 0.7), (0.08, 0.1, 0.22), m["gold"], 0.01)
+    arm_l = agent_mesh("arm.L", (-0.42, 0, 0.74), (0.12, 0.12, 0.46), m["body"], 0.02)
+    arm_r = agent_mesh("arm.R", (0.42, 0, 0.74), (0.12, 0.12, 0.46), m["body"], 0.02)
+    eye_l = agent_mesh("eye.L", (-0.07, -0.32, 0.9), (0.07, 0.03, 0.07), m["iron_dark"], 0.0)
+    eye_r = agent_mesh("eye.R", (0.07, -0.32, 0.9), (0.07, 0.03, 0.07), m["iron_dark"], 0.0)
 
     arm = build_armature()
     parts.append(arm)
@@ -846,6 +859,10 @@ def build_agent():
         (satchel, "bone.body"),
         (satchel_strap, "bone.body"),
         (bolt, "bone.body"),
+        (arm_l, "bone.arm.L"),
+        (arm_r, "bone.arm.R"),
+        (eye_l, "bone.body"),
+        (eye_r, "bone.body"),
     ]
     for face in faces:
         skinned.append((face, "bone.body"))
