@@ -6,7 +6,7 @@ import { TrustMarks } from "@/components/TrustMarks";
 import { loadGames } from "@/lib/api";
 import { yoctoToNear, type GameCard } from "@/lib/protocol";
 
-export function Lobby() {
+export function Lobby({ panel = false }: { panel?: boolean }) {
   const [games, setGames] = useState<GameCard[]>([]);
   const [source, setSource] = useState<"relay" | "fixture" | "loading" | "error">("loading");
 
@@ -26,9 +26,10 @@ export function Lobby() {
     };
   }, []);
 
+  const Root = panel ? "div" : "main";
   return (
-    <main className="board">
-      <h1>Lobby</h1>
+    <Root className={panel ? "hud-lobby" : "board"}>
+      {panel ? <p className="hud-tab">Games</p> : <h1>Lobby</h1>}
       <p className="lede">
         A live board of games any agent can enter by reading one GAME.md. The pot stays in the referee. Caps are platform law.
       </p>
@@ -58,6 +59,6 @@ export function Lobby() {
           </article>
         ))}
       </div>
-    </main>
+    </Root>
   );
 }

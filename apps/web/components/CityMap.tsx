@@ -24,6 +24,16 @@ const ROOM_PREFIX: Record<string, string> = {
   club: "card-club",
 };
 
+const OVERVIEW_PITCH = (50 * Math.PI) / 180;
+const OVERVIEW_YAW = Math.PI / 4;
+const OVERVIEW_DIST = 96;
+const overviewEye = new THREE.Vector3(
+  Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
+  Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
+  Math.cos(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
+);
+const overviewAim = new THREE.Vector3(0, 1.2, 0);
+
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
   { position: [-5.8, 3.2, -1.6], target: [-8.8, 1.15, -5.2] },
   { position: [12.2, 3.5, 8.6], target: [8.8, 1.2, 5.2] },
@@ -342,6 +352,8 @@ function CameraDriver({
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
   const reduce = useRef(false);
+  const wasDriving = useRef(false);
+  const homing = useRef(false);
   useLayoutEffect(() => {
     reduce.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }, []);
@@ -350,13 +362,31 @@ function CameraDriver({
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
     const driving = mode === "cutscene" || (mode === "play" && (followIndex !== null || Boolean(focusId)));
-    rig.enabled = !driving;
-    rig.autoRotate = mode === "orbit" && !reduce.current;
+    if (wasDriving.current && !driving) homing.current = true;
+    wasDriving.current = driving;
+    rig.autoRotate = false;
     if (mode === "orbit") {
-      aim.set(0, 1, 0);
-      rig.target.lerp(aim, reduce.current ? 1 : 0.08);
+      rig.enabled = false;
+      aim.copy(overviewAim);
+      eye.copy(overviewEye);
+      const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2);
+      rig.target.lerp(aim, blend);
+      camera.position.lerp(eye, blend);
+      camera.lookAt(rig.target);
       return;
     }
+    if (!driving && homing.current) {
+      rig.enabled = false;
+      aim.copy(overviewAim);
+      eye.copy(overviewEye);
+      const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2.4);
+      rig.target.lerp(aim, blend);
+      camera.position.lerp(eye, blend);
+      camera.lookAt(rig.target);
+      if (camera.position.distanceTo(overviewEye) < 0.6) homing.current = false;
+      return;
+    }
+    rig.enabled = !driving;
     let drive = false;
     if (mode === "cutscene") {
       const shot = BEATS[Math.min(beat, BEATS.length - 1)];
@@ -415,7 +445,7 @@ export default function CityMap({
     <Canvas
       className="city-canvas"
       dpr={dpr}
-      camera={{ position: [16, 13, 16], fov: 32, near: 0.1, far: 140 }}
+      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 25, near: 0.1, far: 600 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -430,13 +460,14 @@ export default function CityMap({
         });
       }}
     >
-      <color attach="background" args={["#121418"]} />
-      <hemisphereLight args={["#fff1e4", "#1a120e", 0.85]} />
-      <directionalLight position={[8, 14, 6]} intensity={1.35} />
+      <color attach="background" args={["#f3c7a4"]} />
+      <fog attach="fog" args={["#f0cbb4", 70, 220]} />
+      <hemisphereLight args={["#ffe0c2", "#8fb8ff", 0.85]} />
+      <directionalLight position={[30, 40, 12]} intensity={1.5} color="#ffd2a8" />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.08, 0]}>
-        <planeGeometry args={[60, 48]} />
-        <meshToonMaterial color="#121418" />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -6, 0]}>
+        <circleGeometry args={[220, 48]} />
+        <meshStandardMaterial color="#f6d7c4" roughness={1} />
       </mesh>
       <Station gradient={gradient} onPick={onPick} />
       {CITY_AGENTS.map((agent, index) => (
@@ -456,13 +487,12 @@ export default function CityMap({
       <OrbitControls
         makeDefault
         enablePan={false}
-        autoRotate={mode === "orbit"}
-        autoRotateSpeed={0.35}
-        minPolarAngle={0.45}
+        autoRotate={false}
+        minPolarAngle={0.35}
         maxPolarAngle={1.15}
-        minDistance={6}
-        maxDistance={42}
-        target={[0, 1, 0]}
+        minDistance={8}
+        maxDistance={150}
+        target={[0, 1.2, 0]}
       />
     </Canvas>
   );

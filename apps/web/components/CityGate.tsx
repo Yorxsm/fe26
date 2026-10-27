@@ -109,6 +109,7 @@ export function CityGate() {
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [soundLive, setSoundLive] = useState(false);
+  const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
 
   useEffect(() => {
@@ -123,6 +124,17 @@ export function CityGate() {
     if (phase === "cutscene" || phase === "vantage") audio.theme();
     if (phase === "city") audio.city();
   }, [phase]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setFocusId(null);
+      setFollowIndex(null);
+      setShowGames(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (phase !== "cutscene") return;
@@ -198,42 +210,58 @@ export function CityGate() {
 
   return (
     <>
-      <section className="city-wrap" aria-label="City map">
-        {phase === "city" && (
-          <div className="city-head">
-            <h1>fe2VI</h1>
-            <p className="lede">A testnet city of agent games. You watch. Agents play inside platform caps.</p>
-            <div className="city-actions">
-              <button type="button" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
-                {audit ? "End audit call" : "Audit call"}
-              </button>
-              <button type="button" className="btn-quiet" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
-                {paused ? "Lift lockdown" : "Lockdown"}
-              </button>
-              {(focusId || followIndex !== null) && (
-                <button
-                  type="button"
-                  className="btn-quiet"
-                  onClick={() => {
-                    setFocusId(null);
-                    setFollowIndex(null);
-                  }}
-                >
-                  Free camera
-                </button>
-              )}
-            </div>
-            <p className="meta" role="status">
-              {note}{" "}
-              {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
-            </p>
-          </div>
-        )}
+      <section className="game-root" aria-label="City map">
         <div className="city-stage">
           <div className="city-frame">
-            {phase !== "boot" && phase !== "title" && phase !== "dispatch" && (
-              <div className="audio-dock">
-                <AudioHud live={soundLive} />
+            {(phase === "cutscene" || phase === "vantage" || phase === "city") && (
+            <header className="hud-top">
+              <div className="hud-cluster">
+                <p className="hud-brand">
+                  fe2<span>VI</span>
+                </p>
+                <nav className="hud-nav" aria-label="Primary">
+                  <a href="/village">Village</a>
+                  <a href="/create">Create</a>
+                  <a href="/forge">Forge</a>
+                  <a href="/agents/demo.registry.testnet">Agents</a>
+                </nav>
+                {phase === "city" && (
+                  <div className="city-actions">
+                    <button type="button" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                      Games
+                    </button>
+                    <button type="button" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
+                      {audit ? "End audit call" : "Audit call"}
+                    </button>
+                    <button type="button" className="btn-quiet" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
+                      {paused ? "Lift lockdown" : "Lockdown"}
+                    </button>
+                    {(focusId || followIndex !== null) && (
+                      <button
+                        type="button"
+                        className="btn-quiet"
+                        onClick={() => {
+                          setFocusId(null);
+                          setFollowIndex(null);
+                        }}
+                      >
+                        Free camera
+                      </button>
+                    )}
+                  </div>
+                )}
+                {phase === "city" && (
+                  <p className="hud-note" role="status">
+                    {note} {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
+                  </p>
+                )}
+              </div>
+              <AudioHud live={soundLive} />
+            </header>
+            )}
+            {phase === "city" && showGames && (
+              <div className="hud-panel hud-games">
+                <Lobby panel />
               </div>
             )}
             {phase === "boot" ? (
@@ -453,7 +481,6 @@ export function CityGate() {
           )}
         </div>
       </section>
-      {phase === "city" && <Lobby />}
     </>
   );
 }
