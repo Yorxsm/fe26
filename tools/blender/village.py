@@ -14,7 +14,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 6
+ART_STEP = 7
 
 # three.js (x, z). Blender y is -z.
 SITES = [
@@ -337,6 +337,32 @@ def build_stadium(kit, mats):
         box(kit, f"stadium.step.{step}", (cx, cy - sy / 2 - 1.2 - step * 0.7, 0.1 + step * 0.06), (6.0, 0.65, 0.12), mats["kerb"], 0)
 
 
+def build_war_room(kit, mats):
+    cx, cy = blender_xy(12.0, 40.0)
+    sx, sy, height = 22.0, 16.0, 8.0
+    front_shell(kit, mats, "war", cx, cy, sx, sy, height, mats["concrete"], mats["trim"], mats["concrete"], mats["cyan"])
+    for pane, x in enumerate((-6, 0, 6)):
+        box(kit, f"war.glass.{pane}", (cx + x, cy - sy / 2 - 0.05, 2.6), (3.2, 0.08, 3.4), mats["glass"], 0)
+    box(kit, "war.map", (cx, cy + sy / 2 - 0.45, 2.6), (8.0, 0.08, 3.2), mats["cyan"], 0)
+    for index in range(4):
+        x = cx - 6 + index * 4
+        box(kit, f"war.desk.{index}", (x, cy + 1.5, 0.55), (1.8, 0.8, 0.7), mats["trim"], 0)
+        box(kit, f"war.screen.{index}", (x, cy + 2.0, 1.25), (1.1, 0.06, 0.65), mats["cyan"], 0)
+        box(kit, f"war.screenb.{index}", (x + 0.7, cy + 2.0, 1.15), (0.7, 0.06, 0.5), mats["cyan"], 0)
+    kit.cylinder("war.table", (cx, cy - 2, 0.45), 1.3, 0.16, mats["trim"], vertices=16)
+    kit.cylinder("war.holo", (cx, cy - 2, 1.15), 0.45, 0.9, mats["cyan"], vertices=8)
+    kit.cylinder("war.beacon", (cx, cy, height + 0.7), 0.18, 0.35, mats["alarm"], vertices=8)
+    kit.cylinder("war.dishpole", (cx + 6, cy + 4, height + 1.2), 0.06, 2.2, mats["iron"], vertices=6)
+    disc(kit, "war.dish", (cx + 6, cy + 4.4, height + 2.3), 1.1, 0.08, mats["iron"], (1.1, 0, 0.4), 16)
+    box(kit, "war.couch", (cx - 6, cy - 3, 0.4), (2.4, 0.8, 0.55), mats["velvet"], 0.2)
+    box(kit, "war.couchb", (cx + 5, cy - 4, 0.4), (1.8, 0.8, 0.5), mats["seat"], 0)
+    for plant in range(3):
+        kit.cylinder(f"war.pot.{plant}", (cx - 8 + plant * 8, cy + 5, 0.25), 0.22, 0.3, mats["crate"], vertices=8)
+        kit.cone(f"war.plant.{plant}", (cx - 8 + plant * 8, cy + 5, 0.7), 0.35, 0.7, mats["leaf"])
+    for cable in range(4):
+        box(kit, f"war.cable.{cable}", (cx - 4 + cable * 2.2, cy + 3.5, 0.08), (0.06, 3.5, 0.04), mats["iron"], 0.4)
+
+
 def build_village():
     core.reset_scene()
     kit = core.Kit()
@@ -377,6 +403,8 @@ def build_village():
         "pitch": core.material("pitch", "#3f8f45", metallic=0.0, roughness=0.85),
         "seat": core.material("seat", "#d8692a", metallic=0.05, roughness=0.55),
         "trim": core.material("trim", "#2a2e33", metallic=0.4, roughness=0.45),
+        "concrete": core.material("concrete", "#c9c3b8", metallic=0.04, roughness=0.72),
+        "cyan": core.material("cyan", "#12343a", "#7dfff0", 1.4, 0.15, 0.28),
     }
     build_terrain(kit, mats)
     if ART_STEP >= 3:
@@ -388,6 +416,8 @@ def build_village():
         build_market(kit, mats)
     if ART_STEP >= 6:
         build_stadium(kit, mats)
+    if ART_STEP >= 7:
+        build_war_room(kit, mats)
     rooms = []
     for district, name, _prefix, tx, tz in SITES:
         cx, cy = blender_xy(tx, tz)
