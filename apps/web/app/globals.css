@@ -968,6 +968,7 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
   color: var(--ink);
   border: 1px solid var(--line);
 }
+.name-tag.far { font-size: var(--type-caption); line-height: 16px; }
 .name-tag.audit { outline: none; }
 @media (max-width: 480px) {
   .city-stage { display: none; }

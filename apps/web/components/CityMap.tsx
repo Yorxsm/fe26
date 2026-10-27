@@ -803,6 +803,7 @@ function AgentMesh({
   const clipName = useRef("");
   const clipAction = useRef<THREE.AnimationAction | null>(null);
   const clipFade = useRef<THREE.AnimationAction[]>([]);
+  const tagEl = useRef<HTMLDivElement>(null);
   const mood = useRef<Mood>("trait");
   const skin = useMemo(() => displaySkin(agent, index, poster), [agent, index, poster]);
   const scene = useMemo(() => {
@@ -843,13 +844,13 @@ function AgentMesh({
       pose = { x: (col - 1.5) * 7, y: 0, z: (1 - row) * 7, rot: 0 };
     } else if (poster === "street" && index < 4) {
       const spots: Array<[number, number]> = [
-        [-46.2, 31.2],
-        [-43.4, 30.1],
-        [-40.2, 31.4],
-        [-37.0, 30.3],
+        [-48.2, 34.4],
+        [-45.4, 34.9],
+        [-39.2, 34.6],
+        [-36.4, 35.1],
       ];
       const spot = spots[index];
-      pose = { x: spot[0], y: 0, z: spot[1], rot: 1.15 };
+      pose = { x: spot[0], y: 0, z: spot[1], rot: 0.15 };
     }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
@@ -919,8 +920,24 @@ function AgentMesh({
       group.current.rotation.y = pose.rot;
     }
     if (tag.current) {
-      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34" && poster !== "street";
+      tag.current.visible = poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + tagLift(index, state.clock.elapsedTime, paused);
+      const chip = tagEl.current;
+      if (chip && group.current) {
+        const dist = state.camera.position.distanceTo(group.current.position);
+        chip.classList.toggle("far", dist > 16);
+        const rect = chip.getBoundingClientRect();
+        const blockers = document.querySelectorAll(".hud-tl, .hud-tr, .hud-bl, .hud-br, .hud-bc, .audio-hud, .quest-hint, .stress-readout");
+        let covered = false;
+        blockers.forEach((blocker) => {
+          if (covered) return;
+          const hud = blocker.getBoundingClientRect();
+          if (hud.width < 2 || hud.height < 2) return;
+          const overlaps = rect.left < hud.right && rect.right > hud.left && rect.top < hud.bottom && rect.bottom > hud.top;
+          if (overlaps) covered = true;
+        });
+        chip.style.visibility = covered || !tag.current.visible ? "hidden" : "visible";
+      }
     }
     if (face && group.current?.visible) {
       const now = state.clock.elapsedTime + index * 0.37;
@@ -990,8 +1007,8 @@ function AgentMesh({
         }}
       />
       <group ref={tag} position={[0, 5.2, 0]}>
-        <Html center sprite distanceFactor={12} zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
-          <div className={audit ? "name-tag audit" : "name-tag"}>
+        <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+          <div ref={tagEl} className={audit ? "name-tag audit" : "name-tag"}>
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
           </div>
@@ -1420,6 +1437,66 @@ function StressCrowd({
   );
 }
 
+function boundsOf(root: THREE.Object3D) {
+  const box = new THREE.Box3().setFromObject(root);
+  return { height: box.max.y - box.min.y, top: box.max.y, bottom: box.min.y };
+}
+
+function findNamed(root: THREE.Object3D, name: string): THREE.Object3D | null {
+  const hits: THREE.Object3D[] = [];
+  root.traverse((node) => {
+    if (hits.length > 0) return;
+    if (node.name === name || sourceName(node) === name) hits.push(node);
+  });
+  return hits[0] ?? null;
+}
+
+/** One world-space height log, so the street frame can be checked against the doorway. */
+function ScaleProbe() {
+  const logged = useRef(false);
+  const scene = useThree((state) => state.scene);
+  useFrame(() => {
+    if (logged.current) return;
+    const agent = findNamed(scene, "AgentRig");
+    if (!agent) return;
+    agent.updateWorldMatrix(true, true);
+    const head = new THREE.Vector3();
+    let headFound = false;
+    agent.traverse((node) => {
+      if (node.name !== "bone.head") return;
+      node.getWorldPosition(head);
+      headFound = true;
+    });
+    if (!headFound) return;
+    const agentBox = boundsOf(agent);
+    const sign = findNamed(scene, "kit.vault.sign");
+    const portico = findNamed(scene, "kit.vault.portico");
+    const lamp = findNamed(scene, "road.lamp.18");
+    const signBox = sign ? boundsOf(sign) : null;
+    const porticoBox = portico ? boundsOf(portico) : null;
+    const lampBox = lamp ? boundsOf(lamp) : null;
+    const text = [
+      `agent ${agentBox.height.toFixed(2)}`,
+      `head ${head.y.toFixed(2)}`,
+      `sign ${signBox ? signBox.height.toFixed(2) : "missing"}`,
+      `lamp ${lampBox ? lampBox.height.toFixed(2) : "missing"}`,
+      `portico ${porticoBox ? porticoBox.height.toFixed(2) : "missing"}`,
+      `scale ${AGENT_SCALE.toFixed(2)}`,
+    ].join(" · ");
+    console.log(text);
+    let node = document.getElementById("scale-readout");
+    if (!node) {
+      node = document.createElement("p");
+      node.id = "scale-readout";
+      node.hidden = true;
+      document.body.appendChild(node);
+    }
+    node.textContent = text;
+    logged.current = true;
+  });
+  return null;
+}
+
 function WindowGlow() {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const spots = useMemo(() => {
@@ -1613,6 +1690,7 @@ export default function CityMap({
         ))
       )}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
+      {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />

@@ -4,6 +4,8 @@ Measured on the production build, headless Chrome, `--use-gl=angle --use-angle=s
 
 Draw calls are the number that matters. Swiftshader FPS stays under 1 with this post stack, on an empty village and on a crowd. A real GPU will not reproduce that FPS. It will still pay the draws.
 
+`AGENT_SCALE` is `1.75`. The rig is about 1 unit tall, so a full-detail agent is about 1.75 world units. The vault sign and the road lamps are 3.20. The vault portico is 8, and its front opening starts around 6. The previous `5.3 / 1.5` body was still about 3.5, the same height as the sign. The street frame (`STREET_SHOT`) sits about 11 units back at a 30° field so the doorway, a lamp, and four agents fit together. The HTML name tags use z-index 4 down to 1, under the HUD at 6, hide when their box crosses a HUD rect, and drop from `--type-small` (14) to `--type-caption` (12) past 16 units.
+
 ## What the city does today
 
 `placeAgent` in `apps/web/lib/city.ts` is the whole movement model.

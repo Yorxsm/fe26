@@ -103,10 +103,14 @@ const ROOM_XZ: Record<string, [number, number]> = {
 export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
 /** Six roles, shoulder to shoulder, facing the lawn camera. */
-/** World scale for the 1.0-unit ingot. The previous 5.3 body, divided by 1.5. */
-export const AGENT_SCALE = 5.3 / 1.5;
-/** Head height in world units, the same proportion as the 5.3 body. */
-export const AGENT_HEAD = 3.4 / 1.5;
+/**
+ * The rig is about 1 unit tall. 1.75 keeps the head under the 3.2 sign and
+ * lamp post, around shoulder height in the vault doorway. 5.3, and then
+ * 5.3/1.5, still stood as tall as that sign.
+ */
+export const AGENT_SCALE = 1.75;
+/** Head height in world units, the same proportion as the old 5.3 body. */
+export const AGENT_HEAD = (3.4 / 5.3) * AGENT_SCALE;
 
 export const LINEUP_SPOTS: Array<[number, number]> = [
   [-11.25, 0],
@@ -120,10 +124,11 @@ export const LINEUP_SPOTS: Array<[number, number]> = [
 export const LINEUP_SHOT: CameraShot = { eye: [0, 3.8 / 1.5, 18], aim: [0, 2.7 / 1.5, 0], fov: 50 };
 
 /**
- * Street scale. Eye height, 7.6 units back from the agents in front of the
- * vault, so a lamp and the building stay in frame. The old eye sat inside a body.
+ * Wider street frame. About 11 units back from the agents in front of the
+ * vault doorway, 30° vertical field, so the portico, the sign, and a lamp
+ * stay in frame with the four bodies.
  */
-export const STREET_SHOT: CameraShot = { eye: [-41.2, 1.85, 38.2], aim: [-41.2, 1.35, 30.6], fov: 46 };
+export const STREET_SHOT: CameraShot = { eye: [-43.5, 1.6, 45.6], aim: [-42.2, 2.2, 33.2], fov: 30 };
 
 export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: [0, 3.35 / 1.5, 0], fov: 28 };
 
