@@ -10,6 +10,7 @@
 import json
 import math
 import os
+import sys
 
 import bpy
 import bmesh
@@ -880,5 +881,10 @@ def export_glb(objects, path, animations):
 
 
 if __name__ == "__main__":
-    build_station()
+    sys_path = os.path.dirname(__file__)
+    if sys_path not in sys.path:
+        sys.path.insert(0, sys_path)
+    import station_shell
+
+    station_shell.build_station()
     build_agent()

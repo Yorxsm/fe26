@@ -20,7 +20,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Heist Night. Timed vault rounds inside platform caps.",
     status: "live",
     href: "/games/heist-night-template",
-    station: "Vault",
+    station: "Vault Room",
     color: "#ff6b4a",
   },
   {
@@ -29,7 +29,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Trading Cup. A short public tape.",
     status: "live",
     href: "/games/trading-cup-template",
-    station: "Tape",
+    station: "Stadium Room",
     color: "#ffd166",
   },
   {
@@ -38,7 +38,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Open tape, rolling boards, and follow.",
     status: "live",
     href: "/village",
-    station: "Ledger",
+    station: "Trading Market 24/7 Open",
     color: "#2ec4b6",
   },
   {
@@ -47,7 +47,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "A breach challenge on this contract only.",
     status: "live",
     href: "/war-room",
-    station: "Breach",
+    station: "Hacker War Room",
     color: "#ef476f",
   },
   {
@@ -56,7 +56,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Cosmetic skins. One NEAR. No effect on the game.",
     status: "live",
     href: "",
-    station: "Forge",
+    station: "Skin Forge",
     color: "#ff7a1a",
   },
   {
@@ -65,7 +65,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Coming soon.",
     status: "soon",
     href: "",
-    station: "Soon",
+    station: "Coming Soon",
     color: "#8ecae6",
   },
   {
@@ -74,7 +74,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Coming soon.",
     status: "soon",
     href: "",
-    station: "Soon",
+    station: "Coming Soon",
     color: "#f4a261",
   },
   {
@@ -83,21 +83,21 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     summary: "Coming soon.",
     status: "soon",
     href: "",
-    station: "Soon",
+    station: "Coming Soon",
     color: "#b5e48c",
   },
 ];
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
 const ROOM_XZ: Record<string, [number, number]> = {
-  "vault-quarter": [-8.8, -5.2],
-  "cup-stadium": [8.8, -5.2],
-  "trading-village": [8.8, 5.2],
-  "war-room": [-8.8, 5.2],
-  "skin-forge": [0, 5.2],
-  "oracle-plaza": [0, -5.2],
-  "launch-pier": [16.4, 0],
-  "card-club": [-16.4, 0],
+  "vault-quarter": [-12, 8],
+  "cup-stadium": [-8, -12],
+  "trading-village": [12, -8],
+  "war-room": [8, 12],
+  "skin-forge": [0, 0],
+  "launch-pier": [1.6, -18.4],
+  "card-club": [-1.6, 18.4],
+  "oracle-plaza": [-18.4, -1.6],
 };
 
 export const DISTRICTS: District[] = LAYOUT.map((district) => {
@@ -125,8 +125,9 @@ export const CITY_AGENTS: CityAgent[] = [
 /** Door-to-door loop around the concourse. Side rooms stay off the path. */
 export const WALK_LOOP: Array<[number, number]> = [
   "vault-quarter",
-  "oracle-plaza",
+  "skin-forge",
   "cup-stadium",
+  "skin-forge",
   "trading-village",
   "skin-forge",
   "war-room",

@@ -3,7 +3,18 @@
 import { Billboard, Html, OrbitControls, PerformanceMonitor, Text, useGLTF } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { BloomEffect, EffectComposer, EffectPass, RenderPass } from "postprocessing";
+import {
+  BloomEffect,
+  DepthOfFieldEffect,
+  EffectComposer,
+  EffectPass,
+  NormalPass,
+  RenderPass,
+  SSAOEffect,
+  ToneMappingEffect,
+  ToneMappingMode,
+} from "postprocessing";
+import { World } from "@/components/World";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
@@ -27,7 +38,7 @@ const ROOM_PREFIX: Record<string, string> = {
 
 const OVERVIEW_PITCH = (50 * Math.PI) / 180;
 const OVERVIEW_YAW = Math.PI / 4;
-const OVERVIEW_DIST = 96;
+const OVERVIEW_DIST = 118;
 const overviewEye = new THREE.Vector3(
   Math.sin(OVERVIEW_YAW) * Math.cos(OVERVIEW_PITCH) * OVERVIEW_DIST,
   Math.sin(OVERVIEW_PITCH) * OVERVIEW_DIST,
@@ -36,11 +47,11 @@ const overviewEye = new THREE.Vector3(
 const overviewAim = new THREE.Vector3(0, 1.2, 0);
 
 const BEATS: Array<{ position: [number, number, number]; target: [number, number, number] }> = [
-  { position: [-5.8, 3.2, -1.6], target: [-8.8, 1.15, -5.2] },
-  { position: [12.2, 3.5, 8.6], target: [8.8, 1.2, 5.2] },
-  { position: [-5.6, 3.3, 8.6], target: [-8.8, 1.2, 5.2] },
-  { position: [4, 6.5, 8], target: [0, 1.2, 0] },
-  { position: [0, 4.2, -11.2], target: [0, 1.4, 2] },
+  { position: [-6, 5.2, 14], target: [-12, 1.2, 8] },
+  { position: [18, 5.4, -2], target: [12, 1.2, -8] },
+  { position: [14, 5.2, 18], target: [8, 1.2, 12] },
+  { position: [7, 8, 9], target: [0, 1.2, 0] },
+  { position: [-2, 7, -18], target: [-8, 1.3, -12] },
 ];
 
 type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
@@ -48,85 +59,27 @@ type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; ena
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
 
-let outlineMaterial: THREE.MeshBasicMaterial | null = null;
-
-function outlineMat() {
-  if (!outlineMaterial) {
-    outlineMaterial = new THREE.MeshBasicMaterial({ color: "#0c1016", side: THREE.BackSide });
-  }
-  return outlineMaterial;
-}
-
-function toonGradient() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 4;
-  canvas.height = 1;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-  ["#3a3f48", "#8d93a0", "#e6e8ee", "#ffffff"].forEach((color, index) => {
-    context.fillStyle = color;
-    context.fillRect(index, 0, 1, 1);
-  });
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
-  return texture;
-}
-
-function toonFrom(source: THREE.Material, gradient: THREE.Texture | null) {
-  const standard = source as THREE.MeshStandardMaterial;
-  const color = standard.color ? standard.color.clone() : new THREE.Color("#8a939c");
-  const emissive = standard.emissive ? standard.emissive.clone() : new THREE.Color(0, 0, 0);
-  const strength = standard.emissiveIntensity ?? 0;
-  const glowing = strength > 0.15 && emissive.r + emissive.g + emissive.b > 0.05;
-  const material = new THREE.MeshToonMaterial({
-    color,
-    emissive: glowing ? emissive : new THREE.Color(0, 0, 0),
-    emissiveIntensity: glowing ? strength : 0,
-    gradientMap: gradient ?? undefined,
-  });
-  material.name = source.name;
-  if (glowing) material.toneMapped = false;
-  return material;
-}
-
-function addOutline(mesh: THREE.Mesh) {
-  const skinned = mesh as THREE.SkinnedMesh;
-  if (skinned.isSkinnedMesh) {
-    const hull = new THREE.SkinnedMesh(skinned.geometry, outlineMat());
-    hull.bind(skinned.skeleton, skinned.bindMatrix);
-    hull.scale.setScalar(1.045);
-    hull.frustumCulled = false;
-    hull.raycast = () => undefined;
-    skinned.add(hull);
-    return;
-  }
-  const hull = new THREE.Mesh(mesh.geometry, outlineMat());
-  hull.scale.setScalar(1.03);
-  hull.raycast = () => undefined;
-  mesh.add(hull);
-}
-
-function dress(root: THREE.Object3D, gradient: THREE.Texture | null, recolor?: string) {
+function dress(root: THREE.Object3D, recolor?: string) {
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (mesh.isMesh) meshes.push(mesh);
   });
   meshes.forEach((mesh) => {
-    const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    const next = sources.map((source) => toonFrom(source, gradient));
+    const sources = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
     if (recolor) {
-      next.forEach((material) => {
-        if (material.name === "Body") material.color.set(recolor);
+      sources.forEach((material) => {
+        if (material.name === "Body" && material.color) material.color.set(recolor);
       });
     }
-    mesh.material = next.length === 1 ? next[0] : next;
+    sources.forEach((material) => {
+      if ("envMapIntensity" in material) material.envMapIntensity = 0.35;
+    });
     const prefix = mesh.name.split(".")[0];
     const district = ROOM_PREFIX[prefix];
     if (district) mesh.userData.district = district;
-    addOutline(mesh);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.frustumCulled = false;
   });
   return root;
@@ -157,15 +110,9 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
   });
 }
 
-function Station({
-  gradient,
-  onPick,
-}: {
-  gradient: THREE.Texture | null;
-  onPick: (district: District) => void;
-}) {
+function Station({ onPick }: { onPick: (district: District) => void }) {
   const gltf = useGLTF("/models/station.glb", false, true);
-  const scene = useMemo(() => dress(gltf.scene.clone(true), gradient), [gltf.scene, gradient]);
+  const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
   return (
     <group>
       <primitive
@@ -185,18 +132,18 @@ function Station({
         }}
       />
       {DISTRICTS.map((district) => (
-        <Billboard key={district.id} position={[district.x, 2.85, district.z]}>
-          <mesh position={[0, 0, -0.04]}>
-            <planeGeometry args={[Math.max(1.4, district.station.length * 0.28), 0.5]} />
-            <meshStandardMaterial color="#2a241c" roughness={0.85} />
+        <Billboard key={district.id} position={[district.x, 3.15, district.z]}>
+          <mesh position={[0, 0, -0.05]}>
+            <planeGeometry args={[Math.max(1.8, district.station.length * 0.2), 0.46]} />
+            <meshStandardMaterial color="#2a241c" roughness={0.8} />
           </mesh>
           <Text
             font={DISPLAY_FONT}
-            fontSize={0.24}
+            fontSize={0.18}
             color="#f3e6c8"
             anchorX="center"
             anchorY="middle"
-            letterSpacing={0.04}
+            letterSpacing={0.03}
           >
             {district.station.toUpperCase()}
           </Text>
@@ -223,14 +170,12 @@ function AgentMesh({
   index,
   paused,
   audit,
-  gradient,
   onFollow,
 }: {
   agent: CityAgent;
   index: number;
   paused: boolean;
   audit: boolean;
-  gradient: THREE.Texture | null;
   onFollow: (index: number) => void;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
@@ -240,10 +185,10 @@ function AgentMesh({
   const mood = useRef<Mood>("trait");
   const scene = useMemo(() => {
     const cloned = SkeletonUtils.clone(gltf.scene);
-    dress(cloned, gradient, BODY_COLORS[agent.skin.body] ?? BODY_COLORS[0]);
+    dress(cloned, BODY_COLORS[agent.skin.body] ?? BODY_COLORS[0]);
     applyMood(cloned, agent, "trait");
     return cloned;
-  }, [agent, gltf.scene, gradient]);
+  }, [agent, gltf.scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
@@ -286,36 +231,56 @@ function AgentMesh({
   );
 }
 
-function ScreenBloom() {
+function Grade({ focusId }: { focusId: string | null }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
-  const composer = useMemo(() => {
-    const next = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
-    next.addPass(new RenderPass(scene, camera));
-    next.addPass(
+  const focus = useRef(focusId);
+  focus.current = focusId;
+  const grade = useMemo(() => {
+    const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
+    const normal = new NormalPass(scene, camera, { resolutionScale: 0.5 });
+    const dof = new DepthOfFieldEffect(camera, { focusDistance: 18, focusRange: 8, bokehScale: 0.2, resolutionScale: 0.5 });
+    const ssao = new SSAOEffect(camera, normal.texture, {
+      samples: 9,
+      rings: 4,
+      intensity: 0.4,
+      radius: 0.08,
+      luminanceInfluence: 0.65,
+      bias: 0.04,
+    });
+    composer.addPass(normal);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(
       new EffectPass(
         camera,
-        new BloomEffect({
-          intensity: 0.45,
-          luminanceThreshold: 0.9,
-          luminanceSmoothing: 0.2,
-          mipmapBlur: true,
-        }),
+        ssao,
+        dof,
+        new BloomEffect({ intensity: 0.35, luminanceThreshold: 0.85, luminanceSmoothing: 0.25, mipmapBlur: true }),
+        new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
       ),
     );
-    return next;
+    return { composer, dof };
   }, [camera, gl, scene]);
 
   useLayoutEffect(() => {
-    composer.setSize(size.width, size.height);
-  }, [composer, size.height, size.width]);
+    grade.composer.setSize(size.width, size.height);
+  }, [grade, size.height, size.width]);
 
-  useLayoutEffect(() => () => composer.dispose(), [composer]);
+  useLayoutEffect(() => () => grade.composer.dispose(), [grade]);
 
   useFrame((_, delta) => {
-    composer.render(delta);
+    const room = DISTRICTS.find((district) => district.id === focus.current);
+    if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
+    if (room) {
+      grade.dof.target.set(room.x, 1.2, room.z);
+      grade.dof.bokehScale = 1.7;
+    } else {
+      grade.dof.target.set(0, 1.2, 0);
+      grade.dof.bokehScale = 0.15;
+    }
+    grade.composer.render(delta);
   }, 1);
 
   return null;
@@ -410,7 +375,7 @@ function CameraDriver({
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room) {
         aim.set(room.x, 1.15, room.z);
-        eye.set(room.x + 3.4, 4.4, room.z + 4.6);
+        eye.set(room.x + 8, 7.2, room.z + 8);
         drive = true;
       }
     }
@@ -444,14 +409,14 @@ export default function CityMap({
   onFollow: (index: number) => void;
   onUnavailable: () => void;
 }) {
-  const gradient = useMemo(() => toonGradient(), []);
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
 
   return (
     <Canvas
       className="city-canvas"
       dpr={dpr}
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 25, near: 0.1, far: 600 }}
+      shadows
+      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 25, near: 0.1, far: 700 }}
       gl={{
         antialias: false,
         alpha: false,
@@ -460,36 +425,25 @@ export default function CityMap({
         preserveDrawingBuffer: true,
       }}
       onCreated={({ gl }) => {
+        gl.toneMapping = THREE.NoToneMapping;
+        gl.shadowMap.enabled = true;
+        gl.shadowMap.type = THREE.PCFSoftShadowMap;
         gl.domElement.addEventListener("webglcontextlost", (event) => {
           event.preventDefault();
           onUnavailable();
         });
       }}
     >
-      <color attach="background" args={["#f3c7a4"]} />
-      <fog attach="fog" args={["#f0cbb4", 70, 220]} />
-      <hemisphereLight args={["#ffe0c2", "#8fb8ff", 0.85]} />
-      <directionalLight position={[30, 40, 12]} intensity={1.5} color="#ffd2a8" />
+      <color attach="background" args={["#ffcf9e"]} />
+      <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -6, 0]}>
-        <circleGeometry args={[220, 48]} />
-        <meshStandardMaterial color="#f6d7c4" roughness={1} />
-      </mesh>
-      <Station gradient={gradient} onPick={onPick} />
+      <Station onPick={onPick} />
       {CITY_AGENTS.map((agent, index) => (
-        <AgentMesh
-          key={agent.accountId}
-          agent={agent}
-          index={index}
-          paused={paused}
-          audit={audit}
-          gradient={gradient}
-          onFollow={onFollow}
-        />
+        <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
       ))}
       <Ears paused={paused} />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} />
-      <ScreenBloom />
+      <Grade focusId={focusId} />
       <OrbitControls
         makeDefault
         enablePan={false}
@@ -497,7 +451,7 @@ export default function CityMap({
         minPolarAngle={0.35}
         maxPolarAngle={1.15}
         minDistance={8}
-        maxDistance={150}
+        maxDistance={180}
         target={[0, 1.2, 0]}
       />
     </Canvas>
