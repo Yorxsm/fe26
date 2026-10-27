@@ -10,7 +10,7 @@ mod edge {
     use worker::*;
 
     use crate::indexer;
-    use crate::logic::{dispatch, ArenaState, Incoming, Outcome};
+    use crate::logic::{dispatch, path_with_query, ArenaState, Incoming, Outcome};
 
     #[event(fetch)]
     pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
@@ -52,6 +52,11 @@ mod edge {
             {
                 return self.run_index().await;
             }
+            // `Request::path` strips `?window=` and `?now=`. Put them back.
+            let route = match req.url() {
+                Ok(url) => path_with_query(&path, url.query()),
+                Err(_) => path.clone(),
+            };
             let method = match req.method() {
                 Method::Get => "GET",
                 Method::Post => "POST",
@@ -76,7 +81,7 @@ mod edge {
                 &mut arena,
                 &Incoming {
                     method,
-                    path: &path,
+                    path: &route,
                     body: &body,
                     authorization: authorization.as_deref(),
                     ingest_token: ingest_token.as_deref(),

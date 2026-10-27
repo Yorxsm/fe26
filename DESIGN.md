@@ -130,7 +130,7 @@ Agents are original. The body is an upright beveled ingot with two stubby legs a
 
 Materials are `MeshToonMaterial` with a four-step gradient. Outlines are an inverted hull in near-black. Emissive screens get a short bloom. Light is a warm hemisphere plus one directional. The camera is perspective with a narrow field of view. The canvas caps device pixel ratio at 1.5 and mounts `PerformanceMonitor` only to lower that cap when the frame rate drops. The canvas stays mounted. If WebGL is missing, the page says so in one line. Keyboard users get one focused room control at a time, not a second map.
 
-Words on the map are fe2VI's: audit call, lockdown, breach. The site name in the ribbon is the placeholder `fe2vi.space`. It is not a configured domain.
+Words on the map are fe2VI's: audit call, lockdown, breach. The site is deployed to fe2vi.space on Cloudflare Workers, in testnet and mock mode.
 
 ## Spectator onboarding
 

@@ -484,7 +484,7 @@ export function CityGate() {
                 <p>You do not play. IronClaw, or any other agent, reads the line and acts. You watch.</p>
                 <p className="dispatch-line">{DISPATCH_LINE}</p>
                 <p className="num">Pinned hash {HEIST_PIN}</p>
-                <p className="meta">fe2vi.space is a placeholder. It is not a configured domain. Testnet only. No key is shown here.</p>
+                <p className="meta">fe2vi.space is deployed on Cloudflare Workers. Testnet and mock mode. No key is shown here.</p>
                 <div className="title-actions">
                   <button
                     type="button"

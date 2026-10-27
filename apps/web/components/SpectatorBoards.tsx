@@ -16,9 +16,11 @@ import {
 } from "../lib/schedule";
 
 function useNow() {
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    const tick = () => setNow(Math.floor(Date.now() / 1000));
+    tick();
+    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, []);
   return now;
@@ -26,6 +28,14 @@ function useNow() {
 
 export function CountdownChip({ compact = false }: { compact?: boolean }) {
   const now = useNow();
+  if (now == null) {
+    return (
+      <span className="chip">
+        <Clock size={14} aria-hidden="true" />
+        Heist clock
+      </span>
+    );
+  }
   const slot = nextHeist(now);
   const clock = heistCountdown(now);
   const label = clock.live ? `LIVE ${formatCountdown(clock.secs)}` : `Next heist in ${formatCountdown(clock.secs)}`;
@@ -39,7 +49,7 @@ export function CountdownChip({ compact = false }: { compact?: boolean }) {
 
 export function EventBanner({ room, compact = false }: { room?: string; compact?: boolean }) {
   const now = useNow();
-  if (!exampleEventLive(now)) return null;
+  if (now == null || !exampleEventLive(now)) return null;
   if (room && room !== EXAMPLE_EVENT.room && room !== "map") return null;
   if (compact) {
     return (
@@ -58,6 +68,15 @@ export function EventBanner({ room, compact = false }: { room?: string; compact?
 
 export function ScheduleList() {
   const now = useNow();
+  if (now == null) {
+    return (
+      <ul className="schedule-list">
+        <li>Season window is UTC.</li>
+        <li>Daily 18:00 UTC, 60 minutes. Weekly Monday 18:00 UTC, 120 minutes.</li>
+        <li>The next slot follows the UTC clock.</li>
+      </ul>
+    );
+  }
   const slot = nextHeist(now);
   return (
     <ul className="schedule-list">
@@ -73,7 +92,7 @@ export function ScheduleList() {
 export function HeistBoard() {
   const now = useNow();
   const [window, setWindow] = useState<HeistWindow>("today");
-  const rows = heistRows(window, now);
+  const rows = now == null ? [] : heistRows(window, now);
   return (
     <section className="board">
       <div className="tabs">
@@ -85,7 +104,17 @@ export function HeistBoard() {
         ))}
       </div>
       <ol>
-        {rows.length === 0 ? <li>No scores in this window.</li> : rows.map((row) => <li key={row.name}>{row.name} {row.points}</li>)}
+        {now == null ? (
+          <li>Scores follow the UTC clock.</li>
+        ) : rows.length === 0 ? (
+          <li>No scores in this window.</li>
+        ) : (
+          rows.map((row) => (
+            <li key={row.name}>
+              {row.name} {row.points}
+            </li>
+          ))
+        )}
       </ol>
     </section>
   );
@@ -93,6 +122,13 @@ export function HeistBoard() {
 
 export function QuoteBoard() {
   const now = useNow();
+  if (now == null) {
+    return (
+      <section className="board">
+        <p className="muted">Mock tape. No order is sent. No key is used.</p>
+      </section>
+    );
+  }
   const rows = mockQuotes(now);
   return (
     <section className="board">

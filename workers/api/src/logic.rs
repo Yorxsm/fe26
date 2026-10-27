@@ -443,9 +443,45 @@ pub(crate) fn query_param<'a>(path: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
-fn query_now(path: &str) -> u64 {
+/// `Request::path` drops the query string. `now` and `window` live there.
+/// The wasm entry is the production caller. Host builds reach it from tests.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn path_with_query(path: &str, query: Option<&str>) -> String {
+    match query {
+        Some(query) if !query.is_empty() && !path.contains('?') => format!("{path}?{query}"),
+        _ => path.to_string(),
+    }
+}
+
+/// Explicit `?now=` wins. Host tests otherwise stay on [`fe2vi_core::DEMO_EPOCH`].
+/// The deployed worker uses the wall clock.
+pub(crate) fn query_now(path: &str) -> u64 {
     query_param(path, "now")
         .and_then(|value| value.parse().ok())
+        .unwrap_or_else(wall_unix)
+}
+
+fn wall_unix() -> u64 {
+    #[cfg(test)]
+    {
+        fe2vi_core::DEMO_EPOCH
+    }
+    #[cfg(not(test))]
+    {
+        wall_unix_runtime()
+    }
+}
+
+#[cfg(all(not(test), target_arch = "wasm32"))]
+fn wall_unix_runtime() -> u64 {
+    worker::Date::now().as_millis() / 1000
+}
+
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
+fn wall_unix_runtime() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
         .unwrap_or(fe2vi_core::DEMO_EPOCH)
 }
 
@@ -800,5 +836,68 @@ mod tests {
             Outcome::Websocket { .. } => panic!("expected http"),
         }
         assert!(!state.events[0].verified);
+    }
+
+    #[test]
+    fn query_string_reaches_the_router_and_tests_keep_the_demo_clock() {
+        assert_eq!(
+            path_with_query("/v1/heist/leaderboard", Some("window=week")),
+            "/v1/heist/leaderboard?window=week"
+        );
+        assert_eq!(
+            path_with_query("/v1/schedule?now=5", Some("now=9")),
+            "/v1/schedule?now=5"
+        );
+        let mut state = ArenaState::default();
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/schedule",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["now"], fe2vi_core::DEMO_EPOCH);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let pinned = path_with_query("/v1/schedule", Some("now=1790812800"));
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: &pinned,
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["now"], 1_790_812_800u64);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/heist/leaderboard?window=week&now=1790812800",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["window"], "week");
+                assert_eq!(json["now"], 1_790_812_800u64);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
     }
 }

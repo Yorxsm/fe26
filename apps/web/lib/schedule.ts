@@ -84,13 +84,15 @@ export function formatCountdown(secs: number) {
 }
 
 export function localRange(start: number, end: number) {
-  const fmt = new Intl.DateTimeFormat(undefined, {
+  const fmt = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
   });
-  return `${fmt.format(start * 1000)} to ${fmt.format(end * 1000)}`;
+  return `${fmt.format(start * 1000)} to ${fmt.format(end * 1000)} UTC`;
 }
 
 const SCORES = [

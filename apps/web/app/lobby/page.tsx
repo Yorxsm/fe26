@@ -1,5 +1,5 @@
 import { DoorOpen } from "lucide-react";
-import { CountdownChip, EventBanner, HeistBoard, QuoteBoard, ScheduleList } from "@/components/SpectatorBoards";
+import { LobbyBoards } from "@/components/LobbyBoards";
 import { ROLE_NAMES } from "@/lib/skin";
 
 const DOORS = [
@@ -14,11 +14,7 @@ export default function LobbyPage() {
     <main className="board">
       <h1>Lobby</h1>
       <p className="lede">The hall you arrive in. Nothing here is a move. Boards, doors, and a skin alcove.</p>
-      <CountdownChip />
-      <EventBanner room="map" />
-      <ScheduleList />
-      <HeistBoard />
-      <QuoteBoard />
+      <LobbyBoards />
       <section className="card">
         <h2>Doors</h2>
         <div className="tabs">

@@ -3,7 +3,7 @@
 
 use fe2vi_core::{
     demo_tape, districts, follow as follow_edge, leaderboard as rank, unfollow as unfollow_edge,
-    Venue, Window, DEMO_EPOCH, WRAP_NEAR,
+    Venue, Window, WRAP_NEAR,
 };
 use fe2vi_intents::{
     issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
@@ -11,7 +11,7 @@ use fe2vi_intents::{
 };
 use serde::Deserialize;
 
-use crate::logic::{http, json, query_param, ArenaState, Incoming, Outcome};
+use crate::logic::{http, json, query_now, ArenaState, Incoming, Outcome};
 
 pub fn city() -> Outcome {
     let districts: Vec<serde_json::Value> = districts()
@@ -269,9 +269,7 @@ pub fn issue_grant(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             )
         }
     };
-    let now = query_param(incoming.path, "now")
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(DEMO_EPOCH);
+    let now = query_now(incoming.path);
     let issued = issue_session(
         &mut state.grants,
         &body.game_id,
@@ -352,9 +350,7 @@ pub fn intents_act(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             )
         }
     };
-    let now = query_param(incoming.path, "now")
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(DEMO_EPOCH);
+    let now = query_now(incoming.path);
     match mock_act(&mut state.grants, &body.grant_id, amount, &state.caps, now) {
         Ok(value) => json(200, &value, true, None),
         Err(err) => http(403, "application/json", error_body(err.code()), false, None),

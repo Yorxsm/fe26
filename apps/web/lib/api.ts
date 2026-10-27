@@ -49,3 +49,153 @@ export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; 
 export function fixtureFeed(id: string): FeedEvent[] {
   return fixtureEvents.filter((event) => event.game_id === id);
 }
+
+export type LobbyHeistRow = { agent: string; name: string; points: number };
+
+export type LobbyRelay = {
+  now: number;
+  live: boolean;
+  seasonStart: number;
+  seasonEnd: number;
+  slot: { kind: string; start: number; end: number };
+  heist: Record<"today" | "week" | "season", LobbyHeistRow[]>;
+  quotes: { symbol: string; kind: string; markMicros: number; fundingBps: number; pnlMicros: number }[];
+  challenges: { id: string; category: string; title: string; points: number }[];
+  events: {
+    id: string;
+    partner: string;
+    exampleOnly: boolean;
+    room: string;
+    prize: string;
+    live: boolean;
+  }[];
+};
+
+export async function loadLobby(): Promise<
+  { ok: true; relay: LobbyRelay } | { ok: false; reason: "unset" | "unreachable" }
+> {
+  const base = apiBase();
+  if (!base) return { ok: false, reason: "unset" };
+  try {
+    const [schedule, today, week, season, venues, challenges, events] = await Promise.all([
+      fetch(`${base}/v1/schedule`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/heist/leaderboard?window=today`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/heist/leaderboard?window=week`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/heist/leaderboard?window=season`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/venues`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/challenges`, { cache: "no-store" }).then(readJson),
+      fetch(`${base}/v1/events`, { cache: "no-store" }).then(readJson),
+    ]);
+    const relay = parseLobby(schedule, today, week, season, venues, challenges, events);
+    return relay ? { ok: true, relay } : { ok: false, reason: "unreachable" };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  if (!response.ok) throw new Error(String(response.status));
+  return response.json() as Promise<unknown>;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function num(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function heistRows(value: unknown): LobbyHeistRow[] | null {
+  const body = record(value);
+  if (!body || !Array.isArray(body.rows)) return null;
+  const rows: LobbyHeistRow[] = [];
+  for (const row of body.rows) {
+    const item = record(row);
+    const agent = item ? text(item.agent) : null;
+    const name = item ? text(item.name) : null;
+    const points = item ? num(item.points) : null;
+    if (!agent || !name || points == null) return null;
+    rows.push({ agent, name, points });
+  }
+  return rows;
+}
+
+function parseLobby(
+  schedule: unknown,
+  today: unknown,
+  week: unknown,
+  season: unknown,
+  venues: unknown,
+  challenges: unknown,
+  events: unknown,
+): LobbyRelay | null {
+  const clock = record(schedule);
+  const next = clock ? record(clock.next) : null;
+  const now = clock ? num(clock.now) : null;
+  const seasonStart = clock ? num(clock.season_start) : null;
+  const seasonEnd = clock ? num(clock.season_end) : null;
+  const start = next ? num(next.start_unix) : null;
+  const end = next ? num(next.end_unix) : null;
+  const kind = next ? text(next.kind) : null;
+  if (now == null || seasonStart == null || seasonEnd == null || start == null || end == null || !kind) return null;
+  const open = clock?.live;
+  if (typeof open !== "boolean") return null;
+  const heistToday = heistRows(today);
+  const heistWeek = heistRows(week);
+  const heistSeason = heistRows(season);
+  if (!heistToday || !heistWeek || !heistSeason) return null;
+  const tape = record(venues);
+  if (!tape || !Array.isArray(tape.quotes)) return null;
+  const quotes = [];
+  for (const row of tape.quotes) {
+    const item = record(row);
+    const symbol = item ? text(item.symbol) : null;
+    const quoteKind = item ? text(item.kind) : null;
+    const markMicros = item ? num(item.mark_micros) : null;
+    const fundingBps = item ? num(item.funding_bps) : null;
+    const pnlMicros = item ? num(item.pnl_micros) : null;
+    if (!symbol || !quoteKind || markMicros == null || fundingBps == null || pnlMicros == null) return null;
+    quotes.push({ symbol, kind: quoteKind, markMicros, fundingBps, pnlMicros });
+  }
+  const board = record(challenges);
+  if (!board || !Array.isArray(board.challenges)) return null;
+  const parsedChallenges = [];
+  for (const row of board.challenges) {
+    const item = record(row);
+    const id = item ? text(item.id) : null;
+    const category = item ? text(item.category) : null;
+    const title = item ? text(item.title) : null;
+    const points = item ? num(item.points) : null;
+    if (!id || !category || !title || points == null) return null;
+    parsedChallenges.push({ id, category, title, points });
+  }
+  const hosted = record(events);
+  if (!hosted || !Array.isArray(hosted.events) || !Array.isArray(hosted.live)) return null;
+  const live = new Set(hosted.live.filter((id): id is string => typeof id === "string"));
+  const parsedEvents = [];
+  for (const row of hosted.events) {
+    const item = record(row);
+    const id = item ? text(item.id) : null;
+    const partner = item ? text(item.partner_label) : null;
+    const room = item ? text(item.room_id) : null;
+    const prize = item ? text(item.prize_text) : null;
+    if (!id || !partner || !room || !prize || typeof item?.example_only !== "boolean") return null;
+    parsedEvents.push({ id, partner, exampleOnly: item.example_only, room, prize, live: live.has(id) });
+  }
+  return {
+    now,
+    live: open,
+    seasonStart,
+    seasonEnd,
+    slot: { kind, start, end },
+    heist: { today: heistToday, week: heistWeek, season: heistSeason },
+    quotes,
+    challenges: parsedChallenges,
+    events: parsedEvents,
+  };
+}

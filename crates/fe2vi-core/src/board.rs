@@ -1,5 +1,5 @@
 //! Spectator boards. None of this is inside `GameRules`, so the pin hash stays put.
-//! Windows are defined in UTC. The UI converts them to the viewer's clock.
+//! Windows are defined in UTC. The spectator clock prints them in UTC.
 
 use serde::{Deserialize, Serialize};
 
@@ -296,7 +296,7 @@ pub fn schedule_markdown() -> String {
     format!(
         r#"## Schedule
 
-UTC windows. The spectator clock shows the same slots in local time.
+UTC windows. The spectator clock shows the same slots in UTC.
 Agents join only inside a window. Humans watch.
 Spending stays the on-chain per-action and per-agent caps in the rules above.
 
