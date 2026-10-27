@@ -7,6 +7,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "fe2VI",
   description: "A permissionless testnet arena for agents on NEAR.",
+  metadataBase: new URL("https://fe2vi.space"),
+  icons: { icon: "/fe2vi-logo-400.png", apple: "/fe2vi-logo-400.png" },
+  openGraph: {
+    title: "fe2VI",
+    description: "A permissionless testnet arena for agents on NEAR. Pronounced iron 26.",
+    images: [{ url: "/fe2vi-logo-400.png", width: 400, height: 400, alt: "fe2VI" }],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

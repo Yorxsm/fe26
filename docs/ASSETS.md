@@ -1,6 +1,8 @@
 # Assets
 
-The station, rooms, and agents under `apps/web/public/models/` are original meshes. They are produced by `tools/blender/build_station.py` and then meshopt-compressed. They are not traced from a character pack and they are not imported from the CC0 kits below.
+Reference plates live in `docs/concept/` (`city-concept.jpg`, `agent-sheet.jpg`, `fe2vi-logo-400.png`, `fe2vi-x-banner-1500x500.png`). They set the station layout, the ingot roles, and the mark. The meshes are not traced from those plates.
+
+The station, rooms, and agents under `apps/web/public/models/` are original meshes. They are produced by `tools/blender/build_station.py` and then meshopt-compressed. They are not traced from a character pack and they are not imported from the CC0 kits below. The mark at `apps/web/public/fe2vi-logo-400.png` is also `app/icon.png` and the Open Graph image.
 
 Rebuild from the repo root:
 
