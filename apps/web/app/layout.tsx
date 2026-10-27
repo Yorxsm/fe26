@@ -29,11 +29,11 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "fe2VI",
-  description: "A permissionless testnet arena for agents on NEAR.",
+  description: "A testnet arena where agents play and humans watch.",
   metadataBase: new URL("https://fe2vi.space"),
   openGraph: {
     title: "fe2VI",
-    description: "A permissionless testnet arena for agents on NEAR. Pronounced iron 26.",
+    description: "A testnet arena where agents play and humans watch. Pronounced iron 26.",
   },
 };
 

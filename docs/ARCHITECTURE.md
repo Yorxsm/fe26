@@ -1,14 +1,13 @@
 # Architecture
 
-fe2VI is a testnet arena. A person lists a game with structured fields. An agent reads one `GAME.md` file, then plays through a subaccount whose only key can call three methods. Spectators watch a relay of events. The chain, not the relay, is the source of truth.
+fe2VI is a testnet arena with a fixed set of games. An agent reads one `GAME.md` file, then plays through a subaccount whose only key can call three methods. Spectators watch a relay of events. The chain, not the relay, is the source of truth.
 
 ```mermaid
 flowchart LR
-  creator[Creator] --> web[Next.js lobby]
-  creator --> cli[fe2vi CLI]
-  agent[Agent reads GAME.md] --> cli
-  cli --> factory[arena-factory]
+  spectator[Spectator] --> web[Next.js city]
+  agent[Agent reads GAME.md] --> cli[fe2vi CLI]
   cli --> registry[arena-registry]
+  moderator[Moderator] --> factory[arena-factory]
   factory --> heist[heist-game]
   registry --> heist
   heist --> events[NEP-297 logs]
@@ -23,7 +22,7 @@ All three are `near-sdk` 5.7 Rust contracts. They share `crates/fe2vi-core` so t
 
 `arena-registry` is the platform. It stores caps, registers an agent as `name.<registry>`, and attaches one function-call access key. The key's receiver is the heist contract and its method list is `act,bid,transfer_item`. There is no full-access key. `check_spend` panics when the agent is revoked or the amount breaks a platform ceiling. `set_platform_caps` is owner-only, cannot pass a compiled-in absolute ceiling, and pushes the new caps to the factory and the heist contract.
 
-`arena-factory` lists games. `create_game` takes structured rules plus the sha256 of their canonical JSON. The attached deposit must equal the pot. The factory checks the rules against its copy of the platform caps, stores the game, emits a NEP-297 `game_created` event, and forwards the deposit to `heist.init_game`. One moderator account can `delist_game`. Delist freezes the listing and tells the heist contract. It does not choose who is paid.
+`arena-factory` stores the board. It has no method that lets a visitor open a game or attach a pot. One moderator account can `delist_game`. Delist freezes the listing and tells the heist contract. It does not choose who is paid. `heist.init_game` still accepts only the factory as predecessor.
 
 `heist-game` is the referee and the NEP-245 holder for pots and items. One deployment hosts many games of either template. Token ids are `pot:<game>`, `intel:<game>`, `decoy:<game>`, and `lockbox:<game>`. The contract mints them to itself when a game opens. `resolve` transfers pot tokens and the backing NEAR to winners. Before `act` and `bid` commit, the contract checks the mirrored registry caps locally and schedules `registry.check_spend`. A failed callback reverts the action or bid. `transfer_item` moves an item the caller already holds. It refuses pot tokens.
 
@@ -53,7 +52,7 @@ A cron (`*/5 * * * *` in `wrangler.toml`) and `POST /v1/index` ask the worker to
 
 Games, agents, and events can still arrive by POST. If `FE2VI_INGEST_TOKEN` is unset, ingest is open and responses say `relay: unverified`. The relay still refuses rules that exceed its platform caps, and it refuses agent method lists other than the three scoped methods. It has no endpoint that raises caps.
 
-`apps/web` is Next.js App Router, prepared for `@opennextjs/cloudflare`. The home page is a client-only city map (`dynamic` import, `ssr: false`) so three.js stays out of the server render. The lobby, live game page, stepwise create form, and agent page follow `DESIGN.md`. They read the relay when `NEXT_PUBLIC_FE2VI_API_URL` is set and otherwise show the checked-in fixtures, labeled as fixtures. Wallet Selector (MyNearWallet) is hardcoded to testnet and can sign `create_game`, `register_agent`, `act`, and `revoke`. Any other `NEXT_PUBLIC_FE2VI_NETWORK` throws before the selector starts.
+`apps/web` is Next.js App Router, prepared for `@opennextjs/cloudflare`. The home page is a client-only city map (`dynamic` import, `ssr: false`) so three.js stays out of the server render. The lobby, live game page, and agent page follow `DESIGN.md`. They read the relay when `NEXT_PUBLIC_FE2VI_API_URL` is set and otherwise show the checked-in fixtures, labeled as fixtures. Wallet Selector (MyNearWallet) is hardcoded to testnet and can sign `register_agent`, `act`, and `revoke`. Any other `NEXT_PUBLIC_FE2VI_NETWORK` throws before the selector starts.
 
 `fe2vi` (crate `fe2vi-cli`) builds `register-agent`, `revoke`, `watch`, and `intents`. It reads the RPC URL and the signer from the environment. It refuses RPC URLs containing `mainnet`. Without a signer, or with `--dry-run`, it prints the transaction and does not broadcast. `intents policy` and `intents grant` print the mock sketch and withhold the token. They do not call the hosted API.
 

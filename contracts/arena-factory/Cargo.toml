@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Creates Heist Night games and lets one moderator delist them."
+description = "Holds the curated arena board and lets one moderator delist a game."
 
 [lib]
 crate-type = ["cdylib", "rlib"]

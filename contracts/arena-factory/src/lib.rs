@@ -1,12 +1,11 @@
-//! Game factory. Creators submit structured rules and a deposit equal to the
-//! pot. The factory checks those rules against platform caps, stores the game,
-//! and forwards the pot to the heist referee. One moderator account can delist
-//! a game. Delist does not choose a payout recipient and cannot seize the pot.
+//! Arena board. The shipped games are fixed. This contract does not accept a
+//! visitor listing or a creator deposit. One moderator account can delist a
+//! game. Delist does not choose a payout recipient and cannot seize the pot.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use fe2vi_core::{
-    absolute_ceiling, default_platform_caps, event_json, pin_hash, validate_platform_caps,
-    validate_rules, GameRules, PlatformCaps,
+    absolute_ceiling, default_platform_caps, event_json, validate_platform_caps, GameRules,
+    PlatformCaps,
 };
 use near_sdk::serde::Serialize;
 use near_sdk::store::IterableMap;
@@ -64,68 +63,7 @@ impl ArenaFactory {
         }
     }
 
-    /// `rules` are structured fields. `game_md_hash` must be the sha256 of the
-    /// canonical rules JSON. The attached deposit must equal `rules.pot_yocto`
-    /// and is forwarded to the heist contract.
-    #[payable]
-    pub fn create_game(&mut self, rules: GameRules, game_md_hash: String) -> String {
-        validate_rules(&rules, &self.caps).unwrap_or_else(|err| env::panic_str(&err.to_string()));
-        require!(
-            game_md_hash.len() == 64
-                && game_md_hash
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
-            "game_md_hash must be 64 lowercase hex characters"
-        );
-        require!(
-            game_md_hash == pin_hash(&rules),
-            "game_md_hash does not match the rules"
-        );
-        let deposit = env::attached_deposit().as_yoctonear();
-        require!(
-            deposit == rules.pot_yocto,
-            "creator deposit must equal the pot"
-        );
-
-        let id = format!("g{}", self.next_id);
-        self.next_id += 1;
-        let creator = env::predecessor_account_id();
-        let game = StoredGame {
-            creator: creator.clone(),
-            rules: rules.clone(),
-            game_md_hash: game_md_hash.clone(),
-            delisted: false,
-            created_at_ns: env::block_timestamp(),
-        };
-        self.games.insert(id.clone(), game);
-
-        let args = near_sdk::serde_json::json!({
-            "game_id": id,
-            "rules": rules,
-            "creator": creator,
-            "game_md_hash": game_md_hash,
-        });
-        Promise::new(self.heist.clone()).function_call(
-            "init_game".to_string(),
-            near_sdk::serde_json::to_vec(&args).unwrap_or_else(|_| env::panic_str("init args")),
-            NearToken::from_yoctonear(deposit),
-            Gas::from_tgas(80),
-        );
-
-        env::log_str(&event_json(
-            "game_created",
-            near_sdk::serde_json::json!({
-                "id": id,
-                "creator": creator,
-                "template_id": rules.template_id,
-                "game_md_hash": game_md_hash,
-                "pot_yocto": rules.pot_yocto.to_string(),
-            }),
-        ));
-        id
-    }
-
-    /// Single moderator. Creators, players, and the game contract cannot delist.
+    /// Single moderator. Players and the game contract cannot delist.
     /// The heist contract is told to freeze play; payout still follows the rules.
     pub fn delist_game(&mut self, game_id: String) {
         require!(
@@ -255,16 +193,27 @@ mod tests {
         }
     }
 
-    fn create(factory: &mut ArenaFactory) -> String {
+    fn seed(factory: &mut ArenaFactory) -> String {
         let rules = heist_night_example();
-        use_pred("creator.fe2vi.testnet", rules.pot_yocto);
-        factory.create_game(rules.clone(), pin_hash(&rules))
+        let id = format!("g{}", factory.next_id);
+        factory.next_id += 1;
+        factory.games.insert(
+            id.clone(),
+            StoredGame {
+                creator: "heist.fe2vi.testnet".parse().unwrap(),
+                rules: rules.clone(),
+                game_md_hash: pin_hash(&rules),
+                delisted: false,
+                created_at_ns: 0,
+            },
+        );
+        id
     }
 
     #[test]
     fn only_the_moderator_can_delist_a_game() {
         let mut factory = setup();
-        let id = create(&mut factory);
+        let id = seed(&mut factory);
 
         use_pred("creator.fe2vi.testnet", 0);
         let err = catch_unwind(AssertUnwindSafe(|| {
@@ -314,46 +263,6 @@ mod tests {
         .unwrap_err();
         assert!(panic_text(err).contains("game cannot raise platform caps"));
         assert_eq!(factory.get_platform_caps(), original);
-
-        let mut rules = heist_night_example();
-        rules.per_agent_cap_yocto = original.max_per_agent_yocto + 1;
-        use_pred("creator.fe2vi.testnet", rules.pot_yocto);
-        let err = catch_unwind(AssertUnwindSafe(|| {
-            factory.create_game(rules.clone(), pin_hash(&rules));
-        }))
-        .unwrap_err();
-        assert!(panic_text(err).contains("per-agent cap"));
         assert!(factory.list_games().is_empty());
-    }
-
-    #[test]
-    fn create_game_pins_hash_and_forwards_pot() {
-        let mut factory = setup();
-        let id = create(&mut factory);
-        let view = factory.get_game(id).unwrap();
-        assert_eq!(view.game_md_hash, pin_hash(&view.rules));
-        let creator: AccountId = "creator.fe2vi.testnet".parse().unwrap();
-        assert_eq!(view.creator, creator);
-        assert!(get_logs().iter().any(|line| line.contains("game_created")));
-        let mut forwarded = false;
-        for receipt in get_created_receipts() {
-            for action in receipt.actions {
-                if let near_sdk::mock::MockAction::FunctionCallWeight {
-                    method_name,
-                    attached_deposit,
-                    ..
-                } = action
-                {
-                    if method_name == b"init_game" {
-                        assert_eq!(
-                            attached_deposit,
-                            NearToken::from_yoctonear(view.rules.pot_yocto)
-                        );
-                        forwarded = true;
-                    }
-                }
-            }
-        }
-        assert!(forwarded);
     }
 }

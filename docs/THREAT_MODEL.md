@@ -4,13 +4,12 @@ fe2VI assumes creators, agents, and spectators are hostile to each other. It ass
 
 ## Malicious game creators
 
-A creator can list a game, fund a pot, and choose numbers inside the platform caps. They cannot upload a contract. `create_game` accepts `template_id` of `heist-night` or `trading-cup`, and `init_game` only accepts calls from the factory. A creator cannot add a method, change payout code, or point the pot at an arbitrary account. Trading Cup does not read a price. The winner of a round is `round % 2`.
+A visitor cannot list a game. The factory has no method that accepts rules or a pot deposit. They cannot upload a contract. `init_game` only accepts calls from the factory. A caller cannot add a method, change payout code, or point the pot at an arbitrary account. Trading Cup does not read a price. The winner of a round is `round % 2`.
 
 They can still:
 
-- Set rules that are legal but annoying, right up to the platform caps.
 - Try to social-engineer agents with whatever they publish outside the arena. The arena does not give them a prose field.
-- Grief the pot by playing, which the rules allow. The moderator can delist. Delist freezes play and settles the pot to joined players, or back to the creator if nobody joined. The moderator does not pass a recipient.
+- Grief a pot by playing, which the rules allow. The moderator can delist. Delist freezes play and settles the pot to joined players, or back to the recorded creator if nobody joined. The moderator does not pass a recipient.
 
 ## Prompt injection via GAME.md
 
@@ -34,7 +33,7 @@ The parent registrant, or the registry owner, can revoke. Revocation is a separa
 
 Platform caps live in the registry. `set_platform_caps` requires the owner and rejects values above a compiled-in ceiling. Factory and heist copies move only through `apply_platform_caps`, which requires the registry as predecessor. A game account calling that method panics with `game cannot raise platform caps`.
 
-`create_game` and `init_game` both call `validate_rules`. A per-agent cap above the platform cap never becomes a game.
+`init_game` calls `validate_rules`. The factory has no method that opens a game. A per-agent cap above the platform cap never becomes a game.
 
 `act` and `bid` call `authorize_spend`, which rejects the spend if the stored game caps are above the registry caps the heist last received, if the amount exceeds the per-action cap, or if the running total exceeds the per-agent cap. They then call `registry.check_spend`. If that call fails, `on_spend_checked` reverts the optimistic commit.
 
@@ -46,7 +45,7 @@ Ways this can still go wrong:
 
 ## Custody of pots
 
-The creator's deposit equals the pot and is forwarded to the heist contract in the same `create_game` call. The contract mints NEP-245 `pot:<game>` tokens 1:1 with yoctoNEAR and holds both the tokens and the NEAR. `mt_transfer` only moves tokens the predecessor already holds, so a user cannot pull the escrow. `transfer_item` refuses pot token ids. There is no withdraw method and no moderator argument for a recipient.
+The factory does not take a creator deposit. `init_game` still requires the factory as predecessor and a deposit equal to the pot. When that method runs, the contract mints NEP-245 `pot:<game>` tokens 1:1 with yoctoNEAR and holds both the tokens and the NEAR. `mt_transfer` only moves tokens the predecessor already holds, so a user cannot pull the escrow. `transfer_item` refuses pot token ids. There is no withdraw method and no moderator argument for a recipient.
 
 `resolve` is permissionless after the duration, or immediately when the game is delisted. It sets `resolved` before it schedules transfers. Payout is by score, or an equal split of joined players when delisted, or a refund to the creator when there is nothing to split. Item tokens go to the high bidder. The contract auto-registers a payout account that has no NEP-145 storage record, and it pays that storage out of the contract balance rather than the pot tokens. A user calling `mt_transfer` to an unregistered account still panics.
 
