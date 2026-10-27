@@ -1485,3 +1485,13 @@ button.pronounce:focus-visible {
 .vantage-grid button svg { grid-column: 1; grid-row: 1 / span 2; margin-top: 4px; }
 .vantage-grid button strong,
 .vantage-grid button span { grid-column: 2; }
+
+@media (max-width: 480px) {
+  .title-screen { padding-top: 96px; }
+  .game-root:has(.cutscene) .city-stage,
+  .game-root:has(.vantage) .city-stage,
+  .game-root:has(.dispatch) .city-stage { display: block; }
+  .game-root:has(.cutscene) .mobile-gate,
+  .game-root:has(.vantage) .mobile-gate,
+  .game-root:has(.dispatch) .mobile-gate { display: none; }
+}
