@@ -112,6 +112,7 @@ pub enum Outcome {
         body: String,
         mutated: bool,
         fanout: Option<Fanout>,
+        location: Option<String>,
     },
     Websocket {
         game_id: String,
@@ -122,6 +123,16 @@ pub enum Outcome {
 pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
     if incoming.method == "OPTIONS" {
         return http(204, "text/plain", String::new(), false, None);
+    }
+    if let Some(location) = legacy_game_redirect(incoming.path) {
+        return http_at(
+            308,
+            "text/plain",
+            String::new(),
+            false,
+            None,
+            Some(location),
+        );
     }
     let parts = split_path(incoming.path);
     match (incoming.method, parts.as_slice()) {
@@ -482,13 +493,49 @@ pub(crate) fn http(
     mutated: bool,
     fanout: Option<Fanout>,
 ) -> Outcome {
+    http_at(status, content_type, body, mutated, fanout, None)
+}
+
+fn http_at(
+    status: u16,
+    content_type: &'static str,
+    body: String,
+    mutated: bool,
+    fanout: Option<Fanout>,
+    location: Option<String>,
+) -> Outcome {
     Outcome::Http {
         status,
         content_type,
         body,
         mutated,
         fanout,
+        location,
     }
+}
+
+/// Old public ids keep working. The short id is the game route.
+fn legacy_game_redirect(path: &str) -> Option<String> {
+    let (path, query) = match path.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (path, None),
+    };
+    let mut parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    if parts.len() < 3 || parts[0] != "v1" || parts[1] != "games" {
+        return None;
+    }
+    let next = match parts[2] {
+        "heist-night-template" => "heist-night",
+        "trading-cup-template" => "trading-cup",
+        _ => return None,
+    };
+    parts[2] = next;
+    let mut out = format!("/{}", parts.join("/"));
+    if let Some(query) = query {
+        out.push('?');
+        out.push_str(query);
+    }
+    Some(out)
 }
 
 #[derive(Deserialize)]
@@ -560,11 +607,47 @@ mod tests {
     }
 
     #[test]
+    fn old_game_routes_redirect_to_the_short_id() {
+        let mut state = ArenaState::default();
+        let incoming = Incoming {
+            method: "GET",
+            path: "/v1/games/heist-night-template/GAME.md",
+            body: "",
+            authorization: None,
+            ingest_token: None,
+        };
+        match dispatch(&mut state, &incoming) {
+            Outcome::Http {
+                status, location, ..
+            } => {
+                assert_eq!(status, 308);
+                assert_eq!(location.as_deref(), Some("/v1/games/heist-night/GAME.md"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        match dispatch(
+            &mut state,
+            &Incoming {
+                path: "/v1/games/trading-cup-template?watch=1",
+                ..incoming
+            },
+        ) {
+            Outcome::Http {
+                status, location, ..
+            } => {
+                assert_eq!(status, 308);
+                assert_eq!(location.as_deref(), Some("/v1/games/trading-cup?watch=1"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+    }
+
+    #[test]
     fn serves_game_md_with_the_pinned_hash_and_no_command_channel() {
         let mut state = ArenaState::default();
         let rules = heist_night_example();
         state.games.push(StoredGame {
-            id: "heist-night-template".into(),
+            id: "heist-night".into(),
             creator: "heist.fe2vi.testnet".into(),
             rules,
             delisted: false,
@@ -573,7 +656,7 @@ mod tests {
             &mut state,
             &Incoming {
                 method: "GET",
-                path: "/v1/games/heist-night-template/GAME.md",
+                path: "/v1/games/heist-night/GAME.md",
                 body: "",
                 authorization: None,
                 ingest_token: None,

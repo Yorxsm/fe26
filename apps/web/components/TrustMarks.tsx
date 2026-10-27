@@ -5,7 +5,7 @@ export function TrustMarks({ trust, templateId }: { trust: Trust; templateId?: s
     ? templateId === "trading-cup"
       ? "Trading Cup"
       : "Heist Night"
-    : "Unknown template";
+    : "Unknown game";
   return (
     <div className="stamps" aria-label="Trust labels">
       <span className={trust.hash_pinned ? "stamp" : "stamp warn"}>{trust.hash_pinned ? "Hash pinned" : "Hash missing"}</span>

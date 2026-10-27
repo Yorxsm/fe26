@@ -52,7 +52,7 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
               <span className="num">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</span>
             </div>
             <p className="meta">
-              {game.rules.template_id} · {game.rules.max_players} seats · {game.rules.round_count} rounds · {game.creator}
+              {game.rules.template_id === "trading-cup" ? "Trading Cup" : "Heist Night"} · {game.rules.max_players} seats · {game.rules.round_count} rounds
             </p>
             <p className="num">pin {game.game_md_hash}</p>
             <TrustMarks trust={game.trust} templateId={game.rules.template_id} />

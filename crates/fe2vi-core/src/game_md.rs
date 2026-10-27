@@ -160,7 +160,7 @@ mod tests {
         GamePointer {
             network: "testnet".to_string(),
             factory: "factory.fe2vi.testnet".to_string(),
-            game_id: "heist-night-template".to_string(),
+            game_id: "heist-night".to_string(),
         }
     }
 
@@ -202,7 +202,7 @@ mod tests {
         let pointer = GamePointer {
             network: "testnet".into(),
             factory: "factory.fe2vi.testnet".into(),
-            game_id: "trading-cup-template".into(),
+            game_id: "trading-cup".into(),
         };
         let rendered = render_game_md(&rules, &pointer).unwrap();
         let path = concat!(

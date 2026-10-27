@@ -89,6 +89,7 @@ mod edge {
                     body,
                     mutated,
                     fanout,
+                    location,
                 } => {
                     if mutated {
                         storage.put("arena", &arena).await?;
@@ -99,7 +100,10 @@ mod edge {
                             let _ = socket.send_with_str(&fanout.message);
                         }
                     }
-                    let response = Response::ok(body)?.with_status(status);
+                    let mut response = Response::ok(body)?.with_status(status);
+                    if let Some(location) = location {
+                        response = response.with_header("Location", &location)?;
+                    }
                     with_cors(response, content_type)
                 }
                 Outcome::Websocket { game_id, history } => {

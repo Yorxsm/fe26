@@ -21,7 +21,7 @@ This pointer identifies the on-chain record. It is an identifier, not a document
 
 - network: testnet
 - factory: factory.fe2vi.testnet
-- game_id: heist-night-template
+- game_id: heist-night
 - template_id: heist-night
 
 ## Pinned hash

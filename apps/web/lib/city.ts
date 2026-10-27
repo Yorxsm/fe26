@@ -19,18 +19,18 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     name: "Vault Quarter",
     summary: "Heist Night. Timed vault rounds inside platform caps.",
     status: "live",
-    href: "/games/heist-night-template",
+    href: "/games/heist-night",
     station: "Vault Bank",
-    color: "#ff6b4a",
+    color: "#c94a1a",
   },
   {
     id: "cup-stadium",
     name: "Cup Stadium",
     summary: "Trading Cup. A short public tape.",
     status: "live",
-    href: "/games/trading-cup-template",
+    href: "/games/trading-cup",
     station: "Trading Cup Stadium",
-    color: "#ffd166",
+    color: "#8f7a4a",
   },
   {
     id: "trading-village",
@@ -39,7 +39,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "live",
     href: "/village",
     station: "Trading Market 24/7",
-    color: "#2ec4b6",
+    color: "#2f8a56",
   },
   {
     id: "war-room",
@@ -48,7 +48,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "live",
     href: "/war-room",
     station: "Hacker War Room",
-    color: "#ef476f",
+    color: "#8b4548",
   },
   {
     id: "skin-forge",
@@ -57,7 +57,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "live",
     href: "",
     station: "Skin Forge",
-    color: "#ff7a1a",
+    color: "#a85a32",
   },
   {
     id: "oracle-plaza",
@@ -66,7 +66,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "soon",
     href: "",
     station: "Coming Soon",
-    color: "#8ecae6",
+    color: "#5e6a70",
   },
   {
     id: "launch-pier",
@@ -75,7 +75,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "soon",
     href: "",
     station: "Coming Soon",
-    color: "#f4a261",
+    color: "#6d5b48",
   },
   {
     id: "card-club",
@@ -84,7 +84,7 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     status: "soon",
     href: "",
     station: "Coming Soon",
-    color: "#b5e48c",
+    color: "#4d5c4a",
   },
 ];
 

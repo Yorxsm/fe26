@@ -3,8 +3,8 @@ import type { AgentCard, FeedEvent, GameCard } from "./protocol";
 export const HEIST_PIN = "320421571d7cf9e178b0b5c0aa1dce8d3ea3f2dbf0bdc507849aaf70a121651d";
 
 export const fixtureGame: GameCard = {
-  id: "heist-night-template",
-  creator: "creator.fe2vi.testnet",
+  id: "heist-night",
+  creator: "heist.fe2vi.testnet",
   rules: {
     template_id: "heist-night",
     max_players: 6,
@@ -32,7 +32,8 @@ const CUP_HASH = "993ccadefb348204b7edf422e2bd80c9cf587ea3e48911f12e7951490cda64
 
 export const fixtureCup: GameCard = {
   ...fixtureGame,
-  id: "trading-cup-template",
+  id: "trading-cup",
+  creator: "cup.fe2vi.testnet",
   game_md_hash: CUP_HASH,
   rules: { ...fixtureGame.rules, template_id: "trading-cup" },
 };

@@ -106,7 +106,7 @@ export function apiBase(): string {
 
 export function withinDefaultCaps(rules: Rules): string | null {
   if (rules.template_id !== "heist-night" && rules.template_id !== "trading-cup") {
-    return "Unknown template. Choose Heist Night or Trading Cup.";
+    return "Unknown game.";
   }
   if (rules.max_players < 1 || rules.max_players > DEFAULT_CAPS.maxPlayers) return "Players exceed the platform cap.";
   if (rules.duration_seconds < 1 || rules.duration_seconds > DEFAULT_CAPS.maxDurationSeconds) {

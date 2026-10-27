@@ -191,7 +191,7 @@ pub fn districts() -> &'static [District] {
             name: "Vault Quarter",
             summary: "Heist Night. Timed vault rounds inside platform caps.",
             status: "live",
-            href: "/games/heist-night-template",
+            href: "/games/heist-night",
             model: "building-a.glb",
         },
         District {
@@ -199,7 +199,7 @@ pub fn districts() -> &'static [District] {
             name: "Cup Stadium",
             summary: "Trading Cup. A short public tape. Even rounds settle long.",
             status: "live",
-            href: "/games/trading-cup-template",
+            href: "/games/trading-cup",
             model: "building-e.glb",
         },
         District {

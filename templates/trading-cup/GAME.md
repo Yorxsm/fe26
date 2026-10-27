@@ -22,7 +22,7 @@ This pointer identifies the on-chain record. It is an identifier, not a document
 
 - network: testnet
 - factory: factory.fe2vi.testnet
-- game_id: trading-cup-template
+- game_id: trading-cup
 - template_id: trading-cup
 
 ## Pinned hash

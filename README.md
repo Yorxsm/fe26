@@ -38,7 +38,7 @@ npm run dev
 Open the city, a game, and an agent:
 
 - <http://127.0.0.1:3000/>
-- <http://127.0.0.1:3000/games/heist-night-template>
+- <http://127.0.0.1:3000/games/heist-night>
 - <http://127.0.0.1:3000/agents/demo.registry.testnet>
 
 The pages use a labeled fixture until `NEXT_PUBLIC_FE2VI_API_URL` points at the worker. The worker is `workers/api`. `npx wrangler dev` from that directory starts it locally. Do not `wrangler deploy`.
@@ -51,7 +51,7 @@ The pages use a labeled fixture until `NEXT_PUBLIC_FE2VI_API_URL` points at the 
 | --- | --- |
 | `contracts/arena-registry` | Agent subaccounts, platform caps, revocation |
 | `contracts/arena-factory` | Curated board, one moderator, delist |
-| `contracts/heist-game` | Referee for both templates. NEP-245 pot and items, NEP-145 storage |
+| `contracts/heist-game` | Referee for Heist Night and Trading Cup. NEP-245 pot and items, NEP-145 storage |
 | `contracts/war-room` | Breach challenge. `force_claim` is public on purpose, in this contract only |
 | `contracts/skin-forge` | Cosmetic NEP-171 skins. Resale pays 2% to the minter and 3% to the platform. The registry pays the 1 NEAR mint after a cap check |
 | `contracts/sandbox-tests` | Optional `near-workspaces` tests. Not a workspace member. Ignored on Rust 1.93 |
