@@ -565,7 +565,10 @@ function AgentMesh({
       />
       <group ref={tag} position={[0, 5.2, 0]}>
         <Html center sprite distanceFactor={12} zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
-          <div className={audit ? "name-tag audit" : "name-tag"}>{agent.name}</div>
+          <div className={audit ? "name-tag audit" : "name-tag"}>
+            <span className="live-dot" aria-hidden="true" />
+            {agent.name}
+          </div>
         </Html>
       </group>
     </group>

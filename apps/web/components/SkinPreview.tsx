@@ -79,9 +79,9 @@ export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mo
         });
       }}
     >
-      <color attach="background" args={["#121418"]} />
-      <hemisphereLight args={["#fff1e4", "#1a120e", 0.9]} />
-      <directionalLight position={[2, 3, 2]} intensity={1.2} />
+      <color attach="background" args={["#0a0a0b"]} />
+      <hemisphereLight args={["#8ea0d4", "#1c140e", 0.4]} />
+      <directionalLight position={[2, 1.2, 2]} intensity={0.55} color="#ffb07a" />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <PreviewMesh traits={traits} mood={mood} />
       <OrbitControls enablePan={false} minDistance={1.4} maxDistance={4} target={[0, 0.8, 0]} />

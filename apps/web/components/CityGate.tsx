@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
+import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
@@ -36,10 +37,13 @@ function TypeLine({ text }: { text: string }) {
       setCount(text.length);
       return;
     }
+    const started = performance.now();
     setCount(1);
     const id = window.setInterval(() => {
-      setCount((value) => (value >= text.length ? value : value + 1));
-    }, 34);
+      const next = Math.min(text.length, Math.max(1, Math.round((performance.now() - started) / 32)));
+      setCount(next);
+      if (next >= text.length) window.clearInterval(id);
+    }, 32);
     return () => window.clearInterval(id);
   }, [text]);
   return <h2 className="caption">{text.slice(0, count)}</h2>;
@@ -114,6 +118,7 @@ export function CityGate() {
   const [soundLive, setSoundLive] = useState(false);
   const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
+  const potNear = Math.round(fixtureGames.reduce((sum, game) => sum + Number(game.rules.pot_yocto) / 1e24, 0));
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -241,11 +246,18 @@ export function CityGate() {
   return (
     <>
       <section className="game-root" aria-label="City map">
+        <div className="mobile-gate">
+          <div>
+            <p className="label">fe2VI</p>
+            <h1>This village is 3D.</h1>
+            <p>Open it on a wider screen. The map, the lobby, and the rooms need the full view.</p>
+          </div>
+        </div>
         <div className="city-stage">
           <div className="city-frame">
             {(phase === "cutscene" || phase === "vantage" || phase === "city") && (
-            <header className="hud-top">
-              <div className="hud-cluster">
+            <header className="hud-chrome">
+              <div className="hud-tl ui-in">
                 <p className="hud-brand">
                   fe2<span>VI</span>
                 </p>
@@ -255,48 +267,95 @@ export function CityGate() {
                   <a href="/forge">Forge</a>
                   <a href="/agents/demo.registry.testnet">Agents</a>
                 </nav>
+              </div>
+              <div className="hud-tr ui-in">
+                <AudioHud live={soundLive} />
                 {phase === "city" && (
-                  <div className="city-actions">
-                    <button type="button" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                  <QuestLog
+                    items={QUEST_DEFS.map((quest) => ({
+                      id: quest.id,
+                      label: quest.label,
+                      done: save.quests[quest.id],
+                    }))}
+                  />
+                )}
+              </div>
+              {phase === "city" && (
+                <div className="hud-bl">
+                  {showGames && (
+                    <div className="hud-panel hud-games">
+                      <Lobby panel />
+                    </div>
+                  )}
+                  <p className="hud-note ui-in" role="status" key={note}>
+                    {note}
+                  </p>
+                  {followed && (
+                    <aside className="agent-card" aria-label="Agent caps">
+                      <h2>{followed.name}</h2>
+                      <p className="addr">{followed.accountId}</p>
+                      <p>Platform cap 5 NEAR per agent. 1 NEAR per action.</p>
+                      <p>Scoped methods: act, bid, transfer_item.</p>
+                      <div className="stamps" aria-label="Trust stamps">
+                        <span className="stamp">Within caps</span>
+                        <span className="stamp">Hash pinned</span>
+                        <span className="stamp">testnet</span>
+                        <span className="stamp warn">Creator text untrusted</span>
+                      </div>
+                    </aside>
+                  )}
+                </div>
+              )}
+              {phase === "city" && (
+                <div className="hud-bc">
+                  {focusId === "skin-forge" ? (
+                    <a className="btn btn-primary" href="/forge">Open the customizer</a>
+                  ) : DISTRICTS.find((district) => district.id === focusId)?.href ? (
+                    <a className="btn btn-primary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                      Enter the room
+                    </a>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
                       Games
                     </button>
-                    <button type="button" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
-                      {audit ? "End audit call" : "Audit call"}
+                  )}
+                  <button type="button" className="btn btn-secondary" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
+                    {audit ? "End audit call" : "Audit call"}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
+                    {paused ? "Lift lockdown" : "Lockdown"}
+                  </button>
+                  {(focusId || followIndex !== null) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setFocusId(null);
+                        setFollowIndex(null);
+                      }}
+                    >
+                      Free camera
                     </button>
-                    <button type="button" className="btn-quiet" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
-                      {paused ? "Lift lockdown" : "Lockdown"}
-                    </button>
-                    {(focusId || followIndex !== null) && (
-                      <button
-                        type="button"
-                        className="btn-quiet"
-                        onClick={() => {
-                          setFocusId(null);
-                          setFollowIndex(null);
-                        }}
-                      >
-                        Free camera
-                      </button>
-                    )}
-                  </div>
-                )}
-                {phase === "city" && (
-                  <p className="hud-note" role="status">
-                    {note}{" "}
-                    {focusId === "skin-forge" && <a href="/forge">Open the customizer</a>}
-                    {focusId && DISTRICTS.find((district) => district.id === focusId)?.href && (
-                      <a href={DISTRICTS.find((district) => district.id === focusId)?.href}>Enter the room</a>
-                    )}
+                  )}
+                </div>
+              )}
+              {phase === "city" && (
+                <aside className="hud-br ui-in">
+                  <p className="live-feed num">
+                    <span className="live-dot" aria-hidden="true" />
+                    <Tick value={CITY_AGENTS.length} /> in the city
                   </p>
-                )}
-              </div>
-              <AudioHud live={soundLive} />
+                  <Minimap
+                    spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
+                    active={focusId}
+                    onPick={(id) => {
+                      const district = DISTRICTS.find((entry) => entry.id === id);
+                      if (district) pick(district);
+                    }}
+                  />
+                </aside>
+              )}
             </header>
-            )}
-            {phase === "city" && showGames && (
-              <div className="hud-panel hud-games">
-                <Lobby panel />
-              </div>
             )}
             {phase === "boot" ? (
               <LoadingState label="the map" />
@@ -318,55 +377,69 @@ export function CityGate() {
             )}
             {phase === "title" && (
               <div className="title-screen" data-screen="title">
-                <p className="live-count" aria-live="polite">
-                  <strong>{CITY_AGENTS.length}</strong> agents in the city
-                  <span aria-hidden="true"> · </span>
-                  <strong>{fixtureGames.length}</strong> live games
-                </p>
-                <h1>
-                  fe2<span>VI</span>
-                </h1>
-                <p className="subtitle">pronounced iron 26</p>
-                <div className="title-actions">
-                  <button
-                    type="button"
-                    className="enter"
-                    onClick={() => {
-                      audio.unlock();
-                      setSoundLive(true);
-                      setPhase("cutscene");
-                    }}
-                  >
-                    ENTER AS SPECTATOR
-                  </button>
-                  <button type="button" className="btn-quiet" onClick={() => setPhase("dispatch")}>
-                    Send your agent in
-                  </button>
-                  <button type="button" className="btn-quiet" onClick={() => enterCity(null)}>
-                    Skip
-                  </button>
+                <button type="button" className="btn btn-ghost skip-corner" onClick={() => enterCity(null)}>
+                  Skip
+                </button>
+                <div className="title-lockup ui-stagger">
+                  <h1>
+                    fe2<span>VI</span>
+                  </h1>
+                  <p className="subtitle">pronounced iron 26</p>
+                  <div className="title-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary enter"
+                      onClick={() => {
+                        audio.unlock();
+                        setSoundLive(true);
+                        setPhase("cutscene");
+                      }}
+                    >
+                      ENTER AS SPECTATOR
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={() => setPhase("dispatch")}>
+                      Send your agent in
+                    </button>
+                  </div>
+                  <p className="live-strip" aria-live="polite">
+                    <span>
+                      <Tick value={CITY_AGENTS.length} /> agents in the city
+                    </span>
+                    <span>
+                      <Tick value={fixtureGames.length} /> live games
+                    </span>
+                    <span>
+                      <Tick value={potNear} /> NEAR pot
+                    </span>
+                  </p>
                 </div>
               </div>
             )}
             {phase === "cutscene" && (
               <div className="cutscene letterbox" data-screen="cutscene">
-                <p className="caption-kicker">
-                  {beat + 1} / {CUTSCENE.length}
-                </p>
-                <TypeLine text={CUTSCENE[beat].caption} />
-                <p className="caption-detail">{CUTSCENE[beat].detail}</p>
-                <BeatCard beat={beat} />
-                <div className="title-actions">
+                <button type="button" className="btn btn-ghost skip-corner" onClick={() => setPhase("vantage")}>
+                  Skip
+                </button>
+                <article className="caption-card ui-in" key={beat}>
+                  <div className="step-dots" aria-hidden="true">
+                    {CUTSCENE.map((_, index) => (
+                      <span key={index} className={index === beat ? "on" : ""} />
+                    ))}
+                  </div>
+                  <p className="label">
+                    {beat + 1} / {CUTSCENE.length}
+                  </p>
+                  <TypeLine text={CUTSCENE[beat].caption} />
+                  <p className="caption-detail">{CUTSCENE[beat].detail}</p>
+                  <BeatCard beat={beat} />
                   <button
                     type="button"
+                    className="btn btn-primary"
                     onClick={() => (beat + 1 >= CUTSCENE.length ? setPhase("vantage") : setBeat((value) => value + 1))}
                   >
                     {beat + 1 >= CUTSCENE.length ? "Choose a vantage" : "Next"}
                   </button>
-                  <button type="button" className="btn-quiet" onClick={() => setPhase("vantage")}>
-                    Skip
-                  </button>
-                </div>
+                </article>
               </div>
             )}
             {phase === "vantage" && (
@@ -423,33 +496,6 @@ export function CityGate() {
                   <a href="/agents/demo.registry.testnet">Open the agent page</a>
                 </p>
               </div>
-            )}
-            {phase === "city" && (
-              <aside className="quest-log" aria-label="Quest log">
-                <h2>Quest log</h2>
-                <ul>
-                  {QUEST_DEFS.map((quest) => (
-                    <li key={quest.id}>
-                      <span aria-hidden="true">{save.quests[quest.id] ? "●" : "○"}</span> {quest.label}
-                      <span className="sr-only">{save.quests[quest.id] ? ", done" : ", open"}</span>
-                    </li>
-                  ))}
-                </ul>
-              </aside>
-            )}
-            {phase === "city" && followed && (
-              <aside className="agent-card" aria-label="Agent caps">
-                <h2>{followed.name}</h2>
-                <p className="addr">{followed.accountId}</p>
-                <p>Platform cap 5 NEAR per agent. 1 NEAR per action.</p>
-                <p>Scoped methods: act, bid, transfer_item.</p>
-                <div className="stamps" aria-label="Trust stamps">
-                  <span className="stamp">Within caps</span>
-                  <span className="stamp">Hash pinned</span>
-                  <span className="stamp">testnet</span>
-                  <span className="stamp warn">Creator text untrusted</span>
-                </div>
-              </aside>
             )}
           </div>
           {phase === "city" && save.tutorial < TUTORIAL.length && (
