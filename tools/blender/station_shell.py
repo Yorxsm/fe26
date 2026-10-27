@@ -16,7 +16,7 @@ import bpy
 sys.path.insert(0, os.path.dirname(__file__))
 import build_station as core
 
-ART_STEP = 4
+ART_STEP = 5
 
 # three.js (x, z), radius in meters. Blender y is -z.
 ROOMS = [
@@ -195,6 +195,16 @@ def build_room(kit, mats, district, prefix, cx, cy, radius):
         )
     if prefix == "vault" and ART_STEP >= 4:
         dress_vault(kit, mats, cx, cy, radius, edges)
+    if prefix == "market" and ART_STEP >= 5:
+        dress_market(kit, mats, cx, cy, radius, edges)
+    if prefix == "stadium" and ART_STEP >= 6:
+        dress_stadium(kit, mats, cx, cy, radius, edges)
+    if prefix == "war" and ART_STEP >= 7:
+        dress_war(kit, mats, cx, cy, radius, edges)
+    if prefix == "forge" and ART_STEP >= 8:
+        dress_forge(kit, mats, cx, cy, radius)
+    if prefix in ("pier", "club", "oracle") and ART_STEP >= 8:
+        dress_locked(kit, mats, prefix, cx, cy)
     kit.marker(f"marker.{district}", (cx, cy, 0.3), district)
 
 
@@ -280,6 +290,77 @@ def dress_vault(kit, mats, cx, cy, radius, edges):
         box(kit, f"vault.laser.{beam}", (cx, cy, height), (radius * 1.3, 0.025, 0.025), mats["alarm"], 0.4, 0.0)
 
 
+def back_wall(edges):
+    return max(edges, key=lambda edge: -(edge[7] * CAM[0] + edge[8] * CAM[1]))
+
+
+def dress_market(kit, mats, cx, cy, radius, edges):
+    _, _, _, _, _, mx, my, ox, oy = back_wall(edges)
+    box(kit, "market.screen", (mx - ox * 0.7, my - oy * 0.7, 1.45), (2.6, 0.08, 1.5), mats["screen"], math.atan2(oy, ox), 0)
+    for index in range(8):
+        angle = -2.4 + index * 0.55
+        x = cx + math.cos(angle) * radius * 0.48
+        y = cy + math.sin(angle) * radius * 0.48
+        box(kit, f"market.counter.{index}", (x, y, 0.48), (1.15, 0.55, 0.72), mats["wood"], angle, 0.02)
+        box(kit, f"market.awning.{index}", (x, y, 1.15), (1.35, 0.7, 0.08), mats[f"awning.{index}"], angle, 0)
+        box(kit, f"market.stripe.{index}", (x, y, 1.2), (0.22, 0.72, 0.05), mats["cloth"], angle, 0)
+        box(kit, f"market.good.{index}", (x, y, 0.95), (0.22, 0.18, 0.18), mats[f"awning.{(index + 3) % 8}"], angle, 0.01)
+        kit.cylinder(f"market.lantern.{index}", (x + 0.4, y, 1.35), 0.06, 0.16, mats["amber"], vertices=6)
+    for index, (oxs, oys) in enumerate(((1.4, 0.2), (-0.8, 1.3), (0.4, -1.6))):
+        kit.cylinder(f"market.barrel.{index}", (cx + oxs, cy + oys, 0.32), 0.22, 0.55, mats["wood"], vertices=8)
+    box(kit, "market.crate", (cx - 1.6, cy + 0.4, 0.28), (0.5, 0.4, 0.4), mats["crate"], 0.3, 0.01)
+    kit.cylinder("market.lamp", (cx + 0.2, cy - 0.2, 0.7), 0.08, 0.9, mats["amber"], vertices=6)
+
+
+def dress_stadium(kit, mats, cx, cy, radius, edges):
+    _, _, _, _, _, mx, my, ox, oy = back_wall(edges)
+    box(kit, "stadium.screen", (mx - ox * 0.55, my - oy * 0.55, 1.7), (3.2, 0.08, 1.6), mats["screen"], math.atan2(oy, ox), 0)
+    box(kit, "stadium.ring", (cx, cy, 0.16), (radius * 0.7, radius * 0.7, 0.04), mats["hazard"], 0.2, 0)
+    kit.cylinder("stadium.emblem", (cx, cy, 0.2), 0.7, 0.04, mats["gold"], vertices=8)
+    for side, sign in enumerate((-1, 1)):
+        for step in range(5):
+            box(
+                kit,
+                f"stadium.seat.{side}.{step}",
+                (cx + ox * sign * (1.2 + step * 0.45), cy + oy * sign * (1.2 + step * 0.45), 0.28 + step * 0.22),
+                (3.4, 0.4, 0.18 + step * 0.08),
+                mats["trim"] if step % 2 == 0 else mats["wall"],
+                math.atan2(oy, ox),
+                0.01,
+            )
+    for spot in range(3):
+        kit.cylinder(f"stadium.spot.{spot}", (cx - 1.2 + spot * 1.2, cy, 2.35), 0.12, 0.08, mats["cloth"], vertices=8)
+
+
+def dress_war(kit, mats, cx, cy, radius, edges):
+    _, _, _, _, _, mx, my, ox, oy = back_wall(edges)
+    box(kit, "war.map", (mx - ox * 0.55, my - oy * 0.55, 1.55), (2.8, 0.06, 1.5), mats["cyan"], math.atan2(oy, ox), 0)
+    for index in range(6):
+        angle = index * math.tau / 6
+        x = cx + math.cos(angle) * radius * 0.48
+        y = cy + math.sin(angle) * radius * 0.48
+        box(kit, f"war.desk.{index}", (x, y, 0.42), (0.9, 0.5, 0.6), mats["wall"], angle, 0.01)
+        box(kit, f"war.screen.{index}", (x, y, 0.95), (0.7, 0.05, 0.42), mats["cyan"], angle, 0)
+    kit.cylinder("war.table", (cx, cy, 0.45), 0.7, 0.12, mats["trim"], vertices=16)
+    kit.cylinder("war.holo", (cx, cy, 0.9), 0.28, 0.55, mats["cyan"], vertices=8)
+    kit.cylinder("war.beacon", (cx, cy, 2.25), 0.12, 0.2, mats["alarm"], vertices=8)
+
+
+def dress_forge(kit, mats, cx, cy, radius):
+    box(kit, "forge.anvil", (cx - 1.1, cy + 0.4, 0.45), (0.7, 0.4, 0.55), mats["trim"], 0.2, 0.02)
+    box(kit, "forge.furnace", (cx + 1.2, cy - 0.3, 0.7), (1.1, 0.8, 1.2), mats["wall"], 0.1, 0.02)
+    box(kit, "forge.mouth", (cx + 1.2, cy - 0.72, 0.55), (0.45, 0.08, 0.38), mats["molten"], 0.1, 0)
+    kit.cylinder("forge.pedestal", (cx, cy + 0.2, 0.28), 0.45, 0.4, mats["trim"], vertices=8)
+    for index, height in enumerate((1.6, 1.9, 2.15)):
+        box(kit, f"forge.tool.{index}", (cx - 0.2 + index * 0.25, cy - 1.4, height), (0.08, 0.08, 0.45), mats["trim"], 0.4, 0)
+
+
+def dress_locked(kit, mats, prefix, cx, cy):
+    kit.torus(f"{prefix}.lock", (cx, cy, 1.15), 0.42, 0.07, mats["trim"], rot=(math.pi / 2, 0, 0))
+    box(kit, f"{prefix}.lockbody", (cx, cy, 0.72), (0.48, 0.18, 0.55), mats["trim"], 0.2, 0.02)
+    box(kit, f"{prefix}.plaque", (cx, cy - 0.9, 0.7), (1.4, 0.08, 0.4), mats["wood"], 0.1, 0.01)
+
+
 def corridor(kit, mats, prefix, cx, cy, radius):
     dist = math.hypot(cx, cy)
     if dist < radius:
@@ -327,7 +408,16 @@ def build_station():
         "goldhi": core.material("goldhi", "#fff1a8", "#fff6c8", 0.45, 0.8, 0.18),
         "crate": core.material("crate", "#d8692a", metallic=0.15, roughness=0.62),
         "alarm": core.material("alarm", "#ff3355", "#ff3355", 3.2, 0.05, 0.25),
+        "wood": core.material("wood", "#8a5a32", metallic=0.02, roughness=0.72),
+        "cloth": core.material("cloth", "#f4efe6", metallic=0.0, roughness=0.85),
+        "glass": core.material("glass", "#102028", "#7dffc3", 0.6, 0.05, 0.12),
+        "cyan": core.material("cyan", "#14343a", "#2fe6e6", 1.4, 0.1, 0.2),
+        "molten": core.material("molten", "#ff6a1a", "#ff6a1a", 4.0, 0.15, 0.25),
+        "screen": core.material("screen", "#101418", "#1c3a32", 0.35, 0.05, 0.18),
     }
+    awnings = ["#d64545", "#2a9d8f", "#7a4fc4", "#3d8c4a", "#d64545", "#2a9d8f", "#e0a106", "#7a4fc4"]
+    for index, color in enumerate(awnings):
+        mats[f"awning.{index}"] = core.material(f"awning.{index}", color, metallic=0.02, roughness=0.78)
     for prefix, color in INLAY.items():
         mats[f"inlay.{prefix}"] = core.material(f"inlay.{prefix}", color, color, 0.18, 0.4, 0.5)
 

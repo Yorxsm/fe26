@@ -59,6 +59,92 @@ type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; ena
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
 
+function paintScreen(root: THREE.Object3D, name: string, draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void) {
+  const mesh = root.getObjectByName(name) as THREE.Mesh | undefined;
+  if (!mesh || !(mesh.material instanceof THREE.MeshStandardMaterial)) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 320;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  draw(ctx, canvas.width, canvas.height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = mesh.material.clone();
+  mat.map = tex;
+  mat.emissiveMap = tex;
+  mat.emissive = new THREE.Color("#d8fff0");
+  mat.emissiveIntensity = 0.4;
+  mesh.material = mat;
+}
+
+function paintMarket(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.fillStyle = "#101418";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f3e6c8";
+  ctx.font = "700 30px sans-serif";
+  ctx.fillText("MARKET LEADERBOARD", 24, 46);
+  ctx.font = "500 24px sans-serif";
+  ctx.fillStyle = "#3ee07a";
+  [
+    ["1", "Mason", "12.4"],
+    ["2", "Scout", "9.1"],
+    ["3", "Tape", "7.8"],
+    ["4", "Pike", "4.2"],
+  ].forEach((row, index) => {
+    ctx.fillText(`${row[0]}   ${row[1]}`, 28, 100 + index * 36);
+    ctx.fillText(row[2], 380, 100 + index * 36);
+  });
+  ctx.beginPath();
+  ctx.lineWidth = 4;
+  [
+    [36, 290],
+    [120, 260],
+    [200, 270],
+    [280, 220],
+    [360, 200],
+    [460, 150],
+  ].forEach(([x, y], index) => (index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+  ctx.stroke();
+}
+
+function paintStadium(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.fillStyle = "#101418";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f3e6c8";
+  ctx.font = "700 28px sans-serif";
+  ctx.fillText("TRADE LEAGUE", 24, 42);
+  ctx.font = "500 20px sans-serif";
+  ctx.fillText("SEASON 1", 24, 72);
+  ctx.fillStyle = "#3ee0b5";
+  ctx.font = "500 26px sans-serif";
+  [
+    ["Mason", "18"],
+    ["Scout", "14"],
+    ["Tape", "11"],
+    ["Pike", "7"],
+  ].forEach((row, index) => {
+    ctx.beginPath();
+    ctx.arc(40, 120 + index * 42, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillText(row[0], 64, 128 + index * 42);
+    ctx.fillText(row[1], 400, 128 + index * 42);
+  });
+}
+
+function paintWarMap(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.fillStyle = "#071418";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#2fe6e6";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i += 1) {
+    ctx.strokeRect(40 + (i % 4) * 110, 40 + Math.floor(i / 4) * 120, 90, 80);
+    ctx.fillStyle = "#2fe6e6";
+    ctx.font = "16px sans-serif";
+    ctx.fillText(`NODE ${i + 1}`, 52 + (i % 4) * 110, 84 + Math.floor(i / 4) * 120);
+  }
+}
+
 function dress(root: THREE.Object3D, recolor?: string) {
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
@@ -113,9 +199,22 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood) {
 function Station({ onPick }: { onPick: (district: District) => void }) {
   const gltf = useGLTF("/models/station.glb", false, true);
   const scene = useMemo(() => dress(gltf.scene.clone(true)), [gltf.scene]);
-  useFrame((_, delta) => {
+  useLayoutEffect(() => {
+    paintScreen(scene, "market.screen", paintMarket);
+    paintScreen(scene, "stadium.screen", paintStadium);
+    paintScreen(scene, "war.map", paintWarMap);
+  }, [scene]);
+  useFrame((state, delta) => {
     const wheel = scene.getObjectByName("vault.wheel");
     if (wheel) wheel.rotateZ(delta * 0.35);
+    const holo = scene.getObjectByName("war.holo");
+    if (holo) holo.rotateY(delta * 0.8);
+    const beacon = scene.getObjectByName("war.beacon") as THREE.Mesh | undefined;
+    if (beacon) {
+      beacon.rotateY(delta * 2.2);
+      const mat = beacon.material as THREE.MeshStandardMaterial;
+      if (mat?.emissiveIntensity !== undefined) mat.emissiveIntensity = 2 + Math.sin(state.clock.elapsedTime * 6) * 1.5;
+    }
   });
   return (
     <group>
@@ -442,6 +541,10 @@ export default function CityMap({
       <World />
       <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
       <pointLight position={[-12, 3.4, 8]} intensity={18} color="#ffb060" distance={16} decay={2} />
+      <pointLight position={[12, 3.2, -8]} intensity={14} color="#ff7ad9" distance={16} decay={2} />
+      <spotLight position={[-8, 7.5, -12]} angle={0.6} penumbra={0.5} intensity={30} color="#fff1c9" distance={18} decay={2} />
+      <pointLight position={[8, 3.1, 12]} intensity={16} color="#2fe6e6" distance={16} decay={2} />
+      <pointLight position={[0, 2.6, 0]} intensity={12} color="#ff6a1a" distance={12} decay={2} />
       <Station onPick={onPick} />
       {CITY_AGENTS.map((agent, index) => (
         <AgentMesh key={agent.accountId} agent={agent} index={index} paused={paused} audit={audit} onFollow={onFollow} />
