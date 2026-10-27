@@ -22,7 +22,7 @@ import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { AGENT_SCALE, CITY_AGENTS, DISTRICTS, EXTERIOR_SHOTS, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, STREET_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
-import { ROLE_COLORS, expressionVisible, roleVisible, type Mood } from "@/lib/skin";
+import { ROLE_COLORS, SCREEN_COLORS, expressionVisible, roleVisible, type Mood } from "@/lib/skin";
 
 useGLTF.preload("/models/kits.glb", false, true);
 useGLTF.preload("/models/station.glb", false, true);
@@ -345,7 +345,15 @@ function Kits({
   );
 }
 
-function dress(root: THREE.Object3D, recolor?: string) {
+function paintColor(material: THREE.MeshStandardMaterial, color: string) {
+  const copy = material.clone();
+  copy.name = material.name;
+  copy.color.set(color);
+  if (copy.emissive) copy.emissive.set(color);
+  return copy;
+}
+
+function dress(root: THREE.Object3D, recolor?: string, screen?: string) {
   const meshes: THREE.Mesh[] = [];
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
@@ -355,11 +363,9 @@ function dress(root: THREE.Object3D, recolor?: string) {
     let sources = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
     if (recolor) {
       sources = sources.map((material) => {
-        if (material.name !== "Body" || !material.color) return material;
-        const copy = material.clone();
-        copy.name = "Body";
-        copy.color.set(recolor);
-        return copy;
+        if (material.name === "Body" && material.color) return paintColor(material, recolor);
+        if (screen && material.name === "Screen") return paintColor(material, screen);
+        return material;
       });
       mesh.material = Array.isArray(mesh.material) ? sources : sources[0];
     }
@@ -405,8 +411,8 @@ function applyMood(root: THREE.Object3D, agent: CityAgent, mood: Mood, role: num
   root.traverse((node) => {
     const label = sourceName(node);
     const shown = roleVisible(label, skin, mood) ?? expressionVisible(label, skin, mood);
-    if (shown === null) return;
-    node.visible = shown;
+    if (shown !== null) node.visible = shown;
+    if (label.startsWith("body.antenna") && [0, 2, 4].includes(skin.role % 6)) node.visible = false;
   });
 }
 
@@ -522,7 +528,7 @@ function AgentMesh({
   const role = lineup && index < LINEUP_SPOTS.length ? index : index % ROLE_COLORS.length;
   const scene = useMemo(() => {
     const cloned = SkeletonUtils.clone(gltf.scene);
-    dress(cloned, ROLE_COLORS[role] ?? ROLE_COLORS[0]);
+    dress(cloned, ROLE_COLORS[role] ?? ROLE_COLORS[0], SCREEN_COLORS[role] ?? SCREEN_COLORS[0]);
     applyMood(cloned, agent, "trait", role);
     return cloned;
   }, [agent, gltf.scene, role]);

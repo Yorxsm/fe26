@@ -27,8 +27,9 @@ export const BODY_COLORS = [
   "#6e4b3a",
 ];
 
-/** Safecracker, Trader, Hacker, Auditor, Builder, Scout. Baked into each body. */
+/** Safecracker, Trader, Hacker, Auditor, Builder, Scout. */
 export const ROLE_COLORS = ["#9aa0a6", "#7a4fc4", "#1d2a3a", "#e7e4dc", "#e0742a", "#6b7a3a"];
+export const SCREEN_COLORS = ["#ffc928", "#e04bff", "#2fe6e6", "#ffc928", "#e0742a", "#9cff3a"];
 
 export const ROLE_BODIES = [
   "role.safecracker",
@@ -63,7 +64,7 @@ export function expressionVisible(label: string, skin: SkinTraits, mood: Mood): 
   if (!face) return null;
   const index = Number(face[1]);
   if (mood === "happy") return index === 1;
-  if (mood === "alarm") return index === 2;
+  if (mood === "alarm" || skin.role % ROLE_OUTFITS === 2) return index === 2;
   if (skin.role % ROLE_OUTFITS === 4) return index === 3;
   return index === 0;
 }

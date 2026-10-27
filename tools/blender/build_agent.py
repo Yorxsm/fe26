@@ -323,6 +323,49 @@ def build_body(arm, parts, skinned):
     for ob, bone_name in ((line, "bone.spine"), (emblem, "bone.spine"), (ear, "bone.head"), (antenna, "bone.head"), (tip, "bone.head")):
         skinned.append((ob, bone_name))
         parts.append(ob)
+    return front
+
+
+def wear(parts, skinned, ob, bone):
+    skinned.append((ob, bone))
+    parts.append(ob)
+
+
+def build_roles(parts, skinned, front):
+    black = material("Knit", (0.04, 0.04, 0.05), 0.0, 0.85)
+    gold = material("Gold", (0.85, 0.68, 0.22), 0.85, 0.28)
+    navy = material("Hood", (0.08, 0.1, 0.14), 0.05, 0.8)
+    cyan = material("Glyph", (0.18, 0.9, 0.9), 0.1, 0.3, emission=1.6)
+    glass = material("Lens", (0.75, 0.86, 0.9), 0.15, 0.08)
+    hat = material("Hat", (0.95, 0.62, 0.16), 0.15, 0.45)
+    pack = material("Pack", (0.35, 0.22, 0.12), 0.05, 0.7)
+    lime = material("Compass", (0.61, 1.0, 0.23), 0.2, 0.35, emission=0.4)
+
+    wear(parts, skinned, ball("role.safecracker.beanie", (0, -0.02, 0.96), 0.2, black, scale=(1.35, 1.05, 0.55)), "bone.head")
+    wear(parts, skinned, cyl("role.safecracker.keyhole", (0, front - 0.02, 0.9), 0.035, 0.012, gold, vertices=10, rot=(math.pi / 2, 0, 0)), "bone.head")
+
+    wear(parts, skinned, cube("role.trader.band", (0, 0.0, 0.98), (0.46, 0.08, 0.05), gold, bevel=0.015, subdiv=0), "bone.head")
+    wear(parts, skinned, cyl("role.trader.mic", (0.16, front - 0.02, 0.58), 0.012, 0.16, gold, vertices=6, rot=(math.pi / 2.4, 0, 0.4)), "bone.head")
+    wear(parts, skinned, cube("role.trader.pad.L", (-0.36, -0.02, 0.74), (0.16, 0.16, 0.08), gold, bevel=0.02, subdiv=1), "bone.spine")
+    wear(parts, skinned, cube("role.trader.pad.R", (0.36, -0.02, 0.74), (0.16, 0.16, 0.08), gold, bevel=0.02, subdiv=1), "bone.spine")
+
+    wear(parts, skinned, ball("role.hacker.hood", (0, 0.06, 0.9), 0.26, navy, scale=(1.15, 1.05, 0.85)), "bone.head")
+    wear(parts, skinned, cyl("role.hacker.string.L", (-0.06, front - 0.03, 0.55), 0.008, 0.22, navy, vertices=6), "bone.spine")
+    wear(parts, skinned, cyl("role.hacker.string.R", (0.06, front - 0.03, 0.55), 0.008, 0.22, navy, vertices=6), "bone.spine")
+    wear(parts, skinned, cube("role.hacker.glyph", (0, front - 0.03, 0.5), (0.08, 0.012, 0.08), cyan, bevel=0.01, subdiv=0), "bone.spine")
+
+    wear(parts, skinned, cyl("role.auditor.glass", (0.34, front - 0.08, 0.4), 0.07, 0.015, glass, vertices=16, rot=(math.pi / 2, 0, 0)), "bone.arm.R")
+    wear(parts, skinned, cyl("role.auditor.handle", (0.34, front - 0.05, 0.3), 0.012, 0.12, gold, vertices=6), "bone.arm.R")
+    wear(parts, skinned, cyl("role.auditor.shield", (0.1, front - 0.03, 0.48), 0.05, 0.014, gold, vertices=6, rot=(math.pi / 2, 0, 0)), "bone.spine")
+
+    wear(parts, skinned, ball("role.builder.hat", (0, -0.02, 0.98), 0.22, hat, scale=(1.4, 1.2, 0.55)), "bone.head")
+    wear(parts, skinned, cube("role.builder.badge", (0, front - 0.03, 0.48), (0.12, 0.014, 0.08), hat, bevel=0.01, subdiv=0), "bone.spine")
+
+    wear(parts, skinned, cyl("role.scout.goggle.L", (-0.08, front - 0.02, 0.86), 0.045, 0.02, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cyl("role.scout.goggle.R", (0.08, front - 0.02, 0.86), 0.045, 0.02, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.head")
+    wear(parts, skinned, cube("role.scout.pack", (0, 0.28, 0.58), (0.28, 0.14, 0.32), pack, bevel=0.03, subdiv=1), "bone.spine")
+    wear(parts, skinned, cube("role.scout.strap", (0, 0.08, 0.7), (0.36, 0.03, 0.04), pack, bevel=0.008, subdiv=0), "bone.spine")
+    wear(parts, skinned, cyl("role.scout.compass", (0, 0.36, 0.62), 0.04, 0.012, lime, vertices=12, rot=(math.pi / 2, 0, 0)), "bone.spine")
 
 
 def main():
@@ -330,7 +373,8 @@ def main():
     arm = build_armature()
     parts = [arm]
     skinned = []
-    build_body(arm, parts, skinned)
+    front = build_body(arm, parts, skinned)
+    build_roles(parts, skinned, front)
     for ob, bone in skinned:
         bind(ob, arm, bone)
     leg_axis, leg_sign = verify_leg_axis(arm)
