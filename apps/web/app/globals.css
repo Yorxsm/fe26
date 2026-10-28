@@ -846,8 +846,12 @@ button.enter {
 .hud-lobby .lede, .hud-lobby .meta, .hud-lobby a { color: var(--ink-secondary); }
 .quest-log, .hud-tr .quest-panel { position: static; max-width: none; width: 100%; }
 .agent-card h2 { font-size: var(--type-h2); line-height: 32px; margin: 0 0 8px; text-transform: none; letter-spacing: 0; }
-.quest-hint { position: absolute; left: 24px; bottom: 24px; z-index: 7; width: min(360px, calc(100% - 48px)); }
-.hint-toggle { position: absolute; left: 24px; bottom: 24px; z-index: 7; }
+.hud-bl .quest-hint,
+.hud-bl .hint-toggle {
+  position: static;
+  width: min(360px, 100%);
+  z-index: 1;
+}
 .quest-hint h2, .quest-hint .caption-kicker, .quest-hint .line { color: var(--ink); background: transparent; }
 .quest-hint .caption-kicker { color: var(--ink-muted); }
 .audio-hud { justify-content: flex-end; }

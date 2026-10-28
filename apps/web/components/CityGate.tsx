@@ -132,7 +132,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [followIndex, setFollowIndex] = useState<number | null>(null);
   const [soundLive, setSoundLive] = useState(false);
   const [showGames, setShowGames] = useState(false);
-  const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
+  const [note, setNote] = useState("Click a room or an agent.");
   const [hintsOpen, setHintsOpen] = useState(false);
 
   useEffect(() => {
@@ -308,7 +308,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     commit({ ...save, quests });
     if (district.status === "soon") {
       setPaused(true);
-      setNote(`Lockdown. ${district.name} is not open.`);
+      setNote(`${district.name} is not open.`);
       return;
     }
     if (!district.href) {
@@ -402,6 +402,65 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   <p className="hud-note ui-in" role="status" key={note}>
                     {note}
                   </p>
+                  {save.tutorial < TUTORIAL.length && !hintsOpen && (
+                    <button type="button" className="btn btn-secondary hint-toggle" onClick={() => setHintsOpen(true)}>
+                      Hints
+                    </button>
+                  )}
+                  {save.tutorial < TUTORIAL.length && hintsOpen && (
+                    <div className="quest-hint" data-screen="tutorial" role="status">
+                      <p className="caption-kicker">
+                        Hint {save.tutorial + 1} / {TUTORIAL.length}
+                      </p>
+                      <h2>{TUTORIAL[save.tutorial].title}</h2>
+                      <p>{TUTORIAL[save.tutorial].body}</p>
+                      {save.tutorial === 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            audio.sting("rank");
+                            commit({ ...save, tutorial: 2 });
+                            router.push("/village");
+                          }}
+                        >
+                          <ListOrdered aria-hidden="true" strokeWidth={1.75} />
+                          Open the leaderboard
+                        </button>
+                      )}
+                      {save.tutorial === 2 && (
+                        <>
+                          <ul className="feed">
+                            {fixtureEvents.map((event) => (
+                              <li className="line" key={event.id}>
+                                {event.summary} <span className="meta">{event.source}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <button type="button" onClick={() => commit({ ...save, tutorial: 3 })}>
+                            <ScrollText aria-hidden="true" strokeWidth={1.75} />
+                            Feed read
+                          </button>
+                        </>
+                      )}
+                      {save.tutorial === 3 && (
+                        <button
+                          type="button"
+                          disabled={followIndex === null}
+                          onClick={() => commit({ ...save, tutorial: 4 })}
+                        >
+                          <Stamp aria-hidden="true" strokeWidth={1.75} />
+                          Stamps noted
+                        </button>
+                      )}
+                      <button type="button" className="btn-quiet" onClick={() => setHintsOpen(false)}>
+                        Close
+                      </button>
+                      <button type="button" className="btn-quiet" onClick={() => commit({ ...save, tutorial: TUTORIAL.length })}>
+                        <X aria-hidden="true" strokeWidth={1.75} />
+                        Dismiss hints
+                      </button>
+                    </div>
+                  )}
                   {followed && (
                     <aside className="agent-card" aria-label="Agent">
                       <h2>{followed.name}</h2>
@@ -417,13 +476,18 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               )}
               {phase === "city" && (
                 <div className="hud-bc">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPhase("title")}>
-                    <Eye aria-hidden="true" strokeWidth={1.75} />
-                    Enter as spectator
-                  </button>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPhase("dispatch")}>
-                    <Send aria-hidden="true" strokeWidth={1.75} />
-                    Send your agent in
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setPhase("title");
+                      setFocusId(null);
+                      setFollowIndex(null);
+                      setShowGames(false);
+                    }}
+                  >
+                    <Home aria-hidden="true" strokeWidth={1.75} />
+                    Home
                   </button>
                   <a className="btn btn-secondary btn-sm" href="/leaderboard">
                     <Trophy aria-hidden="true" strokeWidth={1.75} />
@@ -602,76 +666,17 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 </div>
               </div>
             )}
-            {(phase === "title" || phase === "cutscene") && (
+            {phase === "cutscene" && (
               <button
                 type="button"
                 className="btn btn-ghost skip-corner"
-                onClick={() => (phase === "title" ? enterCity(null) : setPhase("vantage"))}
+                onClick={() => setPhase("vantage")}
               >
                 <SkipForward aria-hidden="true" strokeWidth={1.75} />
                 Skip
               </button>
             )}
           </div>
-          {phase === "city" && save.tutorial < TUTORIAL.length && !hintsOpen && (
-            <button type="button" className="btn btn-secondary hint-toggle" onClick={() => setHintsOpen(true)}>
-              Hints
-            </button>
-          )}
-          {phase === "city" && save.tutorial < TUTORIAL.length && hintsOpen && (
-            <div className="quest-hint" data-screen="tutorial" role="status">
-              <p className="caption-kicker">
-                Hint {save.tutorial + 1} / {TUTORIAL.length}
-              </p>
-              <h2>{TUTORIAL[save.tutorial].title}</h2>
-              <p>{TUTORIAL[save.tutorial].body}</p>
-              {save.tutorial === 1 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    audio.sting("rank");
-                    commit({ ...save, tutorial: 2 });
-                    router.push("/village");
-                  }}
-                >
-                  <ListOrdered aria-hidden="true" strokeWidth={1.75} />
-                  Open the leaderboard
-                </button>
-              )}
-              {save.tutorial === 2 && (
-                <>
-                  <ul className="feed">
-                    {fixtureEvents.map((event) => (
-                      <li className="line" key={event.id}>
-                        {event.summary} <span className="meta">{event.source}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <button type="button" onClick={() => commit({ ...save, tutorial: 3 })}>
-                    <ScrollText aria-hidden="true" strokeWidth={1.75} />
-                    Feed read
-                  </button>
-                </>
-              )}
-              {save.tutorial === 3 && (
-                <button
-                  type="button"
-                  disabled={followIndex === null}
-                  onClick={() => commit({ ...save, tutorial: 4 })}
-                >
-                  <Stamp aria-hidden="true" strokeWidth={1.75} />
-                  Stamps noted
-                </button>
-              )}
-              <button type="button" className="btn-quiet" onClick={() => setHintsOpen(false)}>
-                Close
-              </button>
-              <button type="button" className="btn-quiet" onClick={() => commit({ ...save, tutorial: TUTORIAL.length })}>
-                <X aria-hidden="true" strokeWidth={1.75} />
-                Dismiss hints
-              </button>
-            </div>
-          )}
           {phase === "city" && (
             <nav className="room-focus" aria-label="Rooms">
               {DISTRICTS.map((district) => (
