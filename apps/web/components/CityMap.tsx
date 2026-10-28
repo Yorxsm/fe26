@@ -111,6 +111,67 @@ function AgentTargets({
   );
 }
 
+function VillageMural() {
+  const [map, setMap] = useState<THREE.CanvasTexture | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const mark = new Image();
+    const word = new Image();
+    mark.src = "/brand/near-mark.svg";
+    word.src = "/brand/near-wordmark.svg";
+    Promise.all([
+      mark.decode(),
+      word.decode(),
+      document.fonts.load('700 72px "Chakra Petch"').catch(() => undefined),
+    ]).then(() => {
+      if (dead) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#141416";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const markH = 112;
+      const gap = 28;
+      const wordScale = 96 / 86;
+      const wordW = 345 * wordScale;
+      const wordH = 86 * wordScale;
+      const lockW = markH + gap + wordW;
+      const lockH = Math.max(markH, wordH);
+      const pad = markH;
+      const plateW = lockW + pad * 2;
+      const plateH = lockH + pad * 2;
+      const plateX = (canvas.width - plateW) / 2;
+      const plateY = 72;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(plateX, plateY, plateW, plateH);
+      ctx.drawImage(mark, plateX + pad, plateY + pad + (lockH - markH) / 2, markH, markH);
+      ctx.drawImage(word, plateX + pad + markH + gap, plateY + pad + (lockH - wordH) / 2, wordW, wordH);
+      ctx.fillStyle = "#d4d2cc";
+      ctx.font = '700 68px "Chakra Petch", sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("THE FUTURE IS NEAR", canvas.width / 2, plateY + plateH + 78);
+      ctx.fillStyle = "#c94a1a";
+      ctx.fillRect(plateX, plateY + plateH + 118, plateW, 10);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      setMap(texture);
+    }).catch(() => undefined);
+    return () => {
+      dead = true;
+    };
+  }, []);
+  return (
+    <mesh position={[-6, 4.4, 6]} rotation={[0, -0.46, 0]}>
+      <planeGeometry args={[18, 10]} />
+      {map ? <meshBasicMaterial map={map} toneMapped={false} /> : <meshStandardMaterial color="#141416" roughness={0.6} />}
+    </mesh>
+  );
+}
+
 function PickRing() {
   const mesh = useRef<THREE.Mesh>(null);
   useFrame(() => {
@@ -2296,6 +2357,7 @@ export default function CityMap({
         <boxGeometry args={[1.6, 1.2, 0.18]} />
         <meshStandardMaterial color="#a85a32" emissive="#c94a1a" emissiveIntensity={0.2} />
       </mesh>
+      <VillageMural />
       <BuildingHits onPick={onPick} />
       <PickRing />
       {lean ? (
