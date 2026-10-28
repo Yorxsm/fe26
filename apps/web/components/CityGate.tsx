@@ -136,6 +136,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [hintsOpen, setHintsOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
+  const [mapProgress, setMapProgress] = useState<number | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -223,6 +225,17 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       window.removeEventListener("fe2vi-title", showTitle);
       window.removeEventListener("hashchange", onHash);
     };
+  }, []);
+
+  useEffect(() => {
+    const onLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{ progress: number; active: boolean }>).detail;
+      if (!detail) return;
+      setMapProgress(detail.progress);
+      if (!detail.active && detail.progress >= 100) setMapReady(true);
+    };
+    window.addEventListener("fe2vi-load", onLoad);
+    return () => window.removeEventListener("fe2vi-load", onLoad);
   }, []);
 
   useEffect(() => {
@@ -574,8 +587,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
               <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
             )}
+            {phase !== "boot" && !mapReady ? <LoadingState label="the map" hero progress={mapProgress} /> : null}
             {phase === "boot" ? (
-              <LoadingState label="the map" hero />
+              <LoadingState label="the map" hero progress={mapProgress} />
             ) : (
               <CityMap
                 paused={paused}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Billboard, Html, OrbitControls, PerformanceMonitor, Text, useGLTF } from "@react-three/drei";
+import { Billboard, Html, OrbitControls, PerformanceMonitor, Text, useGLTF, useProgress } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
@@ -1329,6 +1329,14 @@ function fitInterior(
   };
 }
 
+function LoadReporter() {
+  const { progress, active } = useProgress();
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("fe2vi-load", { detail: { progress, active } }));
+  }, [progress, active]);
+  return null;
+}
+
 function cameraHeld() {
   return document.documentElement.dataset.holdCamera === "1" || document.documentElement.dataset.soundOpen === "1";
 }
@@ -2208,6 +2216,7 @@ export default function CityMap({
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />
+      <LoadReporter />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} shotLock={shotLock} peek={peek} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls

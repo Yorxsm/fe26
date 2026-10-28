@@ -1,10 +1,13 @@
 import { Logo } from "@/components/Logo";
 
-export function LoadingState({ label, hero = false }: { label: string; hero?: boolean }) {
+export function LoadingState({ label, hero = false, progress = null }: { label: string; hero?: boolean; progress?: number | null }) {
+  const pct = progress == null ? null : Math.max(0, Math.min(100, Math.round(progress)));
   return (
-    <div className="loading" role="status">
-      <Logo variant={hero ? "hero" : "nav"} />
-      <p>Loading {label}…</p>
+    <div className={hero ? "loading-screen" : "loading"} role="status" aria-live="polite">
+      <div className="loading-mark">
+        <Logo variant={hero ? "hero" : "nav"} />
+      </div>
+      <p>{pct == null ? `Loading ${label}…` : `${pct}%`}</p>
     </div>
   );
 }

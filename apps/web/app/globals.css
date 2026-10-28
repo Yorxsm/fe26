@@ -1267,6 +1267,23 @@ body, p, li, label, .lede, .meta, .subtitle, .caption-detail, td, .num, .ribbon 
   line-height: 0;
 }
 .loading { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 16px;
+  background: #0a0a0b;
+  color: #d4d2cc;
+  pointer-events: none;
+}
+.loading-mark { animation: logo-float 1.8s ease-in-out infinite alternate; }
+@keyframes logo-float {
+  from { transform: translateY(6px) scale(0.96); opacity: 0.7; }
+  to { transform: translateY(-8px) scale(1); opacity: 1; }
+}
 .title-lockup { padding: 0; background: transparent; }
 .title-lockup::before { content: none; background: transparent; }
 .title-screen h1 { font-size: var(--type-h1); line-height: 1.2; letter-spacing: 0; text-shadow: none; }
