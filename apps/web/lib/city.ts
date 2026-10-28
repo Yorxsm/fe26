@@ -228,76 +228,44 @@ export const CUTSCENE_CAST: CastPose[][] = [
   ],
 ];
 
-const ROOM_WAYS: Array<[number, number]> = [
-  [-3.2, -3.8],
-  [2.8, -3.5],
-  [-2.2, -4.2],
-  [2.2, -4.0],
-  [-3.4, -3.2],
-  [3.0, -3.6],
+/** Open floor, clear of the north boards (local z about -5.7) and the south door. */
+const ROOM_ROUTES: Array<Array<[number, number]>> = [
+  [[-3.2, 1.6], [2.4, 1.2], [2.8, -1.4], [-1.6, -2.2]],
+  [[3.0, 0.4], [0.4, -2.4], [-2.8, -0.8], [-1.2, 2.2]],
+  [[-0.2, 2.4], [3.2, -0.2], [0.8, -2.6], [-3.0, 0.6]],
 ];
 
-/** Walk, idle, emote, and a trip to the south door. Clocks differ per agent. */
+const LOBBY_ROUTE: Array<[number, number]> = [
+  [-2.2, -2.1],
+  [0, -1.5],
+  [2.2, -2.1],
+  [0, -2.7],
+];
+
+/** Walk between stations, then stand and work. No looping emote on one spot. */
 export function interiorPose(roomId: string, index: number, time: number, busy: boolean) {
   const crew = INTERIOR_CAST[roomId];
   const member = crew?.find((entry) => entry.index === index);
   const origin = ROOM_XZ[roomId];
   if (!member || !origin) return null;
+  const route = roomId === "skin-forge" ? LOBBY_ROUTE : ROOM_ROUTES[index % ROOM_ROUTES.length];
+  const leg = (busy ? 9 : 12) + (index % 3);
+  const travel = (time * 0.85 + index * 4.2) % (route.length * leg);
+  const step = Math.floor(travel / leg) % route.length;
+  const along = (travel % leg) / leg;
+  const from = route[step];
+  const to = route[(step + 1) % route.length];
   const [ox, oz] = origin;
-  const span = (busy ? 12 : 18) * (0.82 + (index % 4) * 0.09);
-  const phase = ((time + index * 2.6) % span) / span;
-  const shift = (index % 3) * 0.35;
-  const ways = ROOM_WAYS.map(([x, z], step) => [x + shift * (step % 2 === 0 ? 1 : -1), z] as [number, number]);
-  const from = ways[index % ways.length];
-  const to = ways[(index + 2) % ways.length];
-  const door: [number, number] = [((index % 3) - 1) * 1.8, -3.2];
-  const lane = crew.findIndex((entry) => entry.index === index);
-  const clear = (x: number, z: number) => {
-    let lx = x - ox;
-    let lz = z - oz;
-    if (roomId === "skin-forge") {
-      lx = [-1.35, 0, 1.35][Math.max(0, lane)] ?? 0;
-      lz = -2.5;
-    } else {
-      if (lz > -3.2) lz = -3.2;
-      if (Math.abs(lx) < 1.5) lx = lx < 0 ? -2.1 : 2.1;
-      lx = Math.min(4.1, Math.max(-4.1, lx));
-      lz = Math.max(-4.4, lz);
-    }
-    return { x: ox + lx, z: oz + lz };
-  };
-  const walk = (a: [number, number], b: [number, number], u: number) => {
-    const clamped = Math.min(1, Math.max(0, u));
-    const posed = clear(ox + a[0] + (b[0] - a[0]) * clamped, oz + a[1] + (b[1] - a[1]) * clamped);
-    return {
-      x: posed.x,
-      z: posed.z,
-      rot: Math.atan2(b[0] - a[0], b[1] - a[1]),
-      clip: "walk" as const,
-      visible: true,
-    };
-  };
-  if (phase < 0.42) {
-    const u = phase / 0.42;
-    const ping = u < 0.5 ? u * 2 : (1 - u) * 2;
-    return walk(from, to, ping);
+  const world = (point: [number, number]) => ({ x: ox + point[0], z: oz + point[1] });
+  const rot = Math.atan2(to[0] - from[0], to[1] - from[1]);
+  if (along < 0.7) {
+    const t = along / 0.7;
+    const a = world(from);
+    const b = world(to);
+    return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, rot, clip: "walk" as const, visible: true };
   }
-  if (phase < 0.58) {
-    const posed = clear(ox + to[0], oz + to[1]);
-    return { x: posed.x, z: posed.z, rot: Math.PI, clip: "idle" as const, visible: true };
-  }
-  if (phase < 0.72) {
-    const posed = clear(ox + to[0], oz + to[1]);
-    return { x: posed.x, z: posed.z, rot: Math.PI, clip: "celebrate" as const, visible: true };
-  }
-  if (phase < 0.84) {
-    const posed = clear(ox + from[0] * 0.4, oz - 2.2);
-    return { x: posed.x, z: posed.z, rot: 0, clip: "idle" as const, visible: true };
-  }
-  const doorU = (phase - 0.84) / 0.16;
-  if (doorU < 0.45) return walk(from, door, doorU / 0.45);
-  if (doorU < 0.62) return { x: ox + door[0], z: oz + door[1], rot: 0, clip: "walk" as const, visible: false };
-  return walk(door, to, (doorU - 0.62) / 0.38);
+  const stood = world(to);
+  return { x: stood.x, z: stood.z, rot, clip: "idle" as const, visible: true };
 }
 
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
