@@ -119,7 +119,11 @@ export async function loadHome(): Promise<
     const stats = statsRes.ok ? ((await statsRes.json()) as unknown) : null;
     const relay = parseHome(stats, schedule, events);
     if (relay) return { ok: true, relay };
-    const localAgents = parseHome({ network: "mock", agents: FIXTURE_AGENTS.length }, schedule, events);
+    const localAgents = parseHome(
+      { network: "mock", roster: FIXTURE_AGENTS.map((account_id) => ({ account_id, name: account_id })) },
+      schedule,
+      events,
+    );
     if (!localAgents) return { ok: false, reason: "unreachable" };
     return { ok: true, relay: { ...localAgents, agentsFrom: "fixture" } };
   } catch {
@@ -239,9 +243,9 @@ function parseHome(stats: unknown, schedule: unknown, events: unknown): HomeRela
   const clock = record(stats);
   const board = record(schedule);
   const hosted = record(events);
-  const agents = clock ? num(clock.agents) : null;
   const stamp = board ? num(board.now) : null;
-  if (agents == null || stamp == null || clock?.network !== "mock" || !hosted || !Array.isArray(hosted.events)) return null;
+  if (!clock || !Array.isArray(clock.roster) || stamp == null || clock.network !== "mock" || !hosted || !Array.isArray(hosted.events)) return null;
+  const agents = clock.roster.length;
   const agentsFrom: HomeRelay["agentsFrom"] = "relay";
   const parsed = [];
   for (const row of hosted.events) {

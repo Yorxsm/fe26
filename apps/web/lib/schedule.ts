@@ -105,14 +105,21 @@ export function eventStatusLabel(phase: EventPhase) {
   return "Ended";
 }
 
-/** Account ids shared with `agent_roster` in fe2vi-core. */
+/**
+ * Offline copy of `city_roster` in fe2vi-core. Used only when the API does not answer.
+ * The live chip and the map both use this cast: ten agents, not the six score-tape ids.
+ */
 export const FIXTURE_AGENTS = [
-  "mason.vault.fe2vi.testnet",
   "mason.village.fe2vi.testnet",
-  "pike.war.fe2vi.testnet",
-  "quill.vault.fe2vi.testnet",
   "scout.vault.fe2vi.testnet",
   "tape.cup.fe2vi.testnet",
+  "pike.war.fe2vi.testnet",
+  "quill.forge.fe2vi.testnet",
+  "nori.market.fe2vi.testnet",
+  "brim.stadium.fe2vi.testnet",
+  "kiln.forge.fe2vi.testnet",
+  "wren.scout.fe2vi.testnet",
+  "soot.vault.fe2vi.testnet",
 ];
 
 export function formatClock(secs: number) {
@@ -133,14 +140,62 @@ function hourMinute(unix: number, timeZone: string) {
   }).format(unix * 1000);
 }
 
-/** UTC first. WAT is Africa/Lagos, UTC+1, with no daylight shift. */
-export function slotWindow(start: number, end: number) {
-  const day = new Intl.DateTimeFormat("en-US", {
+export type WindowText = { utc: string; wat: string };
+
+function utcDay(unix: number) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(unix * 1000);
+}
+
+function stamp(unix: number, timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
-    timeZone: "UTC",
-  }).format(start * 1000);
-  return `${day} · ${hourMinute(start, "UTC")}–${hourMinute(end, "UTC")} UTC · ${hourMinute(start, "Africa/Lagos")}–${hourMinute(end, "Africa/Lagos")} WAT`;
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).format(unix * 1000);
+}
+
+/** UTC first. WAT is Africa/Lagos, UTC+1. A range that crosses midnight names both dates. */
+export function slotWindow(start: number, end: number): WindowText {
+  if (utcDay(start) === utcDay(end)) {
+    const day = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(start * 1000);
+    return {
+      utc: `${day} · ${hourMinute(start, "UTC")}–${hourMinute(end, "UTC")} UTC`,
+      wat: `${hourMinute(start, "Africa/Lagos")}–${hourMinute(end, "Africa/Lagos")} WAT`,
+    };
+  }
+  return {
+    utc: `${stamp(start, "UTC")} – ${stamp(end, "UTC")} UTC`,
+    wat: `${stamp(start, "Africa/Lagos")} – ${stamp(end, "Africa/Lagos")} WAT`,
+  };
+}
+
+/** Next seasonal Saturday that has not ended. Bounds come from the API season. */
+export function upcomingSeason(now: number, seasonStart: number, seasonEnd: number): Slot {
+  const span = Math.max(seasonEnd - seasonStart, DAY);
+  const open = 18 * 3600;
+  const len = 3 * 3600;
+  let origin = seasonStart;
+  for (let step = 0; step < 16; step += 1) {
+    const startDay = origin - (origin % DAY);
+    const delta = (6 + 7 - ((Math.floor(startDay / DAY) + 4) % 7)) % 7;
+    const start = startDay + delta * DAY + open;
+    const end = start + len;
+    if (now < end) return { kind: "seasonal", start, end };
+    origin += span;
+  }
+  return { kind: "seasonal", start: origin, end: origin + len };
 }
 
 export function formatCountdown(secs: number) {
@@ -155,15 +210,13 @@ export function formatCountdown(secs: number) {
 }
 
 export function localRange(start: number, end: number) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone: "UTC",
-  });
-  return `${fmt.format(start * 1000)} to ${fmt.format(end * 1000)} UTC`;
+  const text = slotWindow(start, end);
+  return `${text.utc} · ${text.wat}`;
+}
+
+export function exampleHeadline(now: number, start: number, end: number) {
+  const run = now < start ? "Upcoming" : now < end ? "Running" : "Ended";
+  return `Example · ${run}`;
 }
 
 const SCORES = [

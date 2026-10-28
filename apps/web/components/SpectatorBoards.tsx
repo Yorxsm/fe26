@@ -5,9 +5,8 @@ import { useEffect, useState } from "react";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
-  eventPhase,
-  eventStatusLabel,
   exampleEventLive,
+  exampleHeadline,
   formatCountdown,
   heistCountdown,
   heistRows,
@@ -53,7 +52,7 @@ export function EventBanner({ room, compact = false }: { room?: string; compact?
   const now = useNow();
   if (now == null || !exampleEventLive(now)) return null;
   if (room && room !== EXAMPLE_EVENT.room && room !== "map") return null;
-  const label = eventStatusLabel(eventPhase(now, EXAMPLE_EVENT.start, EXAMPLE_EVENT.end, true));
+  const label = exampleHeadline(now, EXAMPLE_EVENT.start, EXAMPLE_EVENT.end);
   if (compact) {
     return (
       <span className="chip">

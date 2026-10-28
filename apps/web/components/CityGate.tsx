@@ -20,7 +20,8 @@ import {
   Gamepad2,
   Home,
   ListOrdered,
-  Lock,
+  Pause,
+  Play,
   MapPin,
   ScrollText,
   Send,
@@ -325,9 +326,14 @@ export function CityGate() {
                     <ShieldAlert aria-hidden="true" strokeWidth={1.75} />
                     {audit ? "End audit call" : "Audit call"}
                   </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setPaused((value) => !value)} aria-pressed={paused}>
-                    <Lock aria-hidden="true" strokeWidth={1.75} />
-                    {paused ? "Lift lockdown" : "Lockdown"}
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-ghost"
+                    onClick={() => setPaused((value) => !value)}
+                    aria-pressed={paused}
+                    aria-label={paused ? "Play animation" : "Pause animation"}
+                  >
+                    {paused ? <Play aria-hidden="true" strokeWidth={1.75} /> : <Pause aria-hidden="true" strokeWidth={1.75} />}
                   </button>
                   {(focusId || followIndex !== null) && (
                     <button

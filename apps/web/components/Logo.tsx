@@ -24,10 +24,9 @@ export function Logo({ variant = "nav", className = "" }: LogoProps) {
     <img
       className={`logo-nav ${className}`.trim()}
       alt="fe2VI"
-      src="/brand/fe2vi-nav@1x.webp"
-      srcSet="/brand/fe2vi-nav@1x.webp 1x, /brand/fe2vi-nav@2x.webp 2x"
-      width={63}
-      height={36}
+      src="/brand/fe2vi-logo@1x.webp"
+      width={361}
+      height={197}
     />
   );
 }

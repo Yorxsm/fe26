@@ -14,11 +14,11 @@ mod venue;
 mod village;
 
 pub use board::{
-    agent_roster, challenges, countdown_secs, daily_slot, event_markdown, event_phase,
-    heist_leaderboard, heist_live, hosted_events, live_events, next_heist, open_slots,
-    schedule_markdown, season_slot, venue_markdown, war_room_md, weekly_slot, Challenge,
-    ChallengeCategory, EventPhase, HeistRow, HeistWindow, HostedEvent, Slot, SlotKind, SEASON_END,
-    SEASON_ID, SEASON_START,
+    agent_roster, challenges, city_roster, countdown_secs, daily_slot, event_markdown, event_phase,
+    example_run, heist_leaderboard, heist_live, hosted_events, live_events, next_heist, open_slots,
+    schedule_markdown, season_slot, upcoming_season_slot, venue_markdown, war_room_md, weekly_slot,
+    Challenge, ChallengeCategory, EventPhase, HeistRow, HeistWindow, HostedEvent, RosterEntry,
+    Slot, SlotKind, SEASON_END, SEASON_ID, SEASON_START,
 };
 pub use caps::{
     authorize_cap_change, authorize_platform_spend, authorize_spend, validate_platform_caps,
@@ -48,6 +48,6 @@ pub use venue::{
     HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,
 };
 pub use village::{
-    demo_tape, districts, follow, leaderboard, unfollow, District, Fill, FollowEdge, Side,
-    Standing, Window, DEMO_EPOCH,
+    demo_tape, demo_tape_at, districts, follow, leaderboard, unfollow, District, Fill, FollowEdge,
+    Side, Standing, Window, DEMO_EPOCH,
 };

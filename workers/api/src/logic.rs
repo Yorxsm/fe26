@@ -920,7 +920,9 @@ mod tests {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(json["network"], "mock");
-                assert_eq!(json["agents"], 6);
+                assert_eq!(json["source"], "mock");
+                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
+                assert_eq!(json["agents"], 10);
                 assert_eq!(json["now"], fe2vi_core::DEMO_EPOCH);
                 assert_eq!(json["live_games"], 0);
                 assert_eq!(json["heist_live"], false);
@@ -928,7 +930,7 @@ mod tests {
             Outcome::Websocket { .. } => panic!("expected http"),
         }
         let body = serde_json::json!({
-            "account_id": "nori.market.fe2vi.testnet",
+            "account_id": "extra.registry.fe2vi.testnet",
             "revoked": false,
             "allowed_methods": ["act", "bid", "transfer_item"],
         })
@@ -949,7 +951,8 @@ mod tests {
         ) {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-                assert_eq!(json["agents"], 7);
+                assert_eq!(json["agents"], 11);
+                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
@@ -967,6 +970,7 @@ mod tests {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(json["live"].as_array().unwrap().len(), 0);
                 assert_eq!(json["events"][0]["phase"], "example");
+                assert_eq!(json["events"][0]["run"], "running");
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }

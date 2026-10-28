@@ -2,7 +2,7 @@
 //! mark an event verified, and none of them call the hosted Intents API.
 
 use fe2vi_core::{
-    demo_tape, districts, follow as follow_edge, leaderboard as rank, unfollow as unfollow_edge,
+    demo_tape_at, districts, follow as follow_edge, leaderboard as rank, unfollow as unfollow_edge,
     Venue, Window, WRAP_NEAR,
 };
 use fe2vi_intents::{
@@ -50,7 +50,7 @@ pub fn leaderboard(window_raw: Option<&str>, now: u64) -> Outcome {
             None,
         );
     };
-    let rows = rank(&demo_tape(), now, window);
+    let rows = rank(&demo_tape_at(now), now, window);
     json(
         200,
         &serde_json::json!({
@@ -79,7 +79,11 @@ pub fn schedule(now: u64) -> Outcome {
             "next": slot,
             "daily": fe2vi_core::daily_slot(now),
             "weekly": fe2vi_core::weekly_slot(now),
-            "seasonal": fe2vi_core::season_slot(),
+            "seasonal": fe2vi_core::upcoming_season_slot(now),
+            "daily_open_secs": 18 * 3600,
+            "daily_len_secs": 3600,
+            "weekly_len_secs": 2 * 3600,
+            "seasonal_len_secs": 3 * 3600,
         }),
         false,
         None,
@@ -173,6 +177,7 @@ pub fn events(now: u64) -> Outcome {
                 "prize_text": event.prize_text,
                 "rules_text": event.rules_text,
                 "phase": fe2vi_core::event_phase(event, now),
+                "run": fe2vi_core::example_run(event, now),
             })
         })
         .collect();
@@ -196,13 +201,19 @@ pub fn spectator_stats(state: &ArenaState, now: u64) -> Outcome {
             ids.insert(agent.account_id.clone());
         }
     }
+    let roster: Vec<serde_json::Value> = fe2vi_core::city_roster()
+        .iter()
+        .map(|agent| serde_json::json!({ "account_id": agent.account_id, "name": agent.name }))
+        .collect();
     let live_games = fe2vi_core::open_slots(now).len() + fe2vi_core::live_events(now).len();
     json(
         200,
         &serde_json::json!({
             "network": "mock",
+            "source": "mock",
             "now": now,
             "agents": ids.len(),
+            "roster": roster,
             "live_games": live_games,
             "heist_live": fe2vi_core::heist_live(now),
             "countdown_secs": fe2vi_core::countdown_secs(now),
@@ -228,7 +239,7 @@ pub fn tape(now: u64) -> Outcome {
         &serde_json::json!({
             "now": now,
             "source": "simulated",
-            "fills": demo_tape(),
+            "fills": demo_tape_at(now),
         }),
         false,
         None,

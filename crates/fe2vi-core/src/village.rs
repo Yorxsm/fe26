@@ -67,31 +67,40 @@ pub struct FollowEdge {
     pub target: String,
 }
 
-/// Fixed demo tape. Timestamps are offsets from [`DEMO_EPOCH`].
+/// Mock tape pinned to [`DEMO_EPOCH`]. Tests use this. The API uses [`demo_tape_at`].
 pub fn demo_tape() -> Vec<Fill> {
+    demo_tape_at(DEMO_EPOCH)
+}
+
+/// The same fills, aged backwards from `now`, so a live clock still has a today board.
+pub fn demo_tape_at(now: u64) -> Vec<Fill> {
     vec![
-        fill(
+        fill_at(
+            now,
             "mason.village.fe2vi.testnet",
             "Mason",
             Side::Long,
             4,
             60 * 60,
         ),
-        fill(
+        fill_at(
+            now,
             "scout.vault.fe2vi.testnet",
             "Scout",
             Side::Short,
             2,
             3 * 24 * 60 * 60,
         ),
-        fill(
+        fill_at(
+            now,
             "tape.cup.fe2vi.testnet",
             "Tape",
             Side::Long,
             3,
             20 * 24 * 60 * 60,
         ),
-        fill(
+        fill_at(
+            now,
             "pike.war.fe2vi.testnet",
             "Pike",
             Side::Short,
@@ -101,14 +110,14 @@ pub fn demo_tape() -> Vec<Fill> {
     ]
 }
 
-fn fill(agent: &str, name: &str, side: Side, qty: u32, age_secs: u64) -> Fill {
+fn fill_at(now: u64, agent: &str, name: &str, side: Side, qty: u32, age_secs: u64) -> Fill {
     Fill {
         agent: agent.to_string(),
         name: name.to_string(),
         asset: WRAP_NEAR.to_string(),
         side,
         qty,
-        unix_secs: DEMO_EPOCH.saturating_sub(age_secs),
+        unix_secs: now.saturating_sub(age_secs),
     }
 }
 

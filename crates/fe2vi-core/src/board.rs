@@ -84,13 +84,6 @@ pub struct HostedEvent {
     pub rules_text: &'static str,
 }
 
-struct Score {
-    agent: &'static str,
-    name: &'static str,
-    points: u32,
-    unix_secs: u64,
-}
-
 fn weekday(unix: u64) -> u64 {
     ((unix / DAY) + 4) % 7
 }
@@ -134,13 +127,29 @@ pub fn weekly_slot(now: u64) -> Slot {
 }
 
 /// The season's single Saturday window. It does not move when the window has closed.
-pub fn season_slot() -> Slot {
-    let start_day = day_start(SEASON_START);
-    let want = 6u64;
-    let have = weekday(start_day);
-    let delta = (want + 7 - have) % 7;
+fn first_saturday(origin: u64) -> Slot {
+    let start_day = day_start(origin);
+    let delta = (6 + 7 - weekday(start_day)) % 7;
     let start = start_day + delta * DAY + DAILY_OPEN;
     slot_from(SlotKind::Seasonal, start, SEASONAL_LEN)
+}
+
+pub fn season_slot() -> Slot {
+    first_saturday(SEASON_START)
+}
+
+/// The seasonal window that has not ended. After this season's Saturday, that is the next season.
+pub fn upcoming_season_slot(now: u64) -> Slot {
+    let span = SEASON_END.saturating_sub(SEASON_START).max(DAY);
+    let mut origin = SEASON_START;
+    for _ in 0..16 {
+        let slot = first_saturday(origin);
+        if now < slot.end_unix {
+            return slot;
+        }
+        origin = origin.saturating_add(span);
+    }
+    first_saturday(origin)
 }
 
 fn seasonal(now: u64) -> Option<Slot> {
@@ -188,16 +197,66 @@ pub fn open_slots(now: u64) -> Vec<Slot> {
     slots
 }
 
-/// Distinct account ids on the heist score list and the village tape.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct RosterEntry {
+    pub account_id: &'static str,
+    pub name: &'static str,
+}
+
+/// The city cast. The map, the home chip, and the mock boards all use this list.
+pub fn city_roster() -> &'static [RosterEntry] {
+    &[
+        RosterEntry {
+            account_id: "mason.village.fe2vi.testnet",
+            name: "Mason",
+        },
+        RosterEntry {
+            account_id: "scout.vault.fe2vi.testnet",
+            name: "Scout",
+        },
+        RosterEntry {
+            account_id: "tape.cup.fe2vi.testnet",
+            name: "Tape",
+        },
+        RosterEntry {
+            account_id: "pike.war.fe2vi.testnet",
+            name: "Pike",
+        },
+        RosterEntry {
+            account_id: "quill.forge.fe2vi.testnet",
+            name: "Quill",
+        },
+        RosterEntry {
+            account_id: "nori.market.fe2vi.testnet",
+            name: "Nori",
+        },
+        RosterEntry {
+            account_id: "brim.stadium.fe2vi.testnet",
+            name: "Brim",
+        },
+        RosterEntry {
+            account_id: "kiln.forge.fe2vi.testnet",
+            name: "Kiln",
+        },
+        RosterEntry {
+            account_id: "wren.scout.fe2vi.testnet",
+            name: "Wren",
+        },
+        RosterEntry {
+            account_id: "soot.vault.fe2vi.testnet",
+            name: "Soot",
+        },
+    ]
+}
+
+/// Distinct account ids on the city roster, sorted.
 pub fn agent_roster() -> Vec<String> {
-    let mut ids = std::collections::BTreeSet::new();
-    for score in scores() {
-        ids.insert(score.agent.to_string());
-    }
-    for fill in crate::village::demo_tape() {
-        ids.insert(fill.agent);
-    }
-    ids.into_iter().collect()
+    let mut ids: Vec<String> = city_roster()
+        .iter()
+        .map(|agent| agent.account_id.to_string())
+        .collect();
+    ids.sort();
+    ids
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -207,6 +266,17 @@ pub enum EventPhase {
     Upcoming,
     Live,
     Ended,
+}
+
+/// Where an example row sits in its sample window. Never "live".
+pub fn example_run(event: &HostedEvent, now: u64) -> &'static str {
+    if now < event.start_unix {
+        "upcoming"
+    } else if now < event.end_unix {
+        "running"
+    } else {
+        "ended"
+    }
 }
 
 /// Example rows never count as live, even inside their sample window.
@@ -232,39 +302,23 @@ pub fn countdown_secs(now: u64) -> u64 {
     }
 }
 
-fn scores() -> &'static [Score] {
-    &[
-        Score {
-            agent: "mason.vault.fe2vi.testnet",
-            name: "Mason",
-            points: 12,
-            unix_secs: 1_793_116_800 - 3600,
-        },
-        Score {
-            agent: "scout.vault.fe2vi.testnet",
-            name: "Scout",
-            points: 9,
-            unix_secs: 1_793_116_800 - 1800,
-        },
-        Score {
-            agent: "pike.war.fe2vi.testnet",
-            name: "Pike",
-            points: 7,
-            unix_secs: 1_793_116_800 - DAY,
-        },
-        Score {
-            agent: "tape.cup.fe2vi.testnet",
-            name: "Tape",
-            points: 15,
-            unix_secs: SEASON_START + DAY,
-        },
-        Score {
-            agent: "quill.vault.fe2vi.testnet",
-            name: "Quill",
-            points: 5,
-            unix_secs: SEASON_START + 2 * DAY,
-        },
-    ]
+/// A mock score time that always falls inside `now`'s today, week, or season.
+fn score_unix(now: u64, index: usize) -> u64 {
+    let day = day_start(now);
+    let since_monday = (weekday(now) + 6) % 7;
+    let week = day.saturating_sub(since_monday * DAY);
+    let raw = match index {
+        0 => day.saturating_add(60),
+        1 => day.saturating_add(120),
+        2 => week.saturating_add(3600),
+        3 => week.saturating_add(7200),
+        n => SEASON_START.saturating_add((n as u64) * DAY),
+    };
+    if raw > now {
+        now
+    } else {
+        raw
+    }
 }
 
 fn window_start(now: u64, window: HeistWindow) -> u64 {
@@ -280,13 +334,22 @@ fn window_start(now: u64, window: HeistWindow) -> u64 {
 
 pub fn heist_leaderboard(now: u64, window: HeistWindow) -> Vec<HeistRow> {
     let start = window_start(now, window);
-    let mut rows: Vec<HeistRow> = scores()
+    let mut rows: Vec<HeistRow> = city_roster()
         .iter()
-        .filter(|score| score.unix_secs >= start && score.unix_secs < SEASON_END)
-        .map(|score| HeistRow {
-            agent: score.agent.to_string(),
-            name: score.name.to_string(),
-            points: score.points,
+        .enumerate()
+        .filter_map(|(index, agent)| {
+            let unix = score_unix(now, index);
+            if unix < start || unix > now || unix >= SEASON_END {
+                return None;
+            }
+            if window == HeistWindow::Season && unix < SEASON_START {
+                return None;
+            }
+            Some(HeistRow {
+                agent: agent.account_id.to_string(),
+                name: agent.name.to_string(),
+                points: 30u32.saturating_sub(index as u32),
+            })
         })
         .collect();
     rows.sort_by(|left, right| {
@@ -467,17 +530,13 @@ mod tests {
             .find(|event| event.partner_label == "Example partner")
             .unwrap();
         assert_eq!(event_phase(example, TUESDAY_AFTERNOON), EventPhase::Example);
-        assert_eq!(
-            agent_roster(),
-            vec![
-                "mason.vault.fe2vi.testnet",
-                "mason.village.fe2vi.testnet",
-                "pike.war.fe2vi.testnet",
-                "quill.vault.fe2vi.testnet",
-                "scout.vault.fe2vi.testnet",
-                "tape.cup.fe2vi.testnet",
-            ]
-        );
+        assert_eq!(example_run(example, TUESDAY_AFTERNOON), "running");
+        assert!(season_slot().end_unix < TUESDAY_AFTERNOON);
+        let upcoming = upcoming_season_slot(TUESDAY_AFTERNOON);
+        assert!(upcoming.start_unix > season_slot().end_unix);
+        assert!(TUESDAY_AFTERNOON < upcoming.end_unix);
+        assert_eq!(agent_roster().len(), city_roster().len());
+        assert_eq!(agent_roster()[0], "brim.stadium.fe2vi.testnet");
     }
 
     #[test]

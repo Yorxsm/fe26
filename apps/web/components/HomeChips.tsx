@@ -40,7 +40,7 @@ export function HomeChips() {
       if (loaded.ok) {
         relay.current = loaded.relay;
         heldAt.current = Date.now();
-        const note = loaded.relay.agentsFrom === "fixture" ? "Fixture. /v1/stats did not answer." : "";
+        const note = loaded.relay.agentsFrom === "fixture" ? "Fixture. Roster is the offline city cast." : "";
         setView(derive(loaded.relay.now, loaded.relay.agents, loaded.relay.events, loaded.relay.agentsFrom, note));
       } else {
         relay.current = null;

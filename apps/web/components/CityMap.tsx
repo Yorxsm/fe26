@@ -1953,24 +1953,6 @@ export default function CityMap({
         </Text>
       </group>
       <Smoke position={[-34, 13.4, -26]} />
-      {DISTRICTS.filter((district) => district.status === "soon").map((district) => (
-        <group key={district.id} position={[district.x, 5.2, district.z + 9]}>
-          <mesh>
-            <boxGeometry args={[8.5, 2.4, 0.25]} />
-            <meshStandardMaterial color="#f4e7c4" roughness={0.6} emissive="#e8c48a" emissiveIntensity={0.45} />
-          </mesh>
-          <Text
-            position={[0, 0, 0.16]}
-            font={DISPLAY_FONT}
-            fontSize={0.62}
-            color="#1c140c"
-            anchorX="center"
-            anchorY="middle"
-          >
-            COMING SOON
-          </Text>
-        </group>
-      ))}
       <WindowGlow />
       {DISTRICTS.filter((district) => district.status === "live").map((district) => (
         <pointLight key={`${district.id}-window`} position={[district.x, 5.4, district.z + 12.4]} color="#ff7a28" intensity={22} distance={18} decay={2} />

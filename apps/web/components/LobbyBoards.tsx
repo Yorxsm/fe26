@@ -14,11 +14,12 @@ import {
   heistCountdown,
   heistRows,
   mockQuotes,
-  seasonSlot,
+  exampleHeadline,
   SEASON_END,
   SEASON_START,
   slotPhase,
   slotWindow,
+  upcomingSeason,
   weeklySlot,
   type HeistWindow,
   type Slot,
@@ -140,10 +141,14 @@ function money(micros: number) {
 function SlotRow({ now, slot, title }: { now: number; slot: Slot; title: string }) {
   const phase = slotPhase(now, slot);
   const label = phase === "live" ? "Live" : phase === "ended" ? "Ended" : "Next";
+  const when = slotWindow(slot.start, slot.end);
   return (
     <li className="lobby-slot">
       <span>{title}</span>
-      <span className="num">{slotWindow(slot.start, slot.end)}</span>
+      <span className="lobby-when num">
+        <span>{when.utc}</span>
+        <span>{when.wat}</span>
+      </span>
       <span className={phase === "live" ? "lobby-live" : "lobby-quiet"}>{label}</span>
     </li>
   );
@@ -241,7 +246,7 @@ export function LobbyBoards() {
   const slots: Array<[string, Slot]> = [
     ["Daily", dailySlot(view.now)],
     ["Weekly", weeklySlot(view.now)],
-    ["Seasonal", seasonSlot()],
+    ["Seasonal", upcomingSeason(view.now, view.seasonStart, view.seasonEnd)],
   ];
 
   return (
@@ -266,8 +271,9 @@ export function LobbyBoards() {
             <SlotRow key={title} now={view.now} slot={slot} title={title} />
           ))}
         </ul>
-        <p className="meta">
-          Season {slotWindow(view.seasonStart, view.seasonEnd)}
+        <p className="meta lobby-when">
+          <span>{slotWindow(view.seasonStart, view.seasonEnd).utc}</span>
+          <span>{slotWindow(view.seasonStart, view.seasonEnd).wat}</span>
         </p>
       </section>
       <section className="lobby-panel lobby-span-5 ui-in">
@@ -275,14 +281,19 @@ export function LobbyBoards() {
         <ul className="lobby-stack">
           {view.events.map((event) => {
             const phase = eventPhase(view.now, event.start, event.end, event.exampleOnly);
+            const when = slotWindow(event.start, event.end);
+            const headline = event.exampleOnly ? exampleHeadline(view.now, event.start, event.end) : eventStatusLabel(phase);
             return (
               <li key={event.id}>
-                <p className={phase === "live" ? "lobby-live" : "lobby-quiet"}>{eventStatusLabel(phase)}</p>
+                <p className={phase === "live" ? "lobby-live" : "lobby-quiet"}>{headline}</p>
                 <p>
                   {event.partner} · {ROOM_LABEL[event.room] ?? event.room}
                 </p>
                 <p className="meta">{event.prize}</p>
-                <p className="num">{slotWindow(event.start, event.end)}</p>
+                <p className="lobby-when num">
+                  <span>{when.utc}</span>
+                  <span>{when.wat}</span>
+                </p>
               </li>
             );
           })}
@@ -290,6 +301,7 @@ export function LobbyBoards() {
       </section>
       <section className="lobby-panel lobby-span-7 ui-in">
         <h2>Leaderboard</h2>
+        <p className="meta">Mock scores from the API clock.</p>
         <div className="lobby-tabs" role="tablist" aria-label="Heist window">
           {(["today", "week", "season"] as const).map((id) => (
             <button key={id} type="button" role="tab" aria-selected={windowName === id} onClick={() => setWindowName(id)}>
