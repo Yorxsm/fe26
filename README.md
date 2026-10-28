@@ -45,7 +45,7 @@ The lobby reads `NEXT_PUBLIC_FE2VI_API_URL` (on the deployed site, `https://api.
 
 ## Deploy
 
-`fe2vi-web` serves `fe2vi.space` and `www.fe2vi.space` as the intro, and `testnet.fe2vi.space` as the full app. `fe2vi-api` serves `api.fe2vi.space`. Both are Cloudflare Workers, testnet and mock only. Add the `testnet.fe2vi.space` DNS record in the zone before the next web deploy. Redeploy from a machine that already has the zone. Supply `CLOUDFLARE_API_TOKEN` in the environment. Never commit it, and do not put it in `wrangler.toml` or `.env`.
+`fe2vi-web` serves `fe2vi.space` and `www.fe2vi.space`. `fe2vi-api` serves `api.fe2vi.space`. Both are Cloudflare Workers, testnet and mock only. Redeploy from a machine that already has the zone. Supply `CLOUDFLARE_API_TOKEN` in the environment. Never commit it, and do not put it in `wrangler.toml` or `.env`.
 
 ```bash
 cd apps/web
