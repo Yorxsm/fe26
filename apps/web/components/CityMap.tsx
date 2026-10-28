@@ -1104,6 +1104,11 @@ function AgentMesh({
     });
     return cloned;
   }, [gltf.scene, skin]);
+  const bodyScale = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(scene);
+    const height = box.max.y - box.min.y;
+    return height > 0.05 ? AGENT_SCALE / height : AGENT_SCALE;
+  }, [scene]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
   const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
   const faceTick = useRef(index % 4);
@@ -1329,7 +1334,7 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
-        scale={AGENT_SCALE}
+        scale={bodyScale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           showPick(agent.name, poseRef.current.x, poseRef.current.z);
