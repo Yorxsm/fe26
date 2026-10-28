@@ -1336,6 +1336,7 @@ function CameraDriver({
   const homing = useRef(false);
   const pointer = useRef({ x: 0, y: 0, down: false });
   const latched = useRef<string | null>(null);
+  const depart = useRef<{ from: THREE.Vector3; at: number } | null>(null);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -1484,6 +1485,24 @@ function CameraDriver({
       drive = true;
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
+      if (room && frameMode === "out") {
+        if (!depart.current) depart.current = { from: camera.position.clone(), at: state.clock.elapsedTime };
+        const trip = depart.current;
+        const t = Math.min(1, (state.clock.elapsedTime - trip.at) / 1.15);
+        const ease = t * t * (3 - 2 * t);
+        const mid = trip.from.clone().lerp(overviewEye, 0.45);
+        mid.y = Math.max(18, trip.from.y + 8, overviewEye.y);
+        const up = trip.from.clone().lerp(mid, ease);
+        const down = mid.clone().lerp(overviewEye, ease);
+        camera.position.copy(up.lerp(down, ease));
+        rig.target.lerp(overviewAim, Math.min(1, ease + 0.2));
+        camera.lookAt(rig.target);
+        applyFov(48);
+        if (controls) controls.enabled = false;
+        latched.current = null;
+        return;
+      }
+      depart.current = null;
       if (room) {
         const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
         const inside = frameMode === "in" && !shotLock;

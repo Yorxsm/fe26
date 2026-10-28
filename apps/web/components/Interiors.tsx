@@ -396,7 +396,11 @@ function RoomBoards({ id }: { id: string }) {
         {screen("SEASON", rankRows)}
         {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => {
           const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
-          const status = slot ? `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}` : "…";
+          const status = !slot
+            ? "…"
+            : slot.live && slot.kind === "season"
+              ? "Open all season"
+              : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
           return (
             <Screen
               key={board.name}

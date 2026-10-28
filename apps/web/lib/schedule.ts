@@ -200,6 +200,11 @@ export function upcomingSeason(now: number, seasonStart: number, seasonEnd: numb
 
 export function formatCountdown(secs: number) {
   const whole = Math.max(0, Math.floor(secs));
+  if (whole >= 24 * 3600) {
+    const days = Math.floor(whole / 86400);
+    const hours = Math.floor((whole % 86400) / 3600);
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
   const hours = Math.floor(whole / 3600);
   const minutes = Math.floor((whole % 3600) / 60);
   const seconds = whole % 60;

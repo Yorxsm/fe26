@@ -146,7 +146,8 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "vault-quarter": insideRoom(-42, 18),
   "trading-village": insideRoom(46, 14),
   "war-room": insideRoom(12, 40),
-  "skin-forge": insideRoom(-38, -24),
+  // Wide enough that the four signs and the crew sit inside both 1280×800 and a phone.
+  "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
   "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
   "launch-pier": { eye: [62, 8, -12], aim: [50, 3, -28] },
@@ -241,8 +242,8 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
     let lx = x - ox;
     let lz = z - oz;
     if (roomId === "skin-forge") {
-      lx = [-3.8, 0, 3.8][Math.max(0, lane)] ?? 0;
-      lz = -1.4;
+      lx = [-1.35, 0, 1.35][Math.max(0, lane)] ?? 0;
+      lz = -2.5;
     } else {
       if (lz > -3.2) lz = -3.2;
       if (Math.abs(lx) < 1.5) lx = lx < 0 ? -2.1 : 2.1;
@@ -304,9 +305,9 @@ export const INTERIOR_CAST: Record<string, CastPose[]> = {
     { index: 7, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -40.8, z: -26.6, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -38, z: -27.4, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 6, x: -35.2, z: -26.6, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 4, x: -39.35, z: -26.5, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 7, x: -38, z: -27.3, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 6, x: -36.65, z: -26.5, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
     { index: 2, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },

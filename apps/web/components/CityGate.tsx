@@ -134,6 +134,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent.");
   const [hintsOpen, setHintsOpen] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  const [questOpen, setQuestOpen] = useState(false);
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -224,11 +226,19 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.holdCamera = showGames || hintsOpen ? "1" : "";
+    const query = window.matchMedia("(max-width: 800px)");
+    const apply = () => setNarrow(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.holdCamera = showGames || hintsOpen || questOpen ? "1" : "";
     return () => {
       delete document.documentElement.dataset.holdCamera;
     };
-  }, [showGames, hintsOpen]);
+  }, [showGames, hintsOpen, questOpen]);
 
   useEffect(() => {
     if (phase === "cutscene" || phase === "vantage") audio.theme();
@@ -245,7 +255,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
         window.setTimeout(() => {
           setFocusId(null);
           setFrameMode("in");
-        }, 800);
+        }, 1200);
         retreatRoom();
         return;
       }
@@ -290,7 +300,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     window.setTimeout(() => {
       setFocusId(null);
       setFrameMode("in");
-    }, 800);
+    }, 1200);
     if (new URLSearchParams(window.location.search).get("room")) retreatRoom();
   }
 
@@ -383,25 +393,38 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
                   <div className="hud-aside">
-                    <QuestLog
-                      items={QUEST_DEFS.map((quest) => ({
-                        id: quest.id,
-                        label: quest.label,
-                        done: save.quests[quest.id],
-                      }))}
-                    />
-                    <p className="live-feed num">
-                      <span className="live-dot" aria-hidden="true" />
-                      <Tick value={CITY_AGENTS.length} /> in the city
-                    </p>
-                    <Minimap
-                      spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
-                      active={focusId}
-                      onPick={(id) => {
-                        const district = DISTRICTS.find((entry) => entry.id === id);
-                        if (district) pick(district);
-                      }}
-                    />
+                    {narrow && !questOpen ? (
+                      <button type="button" className="btn btn-icon btn-secondary" aria-label="Quests" title="Quests" onClick={() => setQuestOpen(true)}>
+                        <ScrollText aria-hidden="true" strokeWidth={1.75} />
+                      </button>
+                    ) : (
+                      <>
+                        {narrow ? (
+                          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setQuestOpen(false)}>
+                            Close quests
+                          </button>
+                        ) : null}
+                        <QuestLog
+                          items={QUEST_DEFS.map((quest) => ({
+                            id: quest.id,
+                            label: quest.label,
+                            done: save.quests[quest.id],
+                          }))}
+                        />
+                        <p className="live-feed num">
+                          <span className="live-dot" aria-hidden="true" />
+                          <Tick value={CITY_AGENTS.length} /> in the city
+                        </p>
+                        <Minimap
+                          spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
+                          active={focusId}
+                          onPick={(id) => {
+                            const district = DISTRICTS.find((entry) => entry.id === id);
+                            if (district) pick(district);
+                          }}
+                        />
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -492,6 +515,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   <button
                     type="button"
                     className="btn btn-primary"
+                    title="Home"
                     onClick={() => {
                       setPhase("title");
                       setFocusId(null);
@@ -500,21 +524,21 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     }}
                   >
                     <Home aria-hidden="true" strokeWidth={1.75} />
-                    Home
+                    <span className="bar-label">Home</span>
                   </button>
-                  <a className="btn btn-secondary" href="/leaderboard">
+                  <a className="btn btn-secondary" href="/leaderboard" title="Leaderboard">
                     <Trophy aria-hidden="true" strokeWidth={1.75} />
-                    Leaderboard
+                    <span className="bar-label">Leaderboard</span>
                   </a>
                   {DISTRICTS.find((district) => district.id === focusId)?.href ? (
-                    <a className="btn btn-secondary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                    <a className="btn btn-secondary" title="Enter the room" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
-                      Enter the room
+                      <span className="bar-label">Enter the room</span>
                     </a>
                   ) : (
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                    <button type="button" className="btn btn-secondary" title="Games" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
                       <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
-                      Games
+                      <span className="bar-label">Games</span>
                     </button>
                   )}
                   <button
@@ -526,7 +550,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     title={paused ? "Play" : "Pause"}
                   >
                     {paused ? <Play aria-hidden="true" strokeWidth={1.75} /> : <Pause aria-hidden="true" strokeWidth={1.75} />}
-                    {paused ? "Play" : "Pause"}
+                    <span className="bar-label">{paused ? "Play" : "Pause"}</span>
                   </button>
                   {(focusId || followIndex !== null) && (
                     <button
