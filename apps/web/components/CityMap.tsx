@@ -23,7 +23,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { FRAME_BOARDS } from "@/lib/boards";
-import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -38,9 +38,6 @@ const ROOM_PREFIX: Record<string, string> = {
   market: "trading-village",
   war: "war-room",
   forge: "skin-forge",
-  oracle: "oracle-plaza",
-  pier: "launch-pier",
-  club: "card-club",
 };
 
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
@@ -772,24 +769,54 @@ function Station({
           }
         }}
       />
-      {DISTRICTS.map((district) => (
-        <Billboard key={district.id} position={[district.x, 11, district.z]}>
-          <mesh position={[0, 0, -0.05]}>
-            <planeGeometry args={[Math.max(1.8, district.station.length * 0.2), 0.46]} />
-            <meshStandardMaterial color="#2a241c" roughness={0.8} />
-          </mesh>
-          <Text
-            font={DISPLAY_FONT}
-            fontSize={0.18}
-            color="#f3e6c8"
-            anchorX="center"
-            anchorY="middle"
-            letterSpacing={0.03}
-          >
-            {district.station.toUpperCase()}
-          </Text>
-        </Billboard>
-      ))}
+      {DISTRICTS.map((district) => {
+        const label = roofLabel(district.id);
+        const plate = Math.max(2.4, label.length * 0.34);
+        const door = BUILDING_DOOR[district.id];
+        return (
+          <group key={district.id}>
+            <Billboard position={[district.x, 11.2, district.z]}>
+              <mesh position={[0, 0, -0.08]}>
+                <planeGeometry args={[plate + 0.36, 0.78]} />
+                <meshStandardMaterial color="#141416" roughness={0.6} />
+              </mesh>
+              <mesh position={[-plate / 2 + 0.08, 0, -0.02]}>
+                <planeGeometry args={[0.08, 0.5]} />
+                <meshStandardMaterial color="#2fb86a" />
+              </mesh>
+              <mesh position={[0, -0.3, -0.02]}>
+                <planeGeometry args={[plate, 0.06]} />
+                <meshStandardMaterial color="#c94a1a" />
+              </mesh>
+              <Text font={DISPLAY_FONT} fontSize={0.28} color="#d4d2cc" anchorX="center" anchorY="middle">
+                {label}
+              </Text>
+            </Billboard>
+            {door ? (
+              <group
+                position={[door[0], 0, door[1]]}
+                onClick={(event: ThreeEvent<MouseEvent>) => {
+                  event.stopPropagation();
+                  onPick(district);
+                }}
+              >
+                <mesh position={[0, 1.35, 0]}>
+                  <boxGeometry args={[1.5, 2.5, 0.16]} />
+                  <meshStandardMaterial color="#141416" />
+                </mesh>
+                <mesh position={[0, 1.35, 0.1]}>
+                  <boxGeometry args={[1.15, 2.15, 0.08]} />
+                  <meshStandardMaterial color="#1e1e21" />
+                </mesh>
+                <mesh position={[0.38, 1.25, 0.16]}>
+                  <boxGeometry args={[0.08, 0.16, 0.05]} />
+                  <meshStandardMaterial color="#c94a1a" emissive="#c94a1a" emissiveIntensity={0.35} />
+                </mesh>
+              </group>
+            ) : null}
+          </group>
+        );
+      })}
     </group>
   );
 }
@@ -1000,11 +1027,15 @@ function AgentMesh({
       pose = { x: spot[0], y: 0, z: spot[1], rot: 0 };
     }
     const scripted = mode === "cutscene" ? (CUTSCENE_CAST[beat] ?? []).find((entry) => entry.index === index) : undefined;
-    const roomCrew = frameMode === "in" && focusId ? INTERIOR_CAST[focusId] : undefined;
+    const roomCrew = focusId && (frameMode === "in" || frameMode === "out") ? INTERIOR_CAST[focusId] : undefined;
     const stationed = scripted ? undefined : roomCrew?.find((entry) => entry.index === index);
     if (scripted) pose = { x: scripted.x, y: 0, z: scripted.z, rot: scripted.rot };
-    const roomMove = stationed && focusId ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
-    if (roomMove) {
+    const crossing = focusId ? thresholdPose(focusId, index, frameMode === "in") : null;
+    const gateHide = Boolean(crossing && !crossing.visible);
+    const roomMove = stationed && focusId && !crossing ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
+    if (crossing) {
+      pose = { x: crossing.x, y: 0, z: crossing.z, rot: crossing.rot };
+    } else if (roomMove) {
       pose = { x: roomMove.x, y: 0, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
@@ -1075,7 +1106,7 @@ function AgentMesh({
     const bodyBox = cover.canvas ? agentOnScreen(pose.x, pose.z, state.camera, cover.canvas) : null;
     const underChip = Boolean(bodyBox && cover.bottom.some((rect) => rectsOverlap(bodyBox, rect)));
     if (group.current) {
-      group.current.visible = shown && !underChip && roomMove?.visible !== false;
+      group.current.visible = shown && !underChip && roomMove?.visible !== false && !gateHide;
       poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
       if (frameMode === "in" && focusId) {

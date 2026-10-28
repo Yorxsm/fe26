@@ -509,10 +509,10 @@ mod tests {
     }
 
     #[test]
-    fn city_lists_eight_districts_without_a_secret() {
+    fn city_lists_five_districts_without_a_secret() {
         let mut state = ArenaState::default();
         let json = body_of(call(&mut state, "GET", "/v1/city", ""));
-        assert_eq!(json["districts"].as_array().unwrap().len(), 8);
+        assert_eq!(json["districts"].as_array().unwrap().len(), 5);
         assert_eq!(json["site"], "fe2vi.space");
         assert!(!json.to_string().contains("naa_"));
     }

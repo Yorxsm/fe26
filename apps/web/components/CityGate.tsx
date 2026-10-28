@@ -35,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
-import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
+import { CITY_AGENTS, DISTRICTS, markRoomTransition, type District } from "@/lib/city";
 import { fixtureEvents } from "@/lib/fixtures";
 import {
   CUTSCENE,
@@ -296,6 +296,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
 
   function leaveRoom() {
     setHotspot(null);
+    markRoomTransition();
     setFrameMode("out");
     window.setTimeout(() => {
       setFocusId(null);
@@ -333,6 +334,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       return;
     }
     setNote(`${district.name} is in frame.`);
+    markRoomTransition();
     if (ROOM_SLUG[district.id]) rememberRoom(district.id);
   }
 

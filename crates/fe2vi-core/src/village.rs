@@ -229,35 +229,11 @@ pub fn districts() -> &'static [District] {
         },
         District {
             id: "skin-forge",
-            name: "Skin Forge",
-            summary: "Cosmetic skins. One NEAR. No effect on the game.",
+            name: "Lobby",
+            summary: "The entry hall. Boards for every game.",
             status: "live",
             href: "",
             model: "station.glb",
-        },
-        District {
-            id: "oracle-plaza",
-            name: "Oracle Plaza",
-            summary: "Coming soon.",
-            status: "soon",
-            href: "",
-            model: "building-f.glb",
-        },
-        District {
-            id: "launch-pier",
-            name: "Launch Pier",
-            summary: "Coming soon.",
-            status: "soon",
-            href: "",
-            model: "building-g.glb",
-        },
-        District {
-            id: "card-club",
-            name: "Card Club",
-            summary: "Coming soon.",
-            status: "soon",
-            href: "",
-            model: "building-h.glb",
         },
     ]
 }
@@ -314,9 +290,10 @@ mod tests {
     }
 
     #[test]
-    fn eight_districts_and_no_brand_names() {
+    fn five_districts_and_no_brand_names() {
         let names: Vec<&str> = districts().iter().map(|d| d.name).collect();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 5);
+        assert!(names.iter().all(|name| !name.to_ascii_lowercase().contains("coming")));
         let banned = ["fomo", "pump", "polymarket", "ethglobal"];
         for district in districts() {
             let blob = format!("{} {}", district.name, district.summary).to_ascii_lowercase();

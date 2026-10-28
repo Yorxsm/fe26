@@ -59,33 +59,6 @@ const LAYOUT: Array<Omit<District, "x" | "z">> = [
     station: "Lobby",
     color: "#a85a32",
   },
-  {
-    id: "oracle-plaza",
-    name: "Oracle Plaza",
-    summary: "Coming soon.",
-    status: "soon",
-    href: "",
-    station: "Coming Soon",
-    color: "#5e6a70",
-  },
-  {
-    id: "launch-pier",
-    name: "Launch Pier",
-    summary: "Coming soon.",
-    status: "soon",
-    href: "",
-    station: "Coming Soon",
-    color: "#6d5b48",
-  },
-  {
-    id: "card-club",
-    name: "Card Club",
-    summary: "Coming soon.",
-    status: "soon",
-    href: "",
-    station: "Coming Soon",
-    color: "#4d5c4a",
-  },
 ];
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
@@ -95,10 +68,57 @@ export const ROOM_XZ: Record<string, [number, number]> = {
   "trading-village": [46, 14],
   "war-room": [12, 40],
   "skin-forge": [-38, -24],
-  "launch-pier": [50, -28],
-  "card-club": [-54, -2],
-  "oracle-plaza": [20, -10],
 };
+
+/** South face of each building. Agents use this when a room opens or closes. */
+export const BUILDING_DOOR: Record<string, [number, number]> = {
+  "vault-quarter": [-42, 21.4],
+  "cup-stadium": [-8, -38.6],
+  "trading-village": [46, 17.4],
+  "war-room": [12, 43.4],
+  "skin-forge": [-38, -20.6],
+};
+
+const ROOF_NAME: Record<string, string> = {
+  "vault-quarter": "VAULT",
+  "cup-stadium": "STADIUM",
+  "trading-village": "TRADING VILLAGE",
+  "war-room": "WAR ROOM",
+  "skin-forge": "LOBBY",
+};
+
+export function roofLabel(id: string) {
+  return ROOF_NAME[id] ?? "";
+}
+
+let transitionMs = 0;
+
+export function markRoomTransition() {
+  transitionMs = performance.now();
+}
+
+export function transitionAge() {
+  return (performance.now() - transitionMs) / 1000;
+}
+
+/** Walk between the lawn and the door. Hidden at the threshold. */
+export function thresholdPose(roomId: string, index: number, entering: boolean) {
+  const door = BUILDING_DOOR[roomId];
+  const crew = INTERIOR_CAST[roomId];
+  if (!door || !crew?.some((member) => member.index === index)) return null;
+  const age = transitionAge();
+  if (age > 1.15) return null;
+  const lawn: [number, number] = [door[0], door[1] + 3.4];
+  const from = entering ? lawn : door;
+  const to = entering ? door : lawn;
+  const u = Math.min(1, age / 1.15);
+  return {
+    x: from[0] + (to[0] - from[0]) * u,
+    z: from[1] + (to[1] - from[1]) * u,
+    rot: entering ? Math.PI : 0,
+    visible: entering ? u < 0.9 : u > 0.08,
+  };
+}
 
 export type CameraShot = { eye: [number, number, number]; aim: [number, number, number]; fov?: number };
 
@@ -150,9 +170,6 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
   "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
-  "launch-pier": { eye: [62, 8, -12], aim: [50, 3, -28] },
-  "card-club": { eye: [-42, 8, 12], aim: [-54, 3, -2] },
-  "oracle-plaza": { eye: [32, 8, 4], aim: [20, 3, -10] },
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -171,9 +188,6 @@ export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
   "war-room": { eye: [12, 6.5, 56], aim: [12, 3.2, 40], fov: 40 },
   "skin-forge": { eye: [-38, 6, -8], aim: [-38, 2.8, -22], fov: 42 },
   "cup-stadium": { eye: [-8, 7, -26], aim: [-8, 3, -40], fov: 40 },
-  "launch-pier": { eye: [50, 12, -4], aim: [50, 4, -28] },
-  "card-club": { eye: [-54, 12, 18], aim: [-54, 4, -2] },
-  "oracle-plaza": { eye: [20, 12, 10], aim: [20, 4, -10] },
 };
 
 /** Authored path for the opening. The first shot stays on the road, outside every shell. */

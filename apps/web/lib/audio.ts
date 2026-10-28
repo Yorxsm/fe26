@@ -283,7 +283,7 @@ class CityAudio {
 
   private raiseCity() {
     this.ambients.forEach((bed) => {
-      const level = bed.id === "oracle-plaza" || bed.id === "launch-pier" || bed.id === "card-club" ? 0.03 : 0.12;
+      const level = 0.12;
       bed.gain.gain.value = this.prefs.quiet ? level * 0.4 : level;
     });
   }
