@@ -75,6 +75,36 @@ mod edge {
                 .ok()
                 .map(|value| value.to_string());
             let ingest_token = ingest_token.filter(|value| !value.trim().is_empty());
+            if method == "GET" && (route == "/v1/admin/status" || route.starts_with("/v1/admin/status?")) {
+                let token = self
+                    .env
+                    .var("ADMIN_TOKEN")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+                let presented = authorization.clone().unwrap_or_default();
+                if token.is_empty() || presented != format!("Bearer {token}") {
+                    return with_cors(Response::empty()?.with_status(404), "text/plain");
+                }
+                let storage = self.state.storage();
+                let requests: u64 = storage.get("metric_requests").await?.unwrap_or(0);
+                let errors: u64 = storage.get("metric_errors").await?.unwrap_or(0);
+                let cron_last: u64 = storage.get("metric_cron_last").await?.unwrap_or(0);
+                let arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
+                let body = serde_json::json!({
+                    "requests": requests,
+                    "errors": errors,
+                    "cron_last": cron_last,
+                    "durable_object": {
+                        "games": arena.games.len(),
+                        "agents": arena.agents.len(),
+                        "events": arena.events.len(),
+                        "indexed_height": arena.indexed_height,
+                    }
+                })
+                .to_string();
+                return with_cors(Response::ok(body)?, "application/json");
+            }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
             let outcome = dispatch(
@@ -104,6 +134,12 @@ mod edge {
                         for socket in self.state.get_websockets_with_tag(&tag) {
                             let _ = socket.send_with_str(&fanout.message);
                         }
+                    }
+                    let requests: u64 = storage.get("metric_requests").await?.unwrap_or(0);
+                    let _ = storage.put("metric_requests", &(requests.saturating_add(1))).await;
+                    if status >= 500 {
+                        let errors: u64 = storage.get("metric_errors").await?.unwrap_or(0);
+                        let _ = storage.put("metric_errors", &(errors.saturating_add(1))).await;
                     }
                     let mut response = Response::ok(body)?.with_status(status);
                     if let Some(location) = location {
@@ -197,6 +233,8 @@ mod edge {
             }
             let added = indexer::apply_chain_events(&mut arena, &found, scanned);
             storage.put("arena", &arena).await?;
+            let cron_now = worker::Date::now().as_millis() / 1000;
+            let _ = storage.put("metric_cron_last", &cron_now).await;
             let body = serde_json::json!({
                 "ok": true,
                 "added": added,
