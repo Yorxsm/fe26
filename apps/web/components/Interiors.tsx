@@ -1,6 +1,7 @@
 "use client";
 
-import { useGLTF } from "@react-three/drei";
+import { Html, useGLTF } from "@react-three/drei";
+import { useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
@@ -281,10 +282,21 @@ function Screen({
         <planeGeometry args={[width, height]} />
         <meshBasicMaterial map={map} color="#ffffff" toneMapped={false} />
       </mesh>
+      {sign && status ? <SignStatus text={status} /> : null}
     </group>
   );
 }
 
+
+function SignStatus({ text }: { text: string }) {
+  const narrow = useThree((state) => state.size.width < 800);
+  if (!narrow || text === "…") return null;
+  return (
+    <Html position={[0, -0.42, 0.12]} center zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
+      <div className="sign-status">{text}</div>
+    </Html>
+  );
+}
 
 function placed(id: string, name: string): FrameBoard {
   const board = FRAME_BOARDS[id]?.find((entry) => entry.name === name);
@@ -309,10 +321,10 @@ function useSeasonBoard(id: string) {
     let dead = false;
     fetch(`${base}/v1/leaderboard?window=season&room=${room}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("missing"))))
-      .then((body: { rows?: Array<{ name?: string; points?: number }> }) => {
+      .then((body: { rows?: Array<{ name?: string; points?: number; rank?: number }> }) => {
         if (dead) return;
-        const next = (body.rows ?? []).slice(0, 4).map((row, index) => ({
-          label: `${index + 1}  ${String(row.name ?? "").toUpperCase()}`,
+        const next = (body.rows ?? []).slice(0, 4).map((row) => ({
+          label: `${row.rank ?? ""}  ${String(row.name ?? "").toUpperCase()}`,
           value: String(row.points ?? ""),
           tone: "orange" as const,
         }));

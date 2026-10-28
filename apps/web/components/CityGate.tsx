@@ -392,7 +392,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 <CountdownChip compact={frameMode === "in" && Boolean(focusId)} />
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
-                  <div className="hud-aside">
+                  <div className={narrow && !questOpen ? "hud-aside is-collapsed" : "hud-aside"}>
                     {narrow && !questOpen ? (
                       <button type="button" className="btn btn-icon btn-secondary" aria-label="Quests" title="Quests" onClick={() => setQuestOpen(true)}>
                         <ScrollText aria-hidden="true" strokeWidth={1.75} />

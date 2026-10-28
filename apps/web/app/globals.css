@@ -958,6 +958,30 @@ button.enter {
     bottom: 64px;
     width: min(240px, calc(100% - 16px));
   }
+  .hud-aside.is-collapsed {
+    width: 48px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+  .shell:has(.game-root) > .site-foot {
+    top: 8px;
+    bottom: auto;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
+.sign-status {
+  background: #141416;
+  color: #d4d2cc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: var(--mono);
+  font-size: var(--type-small);
+  line-height: 20px;
+  white-space: nowrap;
 }
 .hud-bc .btn-secondary,
 .hud-bc .btn-secondary:hover,

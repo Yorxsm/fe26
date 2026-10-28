@@ -1302,6 +1302,16 @@ function cameraHeld() {
   return document.documentElement.dataset.holdCamera === "1" || document.documentElement.dataset.soundOpen === "1";
 }
 
+function widenOrbit(controls: Rig | null) {
+  if (!controls) return;
+  controls.minDistance = 8;
+  controls.maxDistance = 360;
+  controls.minPolarAngle = 0.35;
+  controls.maxPolarAngle = 1.5;
+  const delta = (controls as Rig & { _sphericalDelta?: { set: (x: number, y: number, z: number) => void } })._sphericalDelta;
+  delta?.set(0, 0, 0);
+}
+
 function CameraDriver({
   mode,
   beat,
@@ -1402,14 +1412,20 @@ function CameraDriver({
     }
     if (!driving && homing.current) {
       rig.enabled = false;
+      widenOrbit(controls);
       applyFov(48);
       aim.copy(overviewAim);
       eye.copy(overviewEye);
-      const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2.4);
+      const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 4);
       rig.target.lerp(aim, blend);
       camera.position.lerp(eye, blend);
       camera.lookAt(rig.target);
-      if (camera.position.distanceTo(overviewEye) < 0.6) homing.current = false;
+      if (camera.position.distanceTo(overviewEye) < 0.6) {
+        camera.position.copy(overviewEye);
+        rig.target.copy(overviewAim);
+        controls?.update();
+        homing.current = false;
+      }
       return;
     }
     rig.enabled = !driving;
@@ -1498,8 +1514,15 @@ function CameraDriver({
         rig.target.lerp(overviewAim, Math.min(1, ease + 0.2));
         camera.lookAt(rig.target);
         applyFov(48);
+        widenOrbit(controls);
         if (controls) controls.enabled = false;
         latched.current = null;
+        if (t >= 1) {
+          camera.position.copy(overviewEye);
+          rig.target.copy(overviewAim);
+          camera.lookAt(overviewAim);
+          controls?.update();
+        }
         return;
       }
       depart.current = null;
