@@ -589,6 +589,10 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
     awards
 }
 
+pub fn award_in_window(now: u64, window: BoardWindow, unix: u64) -> bool {
+    in_window(now, window, unix)
+}
+
 fn in_window(now: u64, window: BoardWindow, unix: u64) -> bool {
     if unix > now {
         return false;

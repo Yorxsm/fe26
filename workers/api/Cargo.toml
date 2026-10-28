@@ -14,6 +14,7 @@ fe2vi-core = { path = "../../crates/fe2vi-core" }
 fe2vi-intents = { path = "../../crates/fe2vi-intents" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = { version = "=0.8.6", default-features = false }

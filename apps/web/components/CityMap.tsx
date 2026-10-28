@@ -2111,6 +2111,7 @@ export default function CityMap({
   onUnavailable,
   shotLock = false,
   roomBusy = false,
+  visitors = [],
 }: {
   paused: boolean;
   mode: "orbit" | "cutscene" | "play";
@@ -2127,7 +2128,9 @@ export default function CityMap({
   onUnavailable: () => void;
   shotLock?: boolean;
   roomBusy?: boolean;
+  visitors?: CityAgent[];
 }) {
+  const crew = [...CITY_AGENTS, ...visitors];
   const [lean, setLean] = useState(false);
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
   useEffect(() => {
@@ -2218,7 +2221,7 @@ export default function CityMap({
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
       ) : (
-        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
+        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : crew).map((agent, index) => (
           <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
       )}

@@ -31,6 +31,8 @@ pub struct ArenaState {
     pub follows: Vec<FollowEdge>,
     #[serde(default)]
     pub grants: Vec<StoredGrant>,
+    #[serde(default)]
+    pub book: crate::agents::PlayerBook,
 }
 
 impl Default for ArenaState {
@@ -45,6 +47,7 @@ impl Default for ArenaState {
             seen_chain: Vec::new(),
             follows: Vec::new(),
             grants: Vec::new(),
+            book: crate::agents::PlayerBook::default(),
         }
     }
 }
@@ -134,6 +137,9 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             Some(location),
         );
     }
+    if let Some(outcome) = crate::agents::dispatch_player(state, incoming) {
+        return outcome;
+    }
     let parts = split_path(incoming.path);
     match (incoming.method, parts.as_slice()) {
         ("GET", ["health"]) | ("GET", ["v1", "health"]) => http(
@@ -220,10 +226,13 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ("GET", ["v1", "village", "tape"]) => crate::surface::tape(query_now(incoming.path)),
         ("GET", ["v1", "schedule"]) => crate::surface::schedule(query_now(incoming.path)),
         ("GET", ["v1", "leaderboard"]) => crate::surface::public_board(
+            state,
             query_param(incoming.path, "window"),
-            query_param(incoming.path, "room"),
+            query_param(incoming.path, "room").or_else(|| query_param(incoming.path, "arena")),
             query_param(incoming.path, "agent"),
             query_now(incoming.path),
+            query_param(incoming.path, "limit"),
+            query_param(incoming.path, "offset"),
         ),
         ("GET", ["v1", "rules"]) => crate::surface::point_rules(),
         ("GET", ["v1", "heist", "leaderboard"]) => crate::surface::heist_board(

@@ -1,3 +1,4 @@
+mod agents;
 mod indexer;
 mod logic;
 mod surface;
@@ -60,6 +61,7 @@ mod edge {
             let method = match req.method() {
                 Method::Get => "GET",
                 Method::Post => "POST",
+                Method::Delete => "DELETE",
                 Method::Options => "OPTIONS",
                 _ => "OTHER",
             };
@@ -107,6 +109,12 @@ mod edge {
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
+            let sql = self.state.storage().sql();
+            if ensure_player_sql(&sql).is_ok() {
+                if let Ok(Some(book)) = load_player_book(&sql) {
+                    arena.book = book;
+                }
+            }
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -127,6 +135,8 @@ mod edge {
                     location,
                 } => {
                     if mutated {
+                        let sql = self.state.storage().sql();
+                        let _ = ensure_player_sql(&sql).and_then(|_| save_player_book(&sql, &arena.book));
                         storage.put("arena", &arena).await?;
                     }
                     if let Some(fanout) = fanout {
@@ -244,6 +254,139 @@ mod edge {
             .to_string();
             with_cors(Response::ok(body)?, "application/json")
         }
+    }
+
+    fn ensure_player_sql(sql: &worker::SqlStorage) -> Result<()> {
+        for statement in [
+            "CREATE TABLE IF NOT EXISTS players (agent_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, owner_contact TEXT, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS player_queue (arena_id TEXT NOT NULL, agent_id TEXT NOT NULL, queued_unix INTEGER NOT NULL, PRIMARY KEY (arena_id, agent_id))",
+            "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (agent_id, client_request_id))",
+        ] {
+            sql.exec(statement, None::<Vec<worker::SqlStorageValue>>)?;
+        }
+        Ok(())
+    }
+
+    fn load_player_book(sql: &worker::SqlStorage) -> Result<Option<crate::agents::PlayerBook>> {
+        #[derive(serde::Deserialize)]
+        struct Count { n: i64 }
+        let count: Count = sql.exec("SELECT COUNT(*) AS n FROM players", None::<Vec<worker::SqlStorageValue>>)?.one()?;
+        if count.n == 0 {
+            return Ok(None);
+        }
+        #[derive(serde::Deserialize)]
+        struct PlayerRow {
+            agent_id: String,
+            handle: String,
+            name: String,
+            description: String,
+            owner_contact: Option<String>,
+            token_hash: String,
+            token_prefix: String,
+            status: String,
+            created_unix: i64,
+        }
+        #[derive(serde::Deserialize)]
+        struct QueueRow { arena_id: String, agent_id: String, queued_unix: i64 }
+        #[derive(serde::Deserialize)]
+        struct MatchRow {
+            match_id: String,
+            arena_id: String,
+            status: String,
+            turn: i64,
+            deadline_unix: i64,
+            seats_json: String,
+            actions_json: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct SeenRow { agent_id: String, client_request_id: String, status: i64, body: String }
+        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
+        let queue = sql.exec("SELECT arena_id, agent_id, queued_unix FROM player_queue", None::<Vec<worker::SqlStorageValue>>)?.to_array::<QueueRow>()?;
+        let matches = sql.exec("SELECT match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json FROM player_matches", None::<Vec<worker::SqlStorageValue>>)?.to_array::<MatchRow>()?;
+        let seen = sql.exec("SELECT agent_id, client_request_id, status, body FROM player_seen", None::<Vec<worker::SqlStorageValue>>)?.to_array::<SeenRow>()?;
+        Ok(Some(crate::agents::PlayerBook {
+            players: players.into_iter().map(|row| crate::agents::Player {
+                agent_id: row.agent_id,
+                handle: row.handle,
+                name: row.name,
+                description: row.description,
+                owner_contact: row.owner_contact,
+                token_hash: row.token_hash,
+                token_prefix: row.token_prefix,
+                status: row.status,
+                created_unix: row.created_unix as u64,
+            }).collect(),
+            queue: queue.into_iter().map(|row| crate::agents::Queued {
+                arena_id: row.arena_id,
+                agent_id: row.agent_id,
+                queued_unix: row.queued_unix as u64,
+            }).collect(),
+            matches: matches.into_iter().map(|row| crate::agents::PlayMatch {
+                match_id: row.match_id,
+                arena_id: row.arena_id,
+                status: row.status,
+                turn: row.turn as u32,
+                deadline_unix: row.deadline_unix as u64,
+                seats: serde_json::from_str(&row.seats_json).unwrap_or_default(),
+                actions: serde_json::from_str(&row.actions_json).unwrap_or_default(),
+            }).collect(),
+            seen: seen.into_iter().map(|row| crate::agents::Seen {
+                agent_id: row.agent_id,
+                client_request_id: row.client_request_id,
+                status: row.status as u16,
+                body: row.body,
+            }).collect(),
+        }))
+    }
+
+    fn save_player_book(sql: &worker::SqlStorage, book: &crate::agents::PlayerBook) -> Result<()> {
+        for table in ["players", "player_queue", "player_matches", "player_seen"] {
+            sql.exec(&format!("DELETE FROM {table}"), None::<Vec<worker::SqlStorageValue>>)?;
+        }
+        for player in &book.players {
+            sql.exec(
+                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                Some(vec![
+                    player.agent_id.clone().into(),
+                    player.handle.clone().into(),
+                    player.name.clone().into(),
+                    player.description.clone().into(),
+                    player.owner_contact.clone().into(),
+                    player.token_hash.clone().into(),
+                    player.token_prefix.clone().into(),
+                    player.status.clone().into(),
+                    (player.created_unix as i64).into(),
+                ]),
+            )?;
+        }
+        for seat in &book.queue {
+            sql.exec(
+                "INSERT INTO player_queue (arena_id, agent_id, queued_unix) VALUES (?, ?, ?)",
+                Some(vec![seat.arena_id.clone().into(), seat.agent_id.clone().into(), (seat.queued_unix as i64).into()]),
+            )?;
+        }
+        for play in &book.matches {
+            sql.exec(
+                "INSERT INTO player_matches (match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                Some(vec![
+                    play.match_id.clone().into(),
+                    play.arena_id.clone().into(),
+                    play.status.clone().into(),
+                    (play.turn as i64).into(),
+                    (play.deadline_unix as i64).into(),
+                    serde_json::to_string(&play.seats).unwrap_or_else(|_| "[]".into()).into(),
+                    serde_json::to_string(&play.actions).unwrap_or_else(|_| "[]".into()).into(),
+                ]),
+            )?;
+        }
+        for seen in &book.seen {
+            sql.exec(
+                "INSERT INTO player_seen (agent_id, client_request_id, status, body) VALUES (?, ?, ?, ?)",
+                Some(vec![seen.agent_id.clone().into(), seen.client_request_id.clone().into(), (seen.status as i64).into(), seen.body.clone().into()]),
+            )?;
+        }
+        Ok(())
     }
 
     fn watch_accounts(env: &Env) -> Vec<String> {

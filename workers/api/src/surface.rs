@@ -92,10 +92,13 @@ pub fn schedule(now: u64) -> Outcome {
 }
 
 pub fn public_board(
+    state: &crate::logic::ArenaState,
     window_raw: Option<&str>,
     room_raw: Option<&str>,
     agent: Option<&str>,
     now: u64,
+    limit_raw: Option<&str>,
+    offset_raw: Option<&str>,
 ) -> Outcome {
     let Some(window) = fe2vi_core::BoardWindow::parse(window_raw.unwrap_or("season")) else {
         return http(
@@ -121,16 +124,71 @@ pub fn public_board(
             }
         },
     };
-    let rows = fe2vi_core::public_leaderboard(now, window, room);
-    let recent = agent.map(|id| fe2vi_core::recent_results(now, id, window));
+    let limit = match limit_raw {
+        None => None,
+        Some(raw) => match raw.parse::<usize>() {
+            Ok(value) if (1..=100).contains(&value) => Some(value),
+            _ => {
+                return http(
+                    400,
+                    "application/json",
+                    r#"{"error":"validation_error","message":"limit is 1 to 100"}"#.into(),
+                    false,
+                    None,
+                );
+            }
+        },
+    };
+    let offset = match offset_raw.unwrap_or("0").parse::<usize>() {
+        Ok(value) => value,
+        Err(_) => {
+            return http(
+                400,
+                "application/json",
+                r#"{"error":"validation_error","message":"offset is a number"}"#.into(),
+                false,
+                None,
+            );
+        }
+    };
+    let mut rows = fe2vi_core::public_leaderboard(now, window, room);
+    rows.extend(crate::agents::registered_rows(state, now, window, room));
+    rows.sort_by(|left, right| {
+        right
+            .points
+            .cmp(&left.points)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.agent.cmp(&right.agent))
+    });
+    let mut last_points = None;
+    let mut last_rank = 0u32;
+    for (index, row) in rows.iter_mut().enumerate() {
+        if last_points == Some(row.points) {
+            row.rank = last_rank;
+        } else {
+            last_rank = index as u32 + 1;
+            last_points = Some(row.points);
+            row.rank = last_rank;
+        }
+    }
+    let page: Vec<_> = rows.into_iter().skip(offset).take(limit.unwrap_or(usize::MAX)).collect();
+    let recent = agent.map(|id| {
+        crate::agents::registered_recent(state, id, now, window).unwrap_or_else(|| {
+            serde_json::to_value(fe2vi_core::recent_results(now, id, window))
+                .ok()
+                .and_then(|value| value.as_array().cloned())
+                .unwrap_or_default()
+        })
+    });
     json(
         200,
         &serde_json::json!({
             "window": window.as_str(),
             "room": room.map(|room| room.as_str()).unwrap_or("all"),
+            "arena": room.map(|room| room.as_str()).unwrap_or("all"),
             "now": now,
             "source": "mock",
-            "rows": rows,
+            "rows": page,
             "recent": recent,
         }),
         false,
@@ -269,10 +327,18 @@ pub fn spectator_stats(state: &ArenaState, now: u64) -> Outcome {
             ids.insert(agent.account_id.clone());
         }
     }
-    let roster: Vec<serde_json::Value> = fe2vi_core::city_roster()
+    let mut roster: Vec<serde_json::Value> = fe2vi_core::city_roster()
         .iter()
         .map(|agent| serde_json::json!({ "account_id": agent.account_id, "name": agent.name }))
         .collect();
+    for player in &state.book.players {
+        roster.push(serde_json::json!({
+            "account_id": player.handle,
+            "name": player.name,
+            "registered": true,
+        }));
+        ids.insert(player.handle.clone());
+    }
     let live_games = fe2vi_core::open_slots(now).len() + fe2vi_core::live_events(now).len();
     json(
         200,

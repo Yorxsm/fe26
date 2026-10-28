@@ -14,7 +14,7 @@ mod venue;
 mod village;
 
 pub use board::{
-    agent_roster, challenges, city_roster, countdown_secs, daily_slot, event_markdown, event_phase,
+    agent_roster, award_in_window, challenges, city_roster, countdown_secs, daily_slot, event_markdown, event_phase,
     example_run, heist_leaderboard, heist_live, hosted_events, live_events, mock_awards,
     next_heist, open_slots, public_leaderboard, recent_results, room_windows, schedule_markdown,
     season_slot, upcoming_season_slot, venue_markdown, war_room_md, weekly_slot, BoardWindow,

@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const port = 8787;
 const origin = `http://127.0.0.1:${port}`;
-const routes = ["/", "/?room=vault", "/lobby", "/leaderboard"];
+const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/skill/SKILL.md", "/llms.txt"];
 const env = {
   ...process.env,
   NEXT_PUBLIC_FE2VI_API_URL: process.env.NEXT_PUBLIC_FE2VI_API_URL || "https://api.fe2vi.space",
