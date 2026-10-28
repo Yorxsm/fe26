@@ -1319,6 +1319,19 @@ body, p, li, label, .lede, .meta, .subtitle, .caption-detail, td, .num, .ribbon 
   pointer-events: none;
 }
 .pick-flash[hidden] { display: none; }
+.load-bar {
+  width: min(320px, 72vw);
+  height: 14px;
+  background: #1e1e21;
+  border-radius: 8px;
+  box-shadow: 0 4px 0 #121214;
+  overflow: hidden;
+}
+.load-bar > span {
+  display: block;
+  height: 100%;
+  background: #c94a1a;
+}
 .loading-screen {
   position: fixed;
   inset: 0;
