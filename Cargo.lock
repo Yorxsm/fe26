@@ -735,6 +735,7 @@ dependencies = [
  "fe2vi-intents",
  "serde",
  "serde_json",
+ "sha2",
  "worker",
  "worker-macros",
  "worker-sys",
