@@ -858,9 +858,18 @@ function stackNameTag(
     stack = step;
     if (step === 3) fade = tagPoint.z > Math.min(...others.map((slot) => slot.depth));
   }
+  const margin = 8;
+  const placed = chip.parentElement?.parentElement?.style.transform.match(/translate3d\(([-\d.]+)px/);
+  const originX = placed ? Number(placed[1]) : sx;
+  const minCenter = margin + width / 2;
+  const maxCenter = Math.max(minCenter, size.width - margin - width / 2);
+  const near = originX > -width && originX < size.width + width;
+  const center = near ? Math.min(maxCenter, Math.max(minCenter, originX)) : originX;
+  const shiftX = center - originX;
   const top = sy - height / 2 - stack * (height + gap);
-  tagSlots.set(index, { left: sx - width / 2, top, width, height, depth: tagPoint.z });
-  chip.style.transform = stack ? `translateY(${-stack * (height + gap)}px)` : "";
+  tagSlots.set(index, { left: center - width / 2, top, width, height, depth: tagPoint.z });
+  const shiftY = stack ? -stack * (height + gap) : 0;
+  chip.style.transform = shiftX || shiftY ? `translate(${shiftX}px, ${shiftY}px)` : "";
   chip.style.opacity = fade ? "0.32" : "1";
 }
 

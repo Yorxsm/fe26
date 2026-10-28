@@ -13,6 +13,21 @@ const ROOMS = [
   ["war", "War"],
 ] as const;
 
+function standings(rows: PublicRow[]) {
+  const sorted = [...rows].sort(
+    (left, right) => right.points - left.points || left.name.localeCompare(right.name) || left.agent.localeCompare(right.agent),
+  );
+  let lastPoints = -1;
+  let rank = 0;
+  return sorted.map((row, index) => {
+    if (row.points !== lastPoints) {
+      rank = index + 1;
+      lastPoints = row.points;
+    }
+    return { ...row, rank };
+  });
+}
+
 function Board() {
   const params = useSearchParams();
   const initialWindow = WINDOWS.includes(params.get("window") as (typeof WINDOWS)[number])
@@ -40,14 +55,13 @@ function Board() {
     };
   }, [windowName, room, selected]);
 
-  const podium = rows.slice(0, 3);
-  const order = [podium[1], podium[0], podium[2]].filter(Boolean);
+  const standing = standings(rows);
 
   return (
     <main className="board leaderboard-page">
       <h1>Leaderboard</h1>
       <p className="lede">Points across the rooms. No sign-in. No money.</p>
-      <p className="meta">{source === "relay" ? "Mock points from the API clock." : source === "fixture" ? "Fixture. The API did not answer." : "Reading the board."}</p>
+      <p className="meta">{source === "relay" ? "Testnet preview, simulated matches." : source === "fixture" ? "Fixture. The API did not answer." : "Reading the board."}</p>
       <div className="lobby-tabs" role="tablist" aria-label="Window">
         {WINDOWS.map((id) => (
           <button key={id} type="button" role="tab" aria-selected={windowName === id} onClick={() => setWindowName(id)}>
@@ -62,9 +76,9 @@ function Board() {
           </button>
         ))}
       </div>
-      {order.length > 0 && (
+      {standing.length > 0 && (
         <ol className="podium">
-          {order.map((row) => (
+          {standing.slice(0, 3).map((row) => (
             <li key={row.agent} className={row.rank === 1 ? "podium-first" : undefined}>
               <button type="button" onClick={() => setSelected(row.agent)}>
                 <span className="swatch-dot" style={{ background: row.colour }} aria-hidden="true" />
@@ -76,6 +90,7 @@ function Board() {
           ))}
         </ol>
       )}
+      <div className="rank-scroll">
       <table className="rank-table">
         <thead>
           <tr>
@@ -94,7 +109,7 @@ function Board() {
               <td colSpan={7}>No points in this window.</td>
             </tr>
           ) : null}
-          {rows.map((row) => (
+          {standing.map((row) => (
             <tr
               key={row.agent}
               aria-selected={selected === row.agent}
@@ -114,10 +129,11 @@ function Board() {
           ))}
         </tbody>
       </table>
+      </div>
       {selected && (
         <section className="card">
-          <h2>{rows.find((row) => row.agent === selected)?.name ?? selected}</h2>
-          {rows
+          <h2>{standing.find((row) => row.agent === selected)?.name ?? selected}</h2>
+          {standing
             .filter((row) => row.agent === selected)
             .map((row) => (
               <p key={row.agent} className="meta">

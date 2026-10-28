@@ -958,6 +958,11 @@ button.enter {
     bottom: 64px;
     width: min(240px, calc(100% - 16px));
   }
+  .hud-bl .hint-toggle,
+  .hud-bl .quest-hint {
+    width: calc(100vw - 16px);
+    max-width: none;
+  }
   .hud-aside.is-collapsed {
     width: 48px;
     padding: 0;
@@ -972,17 +977,46 @@ button.enter {
     transform: translateX(-50%);
   }
 }
-.sign-status {
+.sign-list {
+  display: none;
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 8;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  gap: 8px;
   background: #141416;
-  color: #d4d2cc;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 4px 8px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+@media (max-width: 800px) {
+  .sign-list { display: grid; }
+}
+.sign-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.sign-list-name {
+  font-family: var(--display);
+  font-size: var(--type-small);
+  line-height: 20px;
+  color: #d4d2cc;
+}
+.sign-list-status {
   font-family: var(--mono);
   font-size: var(--type-small);
   line-height: 20px;
-  white-space: nowrap;
+  color: #c94a1a;
+  text-align: right;
 }
+.sign-list-status.is-live { color: #2fb86a; }
 .hud-bc .btn-secondary,
 .hud-bc .btn-secondary:hover,
 .hud-bc .btn-secondary:active {
@@ -1919,13 +1953,18 @@ button.pronounce:focus-visible {
   .site-nav.open a { min-height: 44px; }
 }
 
+.leaderboard-page {
+  width: 100%;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.leaderboard-page > * { grid-column: 1 / -1; min-width: 0; }
 .podium {
   display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
   align-items: end;
   list-style: none;
-  margin: 0 0 var(--space-md);
+  margin: 0;
   padding: 0;
 }
 .podium button, .rank-chip {
@@ -1943,12 +1982,16 @@ button.pronounce:focus-visible {
   font-size: var(--type-small);
 }
 .podium-first button { min-height: 72px; background: #141416; }
+.rank-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
 .rank-table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
-  margin: 0 0 var(--space-md);
-  display: block;
-  overflow-x: auto;
+  margin: 0;
+  table-layout: fixed;
 }
 .rank-table th,
 .rank-table td {

@@ -11,7 +11,7 @@ import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
 import { MarkdownDoc } from "@/components/MarkdownDoc";
-import { RoomHud } from "@/components/RoomHud";
+import { LobbySignList, RoomHud } from "@/components/RoomHud";
 import {
   ArrowLeft,
   ArrowRight,
@@ -591,6 +591,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
               <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
             )}
+            {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
             {phase !== "boot" && !mapReady ? <LoadingState label="the map" hero progress={mapProgress} /> : null}
             {phase === "boot" ? (
               <LoadingState label="the map" hero progress={mapProgress} />

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Info, Trophy } from "lucide-react";
-import { useHeistNow } from "@/lib/clock";
+import { useHeistNow, useRoomClocks } from "@/lib/clock";
 import { CITY_AGENTS, INTERIOR_CAST } from "@/lib/city";
 import { apiBase } from "@/lib/protocol";
-import { formatClock, heistCountdown } from "@/lib/schedule";
+import { formatClock, formatCountdown, heistCountdown } from "@/lib/schedule";
 
 function plainPoints(room: string, book: Record<string, unknown>) {
   const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
@@ -72,6 +72,35 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
     rules: "",
   },
 };
+
+const LOBBY_SIGNS = [
+  ["Vault", "vault"],
+  ["Cup", "cup"],
+  ["Floor", "village"],
+  ["War", "war"],
+] as const;
+
+export function LobbySignList() {
+  const rooms = useRoomClocks();
+  return (
+    <ol className="sign-list" aria-label="Room status">
+      {LOBBY_SIGNS.map(([name, id]) => {
+        const slot = rooms[id];
+        const status = !slot
+          ? "…"
+          : slot.live && slot.kind === "season"
+            ? "Open all season"
+            : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
+        return (
+          <li key={id}>
+            <span className="sign-list-name">{name}</span>
+            <span className={slot?.live ? "sign-list-status is-live" : "sign-list-status"}>{status}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export function RoomHud({
   roomId,

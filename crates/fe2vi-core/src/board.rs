@@ -462,6 +462,7 @@ fn at_or_before(now: u64, raw: u64) -> u64 {
 }
 
 /// Several awards per agent, spread across today, this week, and the season.
+/// Counts differ by seat. Each award still uses the published point value.
 /// A wider window therefore sums to at least as many points.
 pub fn mock_awards(now: u64) -> Vec<PointAward> {
     let day = day_start(now);
@@ -471,6 +472,9 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
         let colour = COLOURS[index % COLOURS.len()];
         let push =
             |awards: &mut Vec<PointAward>, room: PointRoom, points: u32, unix: u64, label: &str| {
+                if points == 0 {
+                    return;
+                }
                 let unix = at_or_before(now, unix);
                 awards.push(PointAward {
                     agent: agent.account_id.to_string(),
@@ -482,50 +486,105 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
                     label: label.to_string(),
                 });
             };
-        let today_vault = if index == 0 { POINT_STEAL } else { POINT_SCOUT };
-        push(
-            &mut awards,
-            PointRoom::Vault,
-            today_vault,
-            day.saturating_add(60 + index as u64),
-            "heist scout",
-        );
-        push(
-            &mut awards,
-            PointRoom::Vault,
-            POINT_STEAL,
-            week.saturating_add(3600 + (index as u64) * 60),
-            "heist steal",
-        );
-        push(
-            &mut awards,
-            PointRoom::Vault,
-            POINT_SABOTAGE,
-            SEASON_START.saturating_add((index as u64 + 1) * DAY),
-            "heist sabotage",
-        );
-        push(
-            &mut awards,
-            PointRoom::Cup,
-            POINT_SCOUT,
-            day.saturating_add(180 + index as u64),
-            "cup round",
-        );
-        push(
-            &mut awards,
-            PointRoom::Village,
-            POINT_SCOUT,
-            week.saturating_add(7200 + (index as u64) * 90),
-            "village fill",
-        );
-        let flag = challenges()[index % challenges().len()];
-        push(
-            &mut awards,
-            PointRoom::War,
-            flag.points,
-            SEASON_START.saturating_add((index as u64 + 2) * DAY),
-            "war flag",
-        );
+        // One vault action today. Mason steals, so the daily heist board stays Mason's.
+        if index == 0 {
+            push(
+                &mut awards,
+                PointRoom::Vault,
+                POINT_STEAL,
+                day.saturating_add(120),
+                "heist steal",
+            );
+        } else {
+            push(
+                &mut awards,
+                PointRoom::Vault,
+                POINT_SCOUT,
+                day.saturating_add(120 + index as u64),
+                "heist scout",
+            );
+        }
+        if week < day {
+            let steals_this_week = 1 + (index % 3) as u32;
+            for n in 0..steals_this_week {
+                push(
+                    &mut awards,
+                    PointRoom::Vault,
+                    POINT_STEAL,
+                    week.saturating_add(3_600 + u64::from(n) * 300 + index as u64 * 40),
+                    "heist steal",
+                );
+            }
+        }
+        let history_end = day.saturating_sub(1).max(SEASON_START);
+        let history_span = history_end.saturating_sub(SEASON_START).max(1);
+        let place = |n: u32| -> u64 {
+            let step = (index as u64)
+                .saturating_mul(17)
+                .saturating_add(u64::from(n).saturating_mul(13))
+                .saturating_add(5);
+            SEASON_START.saturating_add((step.saturating_mul(3_600)) % history_span)
+        };
+        let steals = 4 + (index % 6) as u32;
+        let scouts = 6 + ((index * 3) % 12) as u32;
+        let sabotages = (index % 4) as u32;
+        let cup_rounds = 12 + ((index * 5) % 29) as u32;
+        let fills = 9 + ((index * 7) % 27) as u32;
+        for n in 0..steals {
+            push(
+                &mut awards,
+                PointRoom::Vault,
+                POINT_STEAL,
+                place(n),
+                "heist steal",
+            );
+        }
+        for n in 0..scouts {
+            push(
+                &mut awards,
+                PointRoom::Vault,
+                POINT_SCOUT,
+                place(100 + n),
+                "heist scout",
+            );
+        }
+        for n in 0..sabotages {
+            push(
+                &mut awards,
+                PointRoom::Vault,
+                POINT_SABOTAGE,
+                place(200 + n),
+                "heist sabotage",
+            );
+        }
+        for n in 0..cup_rounds {
+            push(
+                &mut awards,
+                PointRoom::Cup,
+                POINT_SCOUT,
+                place(300 + n),
+                "cup round",
+            );
+        }
+        for n in 0..fills {
+            push(
+                &mut awards,
+                PointRoom::Village,
+                POINT_SCOUT,
+                place(400 + n),
+                "village fill",
+            );
+        }
+        if index % 3 != 2 {
+            let flag = challenges()[index % challenges().len()];
+            push(
+                &mut awards,
+                PointRoom::War,
+                flag.points,
+                place(900),
+                "war flag",
+            );
+        }
     }
     awards
 }
@@ -623,6 +682,7 @@ fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicR
         right
             .points
             .cmp(&left.points)
+            .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.agent.cmp(&right.agent))
     });
     let mut last_points: Option<u32> = None;
@@ -874,6 +934,41 @@ mod tests {
         assert!(!vault.live);
         assert_ne!(vault.start_unix, cup.start_unix);
         assert_ne!(vault.end_unix, village.end_unix);
+    }
+
+    #[test]
+    fn season_scores_vary_by_room_and_tiebreak_by_name() {
+        let rows = public_leaderboard(TUESDAY_AFTERNOON, BoardWindow::Season, None);
+        let distinct = |pick: fn(&PublicRow) -> u32| {
+            let mut values: Vec<u32> = rows.iter().map(pick).collect();
+            values.sort_unstable();
+            values.dedup();
+            values.len()
+        };
+        assert!(distinct(|row| row.vault) > 1);
+        assert!(distinct(|row| row.cup) > 1);
+        assert!(distinct(|row| row.village) > 1);
+        assert!(distinct(|row| row.war) > 1);
+        let mut by_war = rows.clone();
+        by_war.sort_by(|left, right| {
+            right
+                .war
+                .cmp(&left.war)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.agent.cmp(&right.agent))
+        });
+        let war_order: Vec<&str> = by_war.iter().map(|row| row.agent.as_str()).collect();
+        let season_order: Vec<&str> = rows.iter().map(|row| row.agent.as_str()).collect();
+        assert_ne!(season_order, war_order);
+        let mut previous_name = "";
+        let mut previous_points: Option<u32> = None;
+        for row in &rows {
+            if previous_points == Some(row.points) {
+                assert!(previous_name <= row.name.as_str());
+            }
+            previous_name = row.name.as_str();
+            previous_points = Some(row.points);
+        }
     }
 
     #[test]

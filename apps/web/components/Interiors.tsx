@@ -1,7 +1,6 @@
 "use client";
 
-import { Html, useGLTF } from "@react-three/drei";
-import { useThree } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
@@ -282,19 +281,7 @@ function Screen({
         <planeGeometry args={[width, height]} />
         <meshBasicMaterial map={map} color="#ffffff" toneMapped={false} />
       </mesh>
-      {sign && status ? <SignStatus text={status} /> : null}
     </group>
-  );
-}
-
-
-function SignStatus({ text }: { text: string }) {
-  const narrow = useThree((state) => state.size.width < 800);
-  if (!narrow || text === "…") return null;
-  return (
-    <Html position={[0, -0.42, 0.12]} center zIndexRange={[8, 0]} style={{ pointerEvents: "none" }}>
-      <div className="sign-status">{text}</div>
-    </Html>
   );
 }
 
