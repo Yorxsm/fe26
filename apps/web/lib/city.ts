@@ -214,12 +214,12 @@ export const CUTSCENE_CAST: CastPose[][] = [
 ];
 
 const ROOM_WAYS: Array<[number, number]> = [
-  [-3.2, -3.4],
-  [2.6, -3.1],
-  [0.2, -0.6],
-  [-2.4, 1.2],
-  [2.2, 1.4],
-  [0, 2.4],
+  [-3.2, -3.8],
+  [2.8, -3.5],
+  [-2.2, -4.2],
+  [2.2, -4.0],
+  [-3.4, -3.2],
+  [3.0, -3.6],
 ];
 
 /** Walk, idle, emote, and a trip to the south door. Clocks differ per agent. */
@@ -235,12 +235,22 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
   const ways = ROOM_WAYS.map(([x, z], step) => [x + shift * (step % 2 === 0 ? 1 : -1), z] as [number, number]);
   const from = ways[index % ways.length];
   const to = ways[(index + 2) % ways.length];
-  const door: [number, number] = [((index % 3) - 1) * 0.8, 1.6];
+  const door: [number, number] = [((index % 3) - 1) * 1.8, -3.2];
+  const clear = (x: number, z: number) => {
+    let lx = x - ox;
+    let lz = z - oz;
+    if (lz > -3.2) lz = -3.2;
+    if (Math.abs(lx) < 1.5) lx = lx < 0 ? -2.1 : 2.1;
+    lx = Math.min(4.1, Math.max(-4.1, lx));
+    lz = Math.max(-4.4, lz);
+    return { x: ox + lx, z: oz + lz };
+  };
   const walk = (a: [number, number], b: [number, number], u: number) => {
     const clamped = Math.min(1, Math.max(0, u));
+    const posed = clear(ox + a[0] + (b[0] - a[0]) * clamped, oz + a[1] + (b[1] - a[1]) * clamped);
     return {
-      x: ox + a[0] + (b[0] - a[0]) * clamped,
-      z: oz + a[1] + (b[1] - a[1]) * clamped,
+      x: posed.x,
+      z: posed.z,
       rot: Math.atan2(b[0] - a[0], b[1] - a[1]),
       clip: "walk" as const,
       visible: true,
@@ -252,13 +262,16 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
     return walk(from, to, ping);
   }
   if (phase < 0.58) {
-    return { x: ox + to[0], z: oz + to[1], rot: Math.PI, clip: "idle" as const, visible: true };
+    const posed = clear(ox + to[0], oz + to[1]);
+    return { x: posed.x, z: posed.z, rot: Math.PI, clip: "idle" as const, visible: true };
   }
   if (phase < 0.72) {
-    return { x: ox + to[0], z: oz + to[1], rot: Math.PI, clip: "celebrate" as const, visible: true };
+    const posed = clear(ox + to[0], oz + to[1]);
+    return { x: posed.x, z: posed.z, rot: Math.PI, clip: "celebrate" as const, visible: true };
   }
   if (phase < 0.84) {
-    return { x: ox + from[0] * 0.4, z: oz - 2.2, rot: 0, clip: "idle" as const, visible: true };
+    const posed = clear(ox + from[0] * 0.4, oz - 2.2);
+    return { x: posed.x, z: posed.z, rot: 0, clip: "idle" as const, visible: true };
   }
   const doorU = (phase - 0.84) / 0.16;
   if (doorU < 0.45) return walk(from, door, doorU / 0.45);

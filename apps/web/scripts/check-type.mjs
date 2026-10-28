@@ -14,7 +14,7 @@ const pxOk = new Set(["12px", "14px", "16px", "20px", "24px", "32px", "48px"]);
 
 function walk(dir, out = []) {
   for (const name of fs.readdirSync(dir)) {
-    if (name === "node_modules" || name === ".next") continue;
+    if (name === "node_modules" || name === ".next" || name === ".open-next") continue;
     const full = path.join(dir, name);
     if (fs.statSync(full).isDirectory()) walk(full, out);
     else if (/\.(css|tsx|ts)$/.test(name)) out.push(full);

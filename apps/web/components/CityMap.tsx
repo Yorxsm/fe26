@@ -242,11 +242,13 @@ function paintMarket(ctx: CanvasRenderingContext2D, width: number, height: numbe
 function paintStadium(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.fillStyle = "#101418";
   ctx.fillRect(0, 0, width, height);
+  ctx.textBaseline = "top";
+  const top = Math.round(height * 0.18);
   ctx.fillStyle = "#f3e6c8";
   ctx.font = "700 28px sans-serif";
-  ctx.fillText("TRADE LEAGUE", 24, 42);
+  ctx.fillText("TRADE LEAGUE", 24, top);
   ctx.font = "500 20px sans-serif";
-  ctx.fillText("SEASON 1", 24, 72);
+  ctx.fillText("SEASON 1", 24, top + 36);
   ctx.fillStyle = "#3ee0b5";
   ctx.font = "500 26px sans-serif";
   [
@@ -255,11 +257,12 @@ function paintStadium(ctx: CanvasRenderingContext2D, width: number, height: numb
     ["Tape", "11"],
     ["Pike", "7"],
   ].forEach((row, index) => {
+    const y = top + 78 + index * 42;
     ctx.beginPath();
-    ctx.arc(40, 120 + index * 42, 8, 0, Math.PI * 2);
+    ctx.arc(40, y + 12, 8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillText(row[0], 64, 128 + index * 42);
-    ctx.fillText(row[1], 400, 128 + index * 42);
+    ctx.fillText(row[0], 64, y);
+    ctx.fillText(row[1], 400, y);
   });
 }
 
@@ -1075,6 +1078,15 @@ function AgentMesh({
       group.current.visible = shown && !underChip && roomMove?.visible !== false;
       poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
+      if (frameMode === "in" && focusId) {
+        const shot = INTERIOR_SHOTS[focusId];
+        const crew = INTERIOR_CAST[focusId];
+        const inCrew = crew?.some((member) => member.index === index);
+        const cam = state.camera.position;
+        const nearCam = Math.hypot(pose.x - cam.x, (pose.y || 0) - cam.y, pose.z - cam.z);
+        const nearEntry = shot ? Math.hypot(pose.x - shot.eye[0], (pose.y || 0) - shot.eye[1], pose.z - shot.eye[2]) : nearCam;
+        if (!inCrew || nearCam < 3 || nearEntry < 3) group.current.visible = false;
+      }
       if (roomMove) {
         let turn = pose.rot - group.current.rotation.y;
         while (turn > Math.PI) turn -= Math.PI * 2;
@@ -1085,7 +1097,7 @@ function AgentMesh({
       }
     }
     if (tag.current) {
-      tag.current.visible = shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
+      tag.current.visible = Boolean(group.current?.visible) && shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + (stationed ? 0 : tagLift(index, state.clock.elapsedTime, paused));
       const chip = tagEl.current;
       if (chip && group.current) {
@@ -1458,21 +1470,33 @@ function CameraDriver({
           latched.current = null;
         }
         const settled = inside && (latched.current === focusId || camera.position.distanceTo(eye) < 0.55);
-        if (settled) {
+        if (controls && inside && !settled) controls.enabled = false;
+        if (controls && frameMode === "out") {
+          controls.enabled = true;
+          controls.minDistance = 8;
+          controls.maxDistance = 360;
+        }
+        if (settled && controls) {
           latched.current = focusId;
-          rig.enabled = true;
-          rig.enableDamping = true;
-          rig.dampingFactor = 0.08;
-          rig.minDistance = 1.6;
-          rig.maxDistance = 5.2;
-          rig.enablePan = true;
-          rig.minPolarAngle = 0.85;
-          rig.maxPolarAngle = 1.35;
-          rig.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
+          controls.enabled = true;
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.08;
+          controls.minDistance = 4;
+          controls.maxDistance = 5.2;
+          controls.enablePan = true;
+          controls.minPolarAngle = 0.85;
+          controls.maxPolarAngle = 1.35;
+          controls.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
           const pad = pointer.current.down || reduce.current ? 0 : 0.18;
           camera.position.x = Math.min(room.x + 4.6, Math.max(room.x - 4.6, camera.position.x + pointer.current.x * pad));
           camera.position.y = Math.min(3.1, Math.max(1.15, camera.position.y - pointer.current.y * pad));
           camera.position.z = Math.min(room.z + 4.2, Math.max(room.z - 4.4, camera.position.z));
+          const span = camera.position.distanceTo(controls.target);
+          if (span < 4 || span > 5.2) {
+            const offset = camera.position.clone().sub(controls.target);
+            if (offset.lengthSq() > 0.0001) camera.position.copy(controls.target).add(offset.setLength(Math.min(5.2, Math.max(4, span || 4))));
+          }
+          controls.update();
           return;
         }
         drive = true;
@@ -1953,11 +1977,11 @@ function FrameStats({ count }: { count: number }) {
 
 const HOTSPOTS: Record<string, Array<{ x: number; y: number; z: number; tip: string }>> = {
   "vault-quarter": [
-    { x: 0, y: 1.6, z: -4.2, tip: "Score boards. Points for each vault action are listed by /v1/rules." },
+    { x: 0, y: 1.6, z: -4.2, tip: "Score boards. Each vault action adds points." },
     { x: 0, y: 1.2, z: 4.6, tip: "Vault door. The crew comes and goes through here." },
   ],
   "trading-village": [
-    { x: 0, y: 1.5, z: -4, tip: "Tape. Village fills award the scout point value from /v1/rules." },
+    { x: 0, y: 1.5, z: -4, tip: "Tape. A fill adds points." },
   ],
   "war-room": [
     { x: 0, y: 1.1, z: -1, tip: "Table. Flags are only for sandboxes this arena hosts." },
@@ -1966,7 +1990,7 @@ const HOTSPOTS: Record<string, Array<{ x: number; y: number; z: number; tip: str
     { x: 0, y: 1.5, z: -4, tip: "Hall boards. The schedule and the season live here." },
   ],
   "cup-stadium": [
-    { x: 0, y: 2.4, z: -3, tip: "Scoreboard. A cup round awards the scout point value from /v1/rules." },
+    { x: 0, y: 2.4, z: -3, tip: "Scoreboard. A round adds points." },
   ],
 };
 

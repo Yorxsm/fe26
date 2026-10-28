@@ -1,11 +1,12 @@
 "use client";
 
 import { useGLTF } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
-import { Suspense, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
-import { CHALLENGES, formatCountdown, heistCountdown, heistRows, mockQuotes } from "@/lib/schedule";
+import { useHeistNow } from "@/lib/clock";
+import { apiBase } from "@/lib/protocol";
+import { CHALLENGES, formatCountdown, heistCountdown, mockQuotes } from "@/lib/schedule";
 
 const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
   "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18] },
@@ -158,7 +159,7 @@ function paintSign(canvas: HTMLCanvasElement, sign: BoardSign, status: string, t
   ctx.fillText(status, 320, 400);
 }
 
-function paintBoard(canvas: HTMLCanvasElement, title: string, rows: BoardRow[], compact: boolean, band: boolean) {
+function paintBoard(canvas: HTMLCanvasElement, title: string, rows: BoardRow[], compact: boolean, band: boolean, inset: boolean) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const display = quotedFamily("--font-display", "sans-serif");
@@ -184,11 +185,12 @@ function paintBoard(canvas: HTMLCanvasElement, title: string, rows: BoardRow[], 
     });
     return;
   }
-  const titleSize = compact ? 150 : 84;
-  const bodySize = compact ? 132 : 60;
-  const titleY = compact ? 48 : 40;
-  const bodyTop = compact ? 280 : 168;
-  const bodyGap = compact ? 180 : 78;
+  const titleSize = compact ? 150 : inset ? 64 : 84;
+  const bodySize = compact ? 132 : inset ? 48 : 60;
+  const topPad = Math.round(canvas.height * (inset ? 0.2 : 0.06));
+  const titleY = inset ? topPad : compact ? 48 : 40;
+  const bodyTop = inset ? topPad + titleSize + 28 : compact ? 280 : 168;
+  const bodyGap = compact ? 180 : inset ? 64 : 78;
   ctx.textBaseline = "top";
   ctx.fillStyle = "#d4d2cc";
   ctx.font = `700 ${titleSize}px "${display}", sans-serif`;
@@ -228,6 +230,7 @@ function Screen({
   const [width, height] = size;
   const compact = !sign && height < 0.85;
   const band = !sign && width / height > 8;
+  const inset = !sign && height < 1.4;
   const map = useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = sign ? 1024 : band ? 3072 : 1024;
@@ -244,15 +247,15 @@ function Screen({
     const draw = () => {
       const canvas = map.image as HTMLCanvasElement;
       if (sign) paintSign(canvas, sign, status, tone);
-      else paintBoard(canvas, title, rows, compact, band);
+      else paintBoard(canvas, title, rows, compact, band, inset);
       map.needsUpdate = true;
     };
     draw();
     const display = quotedFamily("--font-display", "sans-serif");
     const mono = quotedFamily("--font-mono", "monospace");
     const fonts = Promise.all([
-      document.fonts.load(`700 ${sign ? 168 : band ? 72 : compact ? 150 : 84}px "${display}"`),
-      document.fonts.load(`500 ${sign ? 112 : band ? 56 : compact ? 132 : 60}px "${mono}"`),
+      document.fonts.load(`700 ${sign ? 168 : band ? 72 : compact ? 150 : inset ? 64 : 84}px "${display}"`),
+      document.fonts.load(`500 ${sign ? 112 : band ? 56 : compact ? 132 : inset ? 48 : 60}px "${mono}"`),
     ]).catch(() => undefined);
     const raced = Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 400))]);
     raced.then(() => {
@@ -278,15 +281,7 @@ function Screen({
 }
 
 function useClock() {
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  const last = useRef(now);
-  useFrame(() => {
-    const next = Math.floor(Date.now() / 1000);
-    if (next === last.current) return;
-    last.current = next;
-    setNow(next);
-  });
-  return now;
+  return useHeistNow();
 }
 
 function placed(id: string, name: string): FrameBoard {
@@ -295,21 +290,52 @@ function placed(id: string, name: string): FrameBoard {
   return board;
 }
 
+const BOARD_ROOM: Record<string, string> = {
+  "vault-quarter": "vault",
+  "cup-stadium": "cup",
+  "trading-village": "village",
+  "war-room": "war",
+  "skin-forge": "all",
+};
+
+function useSeasonBoard(id: string) {
+  const room = BOARD_ROOM[id] ?? "all";
+  const [rows, setRows] = useState<BoardRow[] | null>(null);
+  useEffect(() => {
+    const base = apiBase();
+    if (!base) return;
+    let dead = false;
+    fetch(`${base}/v1/leaderboard?window=season&room=${room}`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("missing"))))
+      .then((body: { rows?: Array<{ name?: string; points?: number }> }) => {
+        if (dead) return;
+        const next = (body.rows ?? []).slice(0, 4).map((row, index) => ({
+          label: `${index + 1}  ${String(row.name ?? "").toUpperCase()}`,
+          value: String(row.points ?? ""),
+          tone: "orange" as const,
+        }));
+        setRows(next.length ? next : [{ label: "LIVE DATA UNAVAILABLE" }]);
+      })
+      .catch(() => {
+        if (!dead) setRows([{ label: "LIVE DATA UNAVAILABLE" }]);
+      });
+    return () => {
+      dead = true;
+    };
+  }, [room]);
+  return rows ?? [{ label: "…" }];
+}
+
 function RoomBoards({ id }: { id: string }) {
   const now = useClock();
-  const clock = heistCountdown(now);
+  const clock = now == null ? null : heistCountdown(now);
   const clockRow: BoardRow = {
-    label: clock.live ? "LIVE" : "NEXT",
-    value: formatCountdown(clock.secs),
-    tone: clock.live ? "green" : "orange",
+    label: clock?.live ? "LIVE" : "NEXT",
+    value: clock ? formatCountdown(clock.secs) : "…",
+    tone: clock?.live ? "green" : "orange",
   };
-  const ranks = heistRows("season", now).slice(0, 4);
-  const rankRows: BoardRow[] = ranks.map((row, index) => ({
-    label: `${index + 1}  ${row.name.toUpperCase()}`,
-    value: String(row.points),
-    tone: "orange",
-  }));
-  const quotes = mockQuotes(now);
+  const rankRows = useSeasonBoard(id);
+  const quotes = mockQuotes(now ?? 0);
   const screen = (name: string, rows: BoardRow[]) => {
     const board = placed(id, name);
     return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} />;
@@ -360,7 +386,7 @@ function RoomBoards({ id }: { id: string }) {
     );
   }
   if (id === "skin-forge") {
-    const vaultStatus = `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}`;
+    const vaultStatus = clock ? `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}` : "NEXT";
     return (
       <>
         {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
@@ -373,7 +399,7 @@ function RoomBoards({ id }: { id: string }) {
             title={board.name}
             sign={board.sign}
             status={board.sign === "vault" ? vaultStatus : "LIVE"}
-            tone={board.sign === "vault" && !clock.live ? "orange" : "green"}
+            tone={board.sign === "vault" && !clock?.live ? "orange" : "green"}
           />
         ))}
       </>
@@ -386,11 +412,7 @@ function RoomBoards({ id }: { id: string }) {
         position={cup.at}
         size={cup.size}
         title="CUP"
-        rows={[
-          { label: "MASON", value: "2", tone: "green" },
-          { label: "SCOUT", value: "1", tone: "orange" },
-          { label: "TAPE", value: "WATCH" },
-        ]}
+        rows={rankRows}
       />
       <StadiumBeams />
     </>

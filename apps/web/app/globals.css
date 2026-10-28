@@ -847,6 +847,7 @@ button.enter {
 .quest-log, .hud-tr .quest-panel { position: static; max-width: none; width: 100%; }
 .agent-card h2 { font-size: var(--type-h2); line-height: 32px; margin: 0 0 8px; text-transform: none; letter-spacing: 0; }
 .quest-hint { position: absolute; left: 24px; bottom: 24px; z-index: 7; width: min(360px, calc(100% - 48px)); }
+.hint-toggle { position: absolute; left: 24px; bottom: 24px; z-index: 7; }
 .quest-hint h2, .quest-hint .caption-kicker, .quest-hint .line { color: var(--ink); background: transparent; }
 .quest-hint .caption-kicker { color: var(--ink-muted); }
 .audio-hud { justify-content: flex-end; }
@@ -1543,6 +1544,19 @@ button.pronounce:focus-visible {
 }
 .room-panel h2 { font-size: var(--type-h3); }
 .room-panel p { margin: 0 0 var(--space-sm); }
+.room-panel a.room-link {
+  text-decoration: none;
+  color: #d4d2cc;
+  background: #222225;
+  box-shadow: 0 4px 0 #121214;
+  width: 100%;
+}
+.room-panel a.room-link:hover,
+.room-panel a.room-link:active {
+  color: #d4d2cc;
+  background: #222225;
+  text-decoration: none;
+}
 
 .lobby {
   display: grid;
@@ -1653,10 +1667,12 @@ button.pronounce:focus-visible {
   text-transform: none;
   transform: translateY(0);
 }
-.lobby-tabs button[aria-selected="true"] {
-  background: #1e1e21;
-  color: #d4d2cc;
-  box-shadow: 0 4px 0 #121214;
+.lobby-tabs button[aria-selected="true"],
+.lobby-tabs button[aria-selected="true"]:hover,
+.lobby-tabs button[aria-selected="true"]:active {
+  background: #c94a1a;
+  color: #0a0a0b;
+  box-shadow: 0 4px 0 #8a3110;
 }
 .lobby-tabs button:hover {
   background: #222225;
@@ -1764,12 +1780,24 @@ button.pronounce:focus-visible {
   font-size: var(--type-small);
 }
 .podium-first button { min-height: 72px; background: #141416; }
-.rank-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.rank-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-md);
+  display: block;
+  overflow-x: auto;
 }
-.rank-chip { display: inline-flex; align-items: center; gap: 8px; width: auto; }
+.rank-table th,
+.rank-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--type-small);
+  white-space: nowrap;
+}
+.rank-table th { color: var(--ink-secondary); font-weight: 500; }
+.rank-table td { color: var(--ink); }
+.rank-table tbody tr { cursor: pointer; }
+.rank-table tbody tr[aria-selected="true"],
+.rank-table tbody tr:hover { background: #1e1e21; }
+.rank-table .swatch-dot { margin-right: 8px; }

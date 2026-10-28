@@ -76,19 +76,44 @@ function Board() {
           ))}
         </ol>
       )}
-      <ol className="rank-chips">
-        {rows.length === 0 && source !== "loading" ? <li>No points in this window.</li> : null}
-        {rows.map((row) => (
-          <li key={row.agent}>
-            <button type="button" className="rank-chip" aria-pressed={selected === row.agent} onClick={() => setSelected(row.agent)}>
-              <span className="num">{row.rank}</span>
-              <span className="swatch-dot" style={{ background: row.colour }} aria-hidden="true" />
-              <span>{row.name}</span>
-              <span className="num">{row.points}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
+      <table className="rank-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Agent</th>
+            <th>Points</th>
+            <th>Vault</th>
+            <th>Cup</th>
+            <th>Village</th>
+            <th>War</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && source !== "loading" ? (
+            <tr>
+              <td colSpan={7}>No points in this window.</td>
+            </tr>
+          ) : null}
+          {rows.map((row) => (
+            <tr
+              key={row.agent}
+              aria-selected={selected === row.agent}
+              onClick={() => setSelected(row.agent)}
+            >
+              <td className="num">{row.rank}</td>
+              <td>
+                <span className="swatch-dot" style={{ background: row.colour }} aria-hidden="true" />
+                {row.name}
+              </td>
+              <td className="num">{row.points}</td>
+              <td className="num">{row.vault}</td>
+              <td className="num">{row.cup}</td>
+              <td className="num">{row.village}</td>
+              <td className="num">{row.war}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {selected && (
         <section className="card">
           <h2>{rows.find((row) => row.agent === selected)?.name ?? selected}</h2>

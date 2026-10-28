@@ -85,6 +85,20 @@ function webglAvailable() {
   }
 }
 
+const ROOM_DEPTH = "fe2vi.roomDepth";
+
+function roomDepth() {
+  return Number(sessionStorage.getItem(ROOM_DEPTH) || "0") || 0;
+}
+
+function retreatRoom() {
+  if (roomDepth() > 0) {
+    window.history.back();
+    return;
+  }
+  window.history.replaceState({ room: null, fe2vi: true }, "", "/");
+}
+
 const ROOM_SLUG: Record<string, string> = {
   "vault-quarter": "vault",
   "cup-stadium": "cup",
@@ -119,6 +133,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [soundLive, setSoundLive] = useState(false);
   const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
+  const [hintsOpen, setHintsOpen] = useState(false);
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -185,6 +200,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       if (window.location.hash === "#title") showTitle();
     };
     const onPop = () => {
+      const depth = roomDepth();
+      if (depth > 0) sessionStorage.setItem(ROOM_DEPTH, String(depth - 1));
       const slug = new URLSearchParams(window.location.search).get("room");
       const id = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
       if (id) {
@@ -222,7 +239,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
           setFocusId(null);
           setFrameMode("in");
         }, 800);
-        window.history.back();
+        retreatRoom();
         return;
       }
       setFocusId(null);
@@ -256,7 +273,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const url = new URL(window.location.href);
     if (id && ROOM_SLUG[id]) url.searchParams.set("room", ROOM_SLUG[id]);
     else url.searchParams.delete("room");
-    window.history.pushState({ room: id }, "", url);
+    window.history.pushState({ room: id, fe2vi: true }, "", url);
+    if (id) sessionStorage.setItem(ROOM_DEPTH, String(roomDepth() + 1));
   }
 
   function leaveRoom() {
@@ -266,7 +284,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       setFocusId(null);
       setFrameMode("in");
     }, 800);
-    if (new URLSearchParams(window.location.search).get("room")) window.history.back();
+    if (new URLSearchParams(window.location.search).get("room")) retreatRoom();
   }
 
   function pick(district: District) {
@@ -595,7 +613,12 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               </button>
             )}
           </div>
-          {phase === "city" && save.tutorial < TUTORIAL.length && (
+          {phase === "city" && save.tutorial < TUTORIAL.length && !hintsOpen && (
+            <button type="button" className="btn btn-secondary hint-toggle" onClick={() => setHintsOpen(true)}>
+              Hints
+            </button>
+          )}
+          {phase === "city" && save.tutorial < TUTORIAL.length && hintsOpen && (
             <div className="quest-hint" data-screen="tutorial" role="status">
               <p className="caption-kicker">
                 Hint {save.tutorial + 1} / {TUTORIAL.length}
@@ -640,6 +663,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   Stamps noted
                 </button>
               )}
+              <button type="button" className="btn-quiet" onClick={() => setHintsOpen(false)}>
+                Close
+              </button>
               <button type="button" className="btn-quiet" onClick={() => commit({ ...save, tutorial: TUTORIAL.length })}>
                 <X aria-hidden="true" strokeWidth={1.75} />
                 Dismiss hints

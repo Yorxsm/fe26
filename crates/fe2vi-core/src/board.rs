@@ -415,7 +415,6 @@ fn at_or_before(now: u64, raw: u64) -> u64 {
 pub fn mock_awards(now: u64) -> Vec<PointAward> {
     let day = day_start(now);
     let week = week_start(now);
-    let war_points = [100u32, 150, 80];
     let mut awards = Vec::new();
     for (index, agent) in city_roster().iter().enumerate() {
         let colour = COLOURS[index % COLOURS.len()];
@@ -468,15 +467,14 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
             week.saturating_add(7200 + (index as u64) * 90),
             "village fill",
         );
-        if index % 3 == 0 {
-            push(
-                &mut awards,
-                PointRoom::War,
-                war_points[index % 3],
-                SEASON_START.saturating_add((index as u64 + 2) * DAY),
-                "war flag",
-            );
-        }
+        let flag = challenges()[index % challenges().len()];
+        push(
+            &mut awards,
+            PointRoom::War,
+            flag.points,
+            SEASON_START.saturating_add((index as u64 + 2) * DAY),
+            "war flag",
+        );
     }
     awards
 }
@@ -576,8 +574,16 @@ fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicR
             .cmp(&left.points)
             .then_with(|| left.agent.cmp(&right.agent))
     });
+    let mut last_points: Option<u32> = None;
+    let mut last_rank = 0u32;
     for (index, row) in rows.iter_mut().enumerate() {
-        row.rank = index as u32 + 1;
+        if last_points == Some(row.points) {
+            row.rank = last_rank;
+        } else {
+            last_rank = index as u32 + 1;
+            last_points = Some(row.points);
+            row.rank = last_rank;
+        }
     }
     rows
 }
@@ -787,6 +793,17 @@ mod tests {
         let upcoming = upcoming_season_slot(TUESDAY_AFTERNOON);
         assert!(upcoming.start_unix > season_slot().end_unix);
         assert!(TUESDAY_AFTERNOON < upcoming.end_unix);
+        let mut previous_points = None;
+        let mut previous_rank = 0;
+        for row in &wide {
+            if previous_points == Some(row.points) {
+                assert_eq!(row.rank, previous_rank);
+            } else if previous_points.is_some() {
+                assert!(row.rank > previous_rank);
+            }
+            previous_points = Some(row.points);
+            previous_rank = row.rank;
+        }
         assert_eq!(agent_roster().len(), city_roster().len());
         assert_eq!(agent_roster()[0], "brim.stadium.fe2vi.testnet");
     }

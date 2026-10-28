@@ -2,6 +2,7 @@
 
 import { Calendar, Clock, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useHeistNow } from "@/lib/clock";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
@@ -28,7 +29,7 @@ function useNow() {
 }
 
 export function CountdownChip({ compact = false }: { compact?: boolean }) {
-  const now = useNow();
+  const now = useHeistNow();
   if (now == null) {
     return (
       <span className="chip">

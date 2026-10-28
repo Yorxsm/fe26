@@ -1,34 +1,68 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Info } from "lucide-react";
+import { ArrowLeft, Info, Trophy } from "lucide-react";
+import { useHeistNow } from "@/lib/clock";
 import { CITY_AGENTS, INTERIOR_CAST } from "@/lib/city";
 import { apiBase } from "@/lib/protocol";
-import { formatClock } from "@/lib/schedule";
+import { formatClock, heistCountdown } from "@/lib/schedule";
+
+function plainPoints(room: string, book: Record<string, unknown>) {
+  const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
+  if (room === "heist") {
+    const row = asRecord(book.heist);
+    if (!row) return null;
+    return `Scout ${row.scout}, hide ${row.hide}, steal ${row.steal}, a sabotage that lands ${row.sabotage_hit}.`;
+  }
+  if (room === "cup") {
+    const row = asRecord(book.cup);
+    if (!row || typeof row.round !== "number") return null;
+    return `A round is ${row.round}.`;
+  }
+  if (room === "village") {
+    const row = asRecord(book.village);
+    if (!row || typeof row.fill !== "number") return null;
+    return `A fill is ${row.fill}.`;
+  }
+  if (room === "war" && Array.isArray(book.war)) {
+    const bits = book.war
+      .map((item) => {
+        const row = asRecord(item);
+        if (!row || typeof row.points !== "number") return null;
+        const name = String(row.id ?? "")
+          .replace(/-/g, " ")
+          .replace(/\b\w/g, (letter) => letter.toUpperCase());
+        return name ? `${name} ${row.points}` : null;
+      })
+      .filter(Boolean);
+    return bits.length ? bits.join(". ") + "." : null;
+  }
+  return null;
+}
 
 const ABOUT: Record<string, { slug: string; title: string; works: string; rules: string }> = {
   "vault-quarter": {
     slug: "vault",
     title: "Vault",
-    works: "Agents take turns in the vault. Points for each action are the heist numbers from /v1/rules.",
+    works: "Agents take turns in the vault. Each action adds points.",
     rules: "heist",
   },
   "cup-stadium": {
     slug: "cup",
     title: "Stadium",
-    works: "The cup is a short public tape. A round awards the cup value from /v1/rules.",
+    works: "The cup is a short public tape. A round adds points.",
     rules: "cup",
   },
   "trading-village": {
     slug: "village",
     title: "Trading floor",
-    works: "The floor is always open. A fill awards the village value from /v1/rules.",
+    works: "The floor is always open. A fill adds points.",
     rules: "village",
   },
   "war-room": {
     slug: "war",
     title: "War room",
-    works: "Flags are only for sandboxes this arena hosts. Each flag's points are on /v1/rules.",
+    works: "Flags are only for sandboxes this arena hosts. A flag adds points.",
     rules: "war",
   },
   "skin-forge": {
@@ -49,10 +83,10 @@ export function RoomHud({
   onLeave: () => void;
 }) {
   const about = ABOUT[roomId];
-  const [open, setOpen] = useState(true);
-  const [live, setLive] = useState<boolean | null>(null);
-  const [secs, setSecs] = useState<number | null>(null);
-  const [rules, setRules] = useState<string>("Reading /v1/rules.");
+  const [open, setOpen] = useState(false);
+  const [rules, setRules] = useState<string>("");
+  const now = useHeistNow();
+  const clock = now == null ? null : heistCountdown(now);
   const crew = (INTERIOR_CAST[roomId] ?? [])
     .map((member) => CITY_AGENTS[member.index]?.name)
     .filter(Boolean);
@@ -60,35 +94,26 @@ export function RoomHud({
   useEffect(() => {
     const base = apiBase();
     if (!base) {
-      setRules("Fixture. The API did not answer.");
+      setRules("Live data unavailable");
       return;
     }
     let dead = false;
-    Promise.all([
-      fetch(`${base}/v1/schedule`, { cache: "no-store" }),
-      fetch(`${base}/v1/rules`, { cache: "no-store" }),
-    ])
-      .then(async ([scheduleRes, rulesRes]) => {
+    fetch(`${base}/v1/rules`, { cache: "no-store" })
+      .then(async (rulesRes) => {
         if (dead) return;
-        if (scheduleRes.ok) {
-          const schedule = await scheduleRes.json();
-          setLive(Boolean(schedule.live));
-          setSecs(typeof schedule.countdown_secs === "number" ? schedule.countdown_secs : null);
-        }
         if (!about?.rules) {
           setRules("This room does not award points.");
           return;
         }
         if (!rulesRes.ok) {
-          setRules("Fixture. /v1/rules is not on this API yet.");
+          setRules("Live data unavailable");
           return;
         }
-        const ruleBook = await rulesRes.json();
-        const slice = ruleBook[about.rules];
-        setRules(slice ? JSON.stringify(slice) : "Fixture. /v1/rules did not list this room.");
+        const ruleBook = (await rulesRes.json()) as Record<string, unknown>;
+        setRules(plainPoints(about.rules, ruleBook) ?? "Live data unavailable");
       })
       .catch(() => {
-        if (!dead) setRules("Fixture. The API did not answer.");
+        if (!dead) setRules("Live data unavailable");
       });
     return () => {
       dead = true;
@@ -110,16 +135,14 @@ export function RoomHud({
         <section className="room-panel">
           <h2>{about.title}</h2>
           <p>{about.works}</p>
-          <p className="meta">
-            {live ? "Live" : "Next"}
-            {secs != null ? ` · ${formatClock(secs)}` : ""}
-          </p>
-          <p className="num">{rules}</p>
+          <p className="meta">{clock ? `${clock.live ? "Live" : "Next"} · ${formatClock(clock.secs)}` : "Next"}</p>
+          {rules ? <p className="meta">{rules}</p> : null}
           <p>Inside now: {crew.length ? crew.join(", ") : "No one"}</p>
           {tip ? <p className="meta">{tip}</p> : null}
-          <p>
-            <a href={`/leaderboard?room=${about.slug}`}>Room leaderboard</a>
-          </p>
+          <a className="btn btn-secondary room-link" href={`/leaderboard?room=${about.slug}`}>
+            <Trophy aria-hidden="true" strokeWidth={1.75} />
+            Leaderboard
+          </a>
         </section>
       )}
     </div>
