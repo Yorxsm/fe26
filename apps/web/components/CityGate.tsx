@@ -310,6 +310,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   function leaveRoom() {
     setHotspot(null);
     markRoomTransition();
+    audio.crowd(false);
     setFrameMode("out");
     window.setTimeout(() => {
       setFocusId(null);
@@ -336,6 +337,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     }
     if (district.id === "trading-village" || district.id === "cup-stadium") audio.sting("trade");
     if (district.id === "skin-forge") audio.sting("forge");
+    audio.whoosh();
+    if (district.id === "vault-quarter") audio.alarm();
+    audio.crowd(district.id === "cup-stadium");
     commit({ ...save, quests });
     if (district.status === "soon") {
       setPaused(true);

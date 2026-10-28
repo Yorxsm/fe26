@@ -41,6 +41,7 @@ class CityAudio {
   private themeGain: GainNode | null = null;
   private themeTimer = 0;
   private ambients: Array<{ id: string; gain: GainNode }> = [];
+  private crowdGain: GainNode | null = null;
   private prefs: Prefs = EMPTY;
   private bed: "theme" | "city" = "theme";
   private heard = new Set<string>();
@@ -90,6 +91,7 @@ class CityAudio {
     }
     void this.ctx.resume();
     this.applyMaster();
+    this.intro();
     if (this.bed === "theme") this.startTheme();
     else this.raiseCity();
   }
@@ -157,12 +159,74 @@ class CityAudio {
 
   hover() {
     if (!this.ctx || this.prefs.muted) return;
-    this.tone(this.ctx.currentTime, 880, 0.03, 0.03, "triangle");
+    this.tone(this.ctx.currentTime, 880, 0.05, 0.12, "triangle");
   }
 
   click() {
     if (!this.ctx || this.prefs.muted) return;
-    this.tone(this.ctx.currentTime, 440, 0.04, 0.05, "square");
+    this.tone(this.ctx.currentTime, 440, 0.06, 0.18, "square");
+  }
+
+  intro() {
+    if (!this.ctx || !this.master || this.prefs.muted || this.heard.has("intro")) return;
+    this.heard.add("intro");
+    const t = this.ctx.currentTime;
+    [196, 247, 294, 392, 494, 392].forEach((freq, index) => {
+      this.tone(t + index * 0.16, freq, 0.42, 0.22, "triangle");
+    });
+  }
+
+  whoosh() {
+    if (!this.ctx || !this.master || this.prefs.muted) return;
+    const ctx = this.ctx;
+    const noise = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+    const data = noise.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+    const source = ctx.createBufferSource();
+    source.buffer = noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(400, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.35);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+    source.connect(filter).connect(gain).connect(this.master);
+    source.start();
+    source.stop(ctx.currentTime + 0.42);
+  }
+
+  alarm() {
+    if (!this.ctx || !this.master || this.prefs.muted) return;
+    const t = this.ctx.currentTime;
+    [0, 0.28, 0.56].forEach((offset) => this.tone(t + offset, 740, 0.16, 0.2, "sawtooth"));
+  }
+
+  crowd(on: boolean) {
+    if (!this.ctx || !this.master) return;
+    if (!on) {
+      this.crowdGain?.disconnect();
+      this.crowdGain = null;
+      return;
+    }
+    if (this.crowdGain || this.prefs.muted) return;
+    const ctx = this.ctx;
+    const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const data = noise.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+    const source = ctx.createBufferSource();
+    source.buffer = noise;
+    source.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 500;
+    filter.Q.value = 0.6;
+    const gain = ctx.createGain();
+    gain.gain.value = this.prefs.quiet ? 0.08 : 0.22;
+    source.connect(filter).connect(gain).connect(this.master);
+    source.start();
+    this.crowdGain = gain;
   }
 
   /**
@@ -205,7 +269,7 @@ class CityAudio {
       forge: [165, 220, 330],
     };
     notes[name].forEach((freq, index) => {
-      this.tone(t + index * 0.12, freq, 0.14, 0.08 * duck, name === "breach" ? "sawtooth" : "triangle");
+      this.tone(t + index * 0.12, freq, 0.18, 0.2 * duck, name === "breach" ? "sawtooth" : "triangle");
     });
   }
 
@@ -283,7 +347,7 @@ class CityAudio {
 
   private raiseCity() {
     this.ambients.forEach((bed) => {
-      const level = 0.12;
+      const level = 0.28;
       bed.gain.gain.value = this.prefs.quiet ? level * 0.4 : level;
     });
   }
