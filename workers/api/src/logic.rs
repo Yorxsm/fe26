@@ -226,6 +226,9 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ("GET", ["v1", "venues"]) => crate::surface::venues(query_now(incoming.path)),
         ("GET", ["v1", "challenges"]) => crate::surface::challenges(),
         ("GET", ["v1", "events"]) => crate::surface::events(query_now(incoming.path)),
+        ("GET", ["v1", "stats"]) => {
+            crate::surface::spectator_stats(state, query_now(incoming.path))
+        }
         ("GET", ["v1", "war", "GAME.md"]) => crate::surface::war_md(),
         ("POST", ["v1", "village", "follow"]) => crate::surface::follow(state, incoming, true),
         ("POST", ["v1", "village", "unfollow"]) => crate::surface::follow(state, incoming, false),
@@ -896,6 +899,74 @@ mod tests {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(json["window"], "week");
                 assert_eq!(json["now"], 1_790_812_800u64);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+    }
+
+    #[test]
+    fn stats_counts_the_roster_and_ignores_the_example_event() {
+        let mut state = ArenaState::default();
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/stats",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["network"], "mock");
+                assert_eq!(json["agents"], 6);
+                assert_eq!(json["now"], fe2vi_core::DEMO_EPOCH);
+                assert_eq!(json["live_games"], 0);
+                assert_eq!(json["heist_live"], false);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let body = serde_json::json!({
+            "account_id": "nori.market.fe2vi.testnet",
+            "revoked": false,
+            "allowed_methods": ["act", "bid", "transfer_item"],
+        })
+        .to_string();
+        match dispatch(&mut state, &post("/v1/agents", &body)) {
+            Outcome::Http { status, .. } => assert_eq!(status, 201),
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/stats",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["agents"], 7);
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/events?now=1793116800",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Http { body, .. } => {
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["live"].as_array().unwrap().len(), 0);
+                assert_eq!(json["events"][0]["phase"], "example");
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }

@@ -22,13 +22,13 @@ function dayStart(unix: number) {
   return unix - (unix % DAY);
 }
 
-function nextDaily(now: number): Slot {
+export function dailySlot(now: number): Slot {
   const today = dayStart(now) + OPEN;
   const start = now < today + DAILY_LEN ? today : today + DAY;
   return { kind: "daily", start, end: start + DAILY_LEN };
 }
 
-function nextWeekly(now: number): Slot {
+export function weeklySlot(now: number): Slot {
   const sinceMonday = (weekday(now) + 6) % 7;
   const monday = dayStart(now) - sinceMonday * DAY;
   const thisStart = monday + OPEN;
@@ -36,19 +36,23 @@ function nextWeekly(now: number): Slot {
   return { kind: "weekly", start, end: start + WEEKLY_LEN };
 }
 
-function seasonal(now: number): Slot | null {
-  if (now >= SEASON_END) return null;
+export function seasonSlot(): Slot {
   const startDay = dayStart(SEASON_START);
   const delta = (6 + 7 - weekday(startDay)) % 7;
   const start = startDay + delta * DAY + OPEN;
-  const end = start + SEASONAL_LEN;
-  if (now >= end) return null;
-  return { kind: "seasonal", start, end };
+  return { kind: "seasonal", start, end: start + SEASONAL_LEN };
+}
+
+function seasonal(now: number): Slot | null {
+  if (now >= SEASON_END) return null;
+  const slot = seasonSlot();
+  if (now >= slot.end) return null;
+  return slot;
 }
 
 export function nextHeist(now: number): Slot {
-  let best = nextDaily(now);
-  const weekly = nextWeekly(now);
+  let best = dailySlot(now);
+  const weekly = weeklySlot(now);
   if (weekly.start < best.start) best = weekly;
   const season = seasonal(now);
   if (season && season.start < best.start) best = season;
@@ -70,6 +74,73 @@ export function heistCountdown(now: number) {
 export function heistLive(now: number) {
   const slot = nextHeist(now);
   return now >= slot.start && now < slot.end;
+}
+
+export function openSlots(now: number): Slot[] {
+  const slots = [dailySlot(now), weeklySlot(now)];
+  const season = seasonal(now);
+  if (season) slots.push(season);
+  return slots.filter((slot) => now >= slot.start && now < slot.end);
+}
+
+export function slotPhase(now: number, slot: Slot): "live" | "upcoming" | "ended" {
+  if (now < slot.start) return "upcoming";
+  if (now < slot.end) return "live";
+  return "ended";
+}
+
+export type EventPhase = "example" | "upcoming" | "live" | "ended";
+
+export function eventPhase(now: number, start: number, end: number, exampleOnly: boolean): EventPhase {
+  if (exampleOnly) return "example";
+  if (now < start) return "upcoming";
+  if (now < end) return "live";
+  return "ended";
+}
+
+export function eventStatusLabel(phase: EventPhase) {
+  if (phase === "example") return "Example event";
+  if (phase === "upcoming") return "Upcoming";
+  if (phase === "live") return "Live";
+  return "Ended";
+}
+
+/** Account ids shared with `agent_roster` in fe2vi-core. */
+export const FIXTURE_AGENTS = [
+  "mason.vault.fe2vi.testnet",
+  "mason.village.fe2vi.testnet",
+  "pike.war.fe2vi.testnet",
+  "quill.vault.fe2vi.testnet",
+  "scout.vault.fe2vi.testnet",
+  "tape.cup.fe2vi.testnet",
+];
+
+export function formatClock(secs: number) {
+  const whole = Math.max(0, Math.floor(secs));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const seconds = whole % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function hourMinute(unix: number, timeZone: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).format(unix * 1000);
+}
+
+/** UTC first. WAT is Africa/Lagos, UTC+1, with no daylight shift. */
+export function slotWindow(start: number, end: number) {
+  const day = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(start * 1000);
+  return `${day} · ${hourMinute(start, "UTC")}–${hourMinute(end, "UTC")} UTC · ${hourMinute(start, "Africa/Lagos")}–${hourMinute(end, "Africa/Lagos")} WAT`;
 }
 
 export function formatCountdown(secs: number) {

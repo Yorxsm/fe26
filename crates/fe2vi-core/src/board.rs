@@ -107,7 +107,7 @@ fn slot_from(kind: SlotKind, start: u64, len: u64) -> Slot {
     }
 }
 
-fn next_daily(now: u64) -> Slot {
+pub fn daily_slot(now: u64) -> Slot {
     let today = day_start(now) + DAILY_OPEN;
     let start = if now < today + DAILY_LEN {
         today
@@ -129,16 +129,25 @@ fn next_weekly(now: u64) -> Slot {
     slot_from(SlotKind::Weekly, start, WEEKLY_LEN)
 }
 
-fn seasonal(now: u64) -> Option<Slot> {
-    if now >= SEASON_END {
-        return None;
-    }
+pub fn weekly_slot(now: u64) -> Slot {
+    next_weekly(now)
+}
+
+/// The season's single Saturday window. It does not move when the window has closed.
+pub fn season_slot() -> Slot {
     let start_day = day_start(SEASON_START);
     let want = 6u64;
     let have = weekday(start_day);
     let delta = (want + 7 - have) % 7;
     let start = start_day + delta * DAY + DAILY_OPEN;
-    let slot = slot_from(SlotKind::Seasonal, start, SEASONAL_LEN);
+    slot_from(SlotKind::Seasonal, start, SEASONAL_LEN)
+}
+
+fn seasonal(now: u64) -> Option<Slot> {
+    if now >= SEASON_END {
+        return None;
+    }
+    let slot = season_slot();
     if now < slot.end_unix {
         Some(slot)
     } else {
@@ -147,7 +156,7 @@ fn seasonal(now: u64) -> Option<Slot> {
 }
 
 pub fn next_heist(now: u64) -> Slot {
-    let mut best = next_daily(now);
+    let mut best = daily_slot(now);
     let weekly = next_weekly(now);
     if weekly.start_unix < best.start_unix {
         best = weekly;
@@ -163,6 +172,55 @@ pub fn next_heist(now: u64) -> Slot {
 pub fn heist_live(now: u64) -> bool {
     let slot = next_heist(now);
     now >= slot.start_unix && now < slot.end_unix
+}
+
+fn slot_open(now: u64, slot: Slot) -> bool {
+    now >= slot.start_unix && now < slot.end_unix
+}
+
+/// Daily, weekly, and seasonal windows that contain `now`. Overlaps count separately.
+pub fn open_slots(now: u64) -> Vec<Slot> {
+    let mut slots = vec![daily_slot(now), weekly_slot(now)];
+    if let Some(slot) = seasonal(now) {
+        slots.push(slot);
+    }
+    slots.retain(|slot| slot_open(now, *slot));
+    slots
+}
+
+/// Distinct account ids on the heist score list and the village tape.
+pub fn agent_roster() -> Vec<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for score in scores() {
+        ids.insert(score.agent.to_string());
+    }
+    for fill in crate::village::demo_tape() {
+        ids.insert(fill.agent);
+    }
+    ids.into_iter().collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventPhase {
+    Example,
+    Upcoming,
+    Live,
+    Ended,
+}
+
+/// Example rows never count as live, even inside their sample window.
+pub fn event_phase(event: &HostedEvent, now: u64) -> EventPhase {
+    if event.example_only {
+        return EventPhase::Example;
+    }
+    if now < event.start_unix {
+        EventPhase::Upcoming
+    } else if now < event.end_unix {
+        EventPhase::Live
+    } else {
+        EventPhase::Ended
+    }
 }
 
 pub fn countdown_secs(now: u64) -> u64 {
@@ -288,7 +346,7 @@ pub fn hosted_events() -> &'static [HostedEvent] {
 pub fn live_events(now: u64) -> Vec<&'static HostedEvent> {
     hosted_events()
         .iter()
-        .filter(|event| event.example_only && now >= event.start_unix && now < event.end_unix)
+        .filter(|event| event_phase(event, now) == EventPhase::Live)
         .collect()
 }
 
@@ -403,11 +461,31 @@ mod tests {
         assert!(week.len() > today.len());
         assert!(season.len() > week.len());
         assert_eq!(challenges().len(), 3);
-        assert!(live_events(TUESDAY_AFTERNOON)
+        assert!(live_events(TUESDAY_AFTERNOON).is_empty());
+        let example = hosted_events()
             .iter()
-            .all(|event| event.example_only));
-        assert!(live_events(TUESDAY_AFTERNOON)
-            .iter()
-            .any(|event| event.partner_label == "Example partner"));
+            .find(|event| event.partner_label == "Example partner")
+            .unwrap();
+        assert_eq!(event_phase(example, TUESDAY_AFTERNOON), EventPhase::Example);
+        assert_eq!(
+            agent_roster(),
+            vec![
+                "mason.vault.fe2vi.testnet",
+                "mason.village.fe2vi.testnet",
+                "pike.war.fe2vi.testnet",
+                "quill.vault.fe2vi.testnet",
+                "scout.vault.fe2vi.testnet",
+                "tape.cup.fe2vi.testnet",
+            ]
+        );
+    }
+
+    #[test]
+    fn monday_evening_opens_the_daily_and_weekly_slots() {
+        let monday_evening = 4 * super::DAY + 18 * 3600 + 30 * 60;
+        let open = open_slots(monday_evening);
+        assert_eq!(open.len(), 2);
+        assert!(open.iter().any(|slot| slot.kind == SlotKind::Daily));
+        assert!(open.iter().any(|slot| slot.kind == SlotKind::Weekly));
     }
 }

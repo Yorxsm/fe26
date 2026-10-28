@@ -77,6 +77,9 @@ pub fn schedule(now: u64) -> Outcome {
             "live": fe2vi_core::heist_live(now),
             "countdown_secs": fe2vi_core::countdown_secs(now),
             "next": slot,
+            "daily": fe2vi_core::daily_slot(now),
+            "weekly": fe2vi_core::weekly_slot(now),
+            "seasonal": fe2vi_core::season_slot(),
         }),
         false,
         None,
@@ -157,12 +160,52 @@ pub fn challenges() -> Outcome {
 }
 
 pub fn events(now: u64) -> Outcome {
+    let rows: Vec<serde_json::Value> = fe2vi_core::hosted_events()
+        .iter()
+        .map(|event| {
+            serde_json::json!({
+                "id": event.id,
+                "partner_label": event.partner_label,
+                "example_only": event.example_only,
+                "room_id": event.room_id,
+                "start_unix": event.start_unix,
+                "end_unix": event.end_unix,
+                "prize_text": event.prize_text,
+                "rules_text": event.rules_text,
+                "phase": fe2vi_core::event_phase(event, now),
+            })
+        })
+        .collect();
     json(
         200,
         &serde_json::json!({
             "now": now,
-            "events": fe2vi_core::hosted_events(),
+            "events": rows,
             "live": fe2vi_core::live_events(now).iter().map(|event| event.id).collect::<Vec<_>>(),
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn spectator_stats(state: &ArenaState, now: u64) -> Outcome {
+    let mut ids: std::collections::BTreeSet<String> =
+        fe2vi_core::agent_roster().into_iter().collect();
+    for agent in &state.agents {
+        if !agent.account_id.is_empty() {
+            ids.insert(agent.account_id.clone());
+        }
+    }
+    let live_games = fe2vi_core::open_slots(now).len() + fe2vi_core::live_events(now).len();
+    json(
+        200,
+        &serde_json::json!({
+            "network": "mock",
+            "now": now,
+            "agents": ids.len(),
+            "live_games": live_games,
+            "heist_live": fe2vi_core::heist_live(now),
+            "countdown_secs": fe2vi_core::countdown_secs(now),
         }),
         false,
         None,

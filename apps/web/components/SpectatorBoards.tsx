@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
+  eventPhase,
+  eventStatusLabel,
   exampleEventLive,
   formatCountdown,
   heistCountdown,
@@ -51,17 +53,18 @@ export function EventBanner({ room, compact = false }: { room?: string; compact?
   const now = useNow();
   if (now == null || !exampleEventLive(now)) return null;
   if (room && room !== EXAMPLE_EVENT.room && room !== "map") return null;
+  const label = eventStatusLabel(eventPhase(now, EXAMPLE_EVENT.start, EXAMPLE_EVENT.end, true));
   if (compact) {
     return (
       <span className="chip">
         <Trophy size={14} aria-hidden="true" />
-        Event live
+        {label}
       </span>
     );
   }
   return (
     <p className="banner">
-      Event live · {EXAMPLE_EVENT.partner} · example only · {EXAMPLE_EVENT.roomLabel} · {EXAMPLE_EVENT.prize}
+      {label} · {EXAMPLE_EVENT.partner} · {EXAMPLE_EVENT.roomLabel} · {EXAMPLE_EVENT.prize}
     </p>
   );
 }

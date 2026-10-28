@@ -1,5 +1,6 @@
 import { fixtureAgent, fixtureEvents, fixtureGames } from "./fixtures";
 import { apiBase, type AgentCard, type FeedEvent, type GameCard } from "./protocol";
+import { FIXTURE_AGENTS } from "./schedule";
 
 export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" | "fixture" }> {
   const base = apiBase();
@@ -67,8 +68,16 @@ export type LobbyRelay = {
     exampleOnly: boolean;
     room: string;
     prize: string;
-    live: boolean;
+    start: number;
+    end: number;
   }[];
+};
+
+export type HomeRelay = {
+  now: number;
+  agents: number;
+  agentsFrom: "relay" | "fixture";
+  events: { exampleOnly: boolean; start: number; end: number }[];
 };
 
 export async function loadLobby(): Promise<
@@ -88,6 +97,31 @@ export async function loadLobby(): Promise<
     ]);
     const relay = parseLobby(schedule, today, week, season, venues, challenges, events);
     return relay ? { ok: true, relay } : { ok: false, reason: "unreachable" };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+export async function loadHome(): Promise<
+  { ok: true; relay: HomeRelay } | { ok: false; reason: "unset" | "unreachable" }
+> {
+  const base = apiBase();
+  if (!base) return { ok: false, reason: "unset" };
+  try {
+    const [statsRes, scheduleRes, eventsRes] = await Promise.all([
+      fetch(`${base}/v1/stats`, { cache: "no-store" }),
+      fetch(`${base}/v1/schedule`, { cache: "no-store" }),
+      fetch(`${base}/v1/events`, { cache: "no-store" }),
+    ]);
+    if (!scheduleRes.ok || !eventsRes.ok) return { ok: false, reason: "unreachable" };
+    const schedule = (await scheduleRes.json()) as unknown;
+    const events = (await eventsRes.json()) as unknown;
+    const stats = statsRes.ok ? ((await statsRes.json()) as unknown) : null;
+    const relay = parseHome(stats, schedule, events);
+    if (relay) return { ok: true, relay };
+    const localAgents = parseHome({ network: "mock", agents: FIXTURE_AGENTS.length }, schedule, events);
+    if (!localAgents) return { ok: false, reason: "unreachable" };
+    return { ok: true, relay: { ...localAgents, agentsFrom: "fixture" } };
   } catch {
     return { ok: false, reason: "unreachable" };
   }
@@ -175,8 +209,7 @@ function parseLobby(
     parsedChallenges.push({ id, category, title, points });
   }
   const hosted = record(events);
-  if (!hosted || !Array.isArray(hosted.events) || !Array.isArray(hosted.live)) return null;
-  const live = new Set(hosted.live.filter((id): id is string => typeof id === "string"));
+  if (!hosted || !Array.isArray(hosted.events)) return null;
   const parsedEvents = [];
   for (const row of hosted.events) {
     const item = record(row);
@@ -184,8 +217,10 @@ function parseLobby(
     const partner = item ? text(item.partner_label) : null;
     const room = item ? text(item.room_id) : null;
     const prize = item ? text(item.prize_text) : null;
-    if (!id || !partner || !room || !prize || typeof item?.example_only !== "boolean") return null;
-    parsedEvents.push({ id, partner, exampleOnly: item.example_only, room, prize, live: live.has(id) });
+    const start = item ? num(item.start_unix) : null;
+    const end = item ? num(item.end_unix) : null;
+    if (!id || !partner || !room || !prize || start == null || end == null || typeof item?.example_only !== "boolean") return null;
+    parsedEvents.push({ id, partner, exampleOnly: item.example_only, room, prize, start, end });
   }
   return {
     now,
@@ -198,4 +233,24 @@ function parseLobby(
     challenges: parsedChallenges,
     events: parsedEvents,
   };
+}
+
+function parseHome(stats: unknown, schedule: unknown, events: unknown): HomeRelay | null {
+  const clock = record(stats);
+  const board = record(schedule);
+  const hosted = record(events);
+  const agents = clock ? num(clock.agents) : null;
+  const stamp = board ? num(board.now) : null;
+  if (agents == null || stamp == null || clock?.network !== "mock" || !hosted || !Array.isArray(hosted.events)) return null;
+  const agentsFrom: HomeRelay["agentsFrom"] = "relay";
+  const parsed = [];
+  for (const row of hosted.events) {
+    const item = record(row);
+    if (!item || typeof item.example_only !== "boolean") return null;
+    const start = num(item.start_unix);
+    const end = num(item.end_unix);
+    if (start == null || end == null) return null;
+    parsed.push({ exampleOnly: item.example_only, start, end });
+  }
+  return { now: stamp, agents, agentsFrom, events: parsed };
 }

@@ -8,11 +8,11 @@ import { Lobby } from "@/components/Lobby";
 import { CountdownChip, EventBanner } from "@/components/SpectatorBoards";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
+import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
 import {
   ArrowLeft,
   ArrowRight,
-  Bot,
   Compass,
   Copy,
   DoorOpen,
@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
-import { fixtureEvents, fixtureGames, HEIST_PIN } from "@/lib/fixtures";
+import { fixtureEvents, HEIST_PIN } from "@/lib/fixtures";
 import {
   CUTSCENE,
   DISPATCH_LINE,
@@ -393,23 +393,7 @@ export function CityGate() {
                     <Volume2 aria-hidden="true" strokeWidth={1.75} />
                     iron 26
                   </button>
-                  <p className="live-chips" aria-live="polite">
-                    <span className="chip">
-                      <Bot aria-hidden="true" strokeWidth={1.75} />
-                      <span className="num">
-                        <Tick value={CITY_AGENTS.length} />
-                      </span>
-                      agents
-                    </span>
-                    <span className="chip">
-                      <span className="live-dot" aria-hidden="true" />
-                      <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
-                      <span className="num">
-                        <Tick value={fixtureGames.length} />
-                      </span>
-                      live games
-                    </span>
-                  </p>
+                  <HomeChips />
                   <div className="title-actions">
                     <button
                       type="button"

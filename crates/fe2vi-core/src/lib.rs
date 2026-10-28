@@ -14,10 +14,11 @@ mod venue;
 mod village;
 
 pub use board::{
-    challenges, countdown_secs, event_markdown, heist_leaderboard, heist_live, hosted_events,
-    live_events, next_heist, schedule_markdown, venue_markdown, war_room_md, Challenge,
-    ChallengeCategory, HeistRow, HeistWindow, HostedEvent, Slot, SlotKind, SEASON_END, SEASON_ID,
-    SEASON_START,
+    agent_roster, challenges, countdown_secs, daily_slot, event_markdown, event_phase,
+    heist_leaderboard, heist_live, hosted_events, live_events, next_heist, open_slots,
+    schedule_markdown, season_slot, venue_markdown, war_room_md, weekly_slot, Challenge,
+    ChallengeCategory, EventPhase, HeistRow, HeistWindow, HostedEvent, Slot, SlotKind, SEASON_END,
+    SEASON_ID, SEASON_START,
 };
 pub use caps::{
     authorize_cap_change, authorize_platform_spend, authorize_spend, validate_platform_caps,
