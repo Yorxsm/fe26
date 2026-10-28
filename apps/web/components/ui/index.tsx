@@ -3,6 +3,7 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import {
   Bot,
+  Check,
   Compass,
   Dices,
   Eye,
@@ -163,7 +164,11 @@ export function QuestLog({ items }: { items: { id: string; label: string; done: 
       <ul className="quest-items">
         {items.map((item) => (
           <li key={item.id}>
-            <span className={item.done ? "live-dot" : "dot-idle"} aria-hidden="true" />
+            {item.done ? (
+              <Check className="quest-mark" aria-hidden="true" strokeWidth={2.5} />
+            ) : (
+              <span className="quest-ring" aria-hidden="true" />
+            )}
             {item.label}
             <span className="sr-only">{item.done ? ". Done." : ". Not done yet."}</span>
           </li>

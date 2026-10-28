@@ -872,9 +872,9 @@ button.enter {
 .audio-hud > button { min-height: 44px; }
 .audio-pop {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 8;
+  top: 0;
+  right: calc(100% + 8px);
+  z-index: 30;
   display: grid;
   gap: 8px;
   width: 200px;
@@ -882,6 +882,7 @@ button.enter {
   background: #141416;
   border: 1px solid var(--line);
   border-radius: 8px;
+  opacity: 1;
 }
 .audio-pop label {
   display: grid;
@@ -895,10 +896,32 @@ button.enter {
   display: grid;
   gap: 8px;
   justify-items: stretch;
-  width: min(240px, 100%);
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  background: #141416;
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
+.hud-aside .quest-panel,
+.hud-aside .quest-log,
 .hud-aside .live-feed,
-.hud-aside .minimap { margin: 0; }
+.hud-aside .minimap {
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.quest-mark { width: 16px; height: 16px; color: #2fb86a; flex: none; }
+.quest-ring {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #8b8a86;
+  border-radius: 999px;
+  box-sizing: border-box;
+  flex: none;
+}
 .hud-bc .btn-secondary,
 .hud-bc .btn-secondary:hover,
 .hud-bc .btn-secondary:active {
@@ -1074,19 +1097,8 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
 .name-tag.far { font-size: var(--type-caption); line-height: 16px; }
 .name-tag.audit { outline: none; }
 @media (max-width: 480px) {
-  .city-stage { display: none; }
-  .mobile-gate {
-    display: grid;
-    place-items: center;
-    min-height: 100vh;
-    padding: 24px;
-    text-align: center;
-  }
-  /* The lobby is framed for a phone. The gate returns once play starts. */
-  .game-root:has(.title-screen) .city-stage,
-  .game-root:has(.room-hud) .city-stage { display: block; }
-  .game-root:has(.title-screen) .mobile-gate,
-  .game-root:has(.room-hud) .mobile-gate { display: none; }
+  .city-stage { display: block; }
+  .mobile-gate { display: none; }
   .title-screen { padding-top: 88px; align-items: stretch; }
   .title-lockup { padding: 0 16px 16px; width: 100%; }
   .title-actions { flex-direction: column; width: 100%; }

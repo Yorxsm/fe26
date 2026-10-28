@@ -4,7 +4,7 @@ import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
-import { useHeistNow, useScheduleClock } from "@/lib/clock";
+import { useHeistNow, useRoomClocks, useScheduleClock } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
 import { CHALLENGES, formatCountdown, mockQuotes } from "@/lib/schedule";
 
@@ -331,6 +331,7 @@ function useSeasonBoard(id: string) {
 function RoomBoards({ id }: { id: string }) {
   const now = useHeistNow();
   const clock = useScheduleClock();
+  const rooms = useRoomClocks();
   const clockRow: BoardRow = {
     label: clock?.live ? "LIVE" : "NEXT",
     value: clock ? formatCountdown(clock.secs) : "…",
@@ -388,22 +389,26 @@ function RoomBoards({ id }: { id: string }) {
     );
   }
   if (id === "skin-forge") {
-    const signStatus = clock ? `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}` : "…";
+    const signRoom: Record<string, string> = { vault: "vault", cup: "cup", floor: "village", war: "war" };
     return (
       <>
         {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
         {screen("SEASON", rankRows)}
-        {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => (
-          <Screen
-            key={board.name}
-            position={board.at}
-            size={board.size}
-            title={board.name}
-            sign={board.sign}
-            status={signStatus}
-            tone={clock?.live ? "green" : "orange"}
-          />
-        ))}
+        {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => {
+          const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
+          const status = slot ? `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}` : "…";
+          return (
+            <Screen
+              key={board.name}
+              position={board.at}
+              size={board.size}
+              title={board.name}
+              sign={board.sign}
+              status={status}
+              tone={slot?.live ? "green" : "orange"}
+            />
+          );
+        })}
       </>
     );
   }

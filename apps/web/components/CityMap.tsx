@@ -45,7 +45,7 @@ const ROOM_PREFIX: Record<string, string> = {
 
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
 const overviewEye = new THREE.Vector3(-32, 16, 58);
-const overviewAim = new THREE.Vector3(0, 6, -4);
+const overviewAim = new THREE.Vector3(14, 6, -4);
 /**
  * Lobby. Almost level, from above the roofs, so the horizon lands near
  * mid-frame and the lit plaza fills the lower half. Mobile looks a little
@@ -1274,6 +1274,34 @@ function Ears({ paused }: { paused: boolean }) {
   return null;
 }
 
+function fitInterior(
+  camera: THREE.PerspectiveCamera,
+  shot: { eye: [number, number, number]; aim: [number, number, number]; fov?: number },
+) {
+  const authored = shot.fov ?? 50;
+  const aspect = camera.aspect;
+  if (!Number.isFinite(aspect) || aspect >= 1) {
+    return { eye: shot.eye, aim: shot.aim, fov: authored };
+  }
+  const desktop = 1.6;
+  const halfH = Math.atan(Math.tan((authored * Math.PI) / 360) * desktop);
+  let fov = (2 * Math.atan(Math.tan(halfH) / Math.max(aspect, 0.42)) * 180) / Math.PI;
+  fov = Math.min(74, Math.max(authored, fov));
+  const aim = new THREE.Vector3(shot.aim[0], shot.aim[1] + (aspect < 0.7 ? 0.7 : 0.3), shot.aim[2]);
+  const back = new THREE.Vector3(shot.eye[0] - shot.aim[0], shot.eye[1] - shot.aim[1], shot.eye[2] - shot.aim[2]);
+  const pull = Math.min(1.22, Math.max(1, (desktop / Math.max(aspect, 0.45)) * (authored / fov)));
+  const eye = new THREE.Vector3(shot.aim[0], shot.aim[1], shot.aim[2]).add(back.multiplyScalar(pull));
+  return {
+    eye: [eye.x, eye.y, eye.z] as [number, number, number],
+    aim: [aim.x, aim.y, aim.z] as [number, number, number],
+    fov,
+  };
+}
+
+function cameraHeld() {
+  return document.documentElement.dataset.holdCamera === "1" || document.documentElement.dataset.soundOpen === "1";
+}
+
 function CameraDriver({
   mode,
   beat,
@@ -1352,8 +1380,9 @@ function CameraDriver({
       const baseAim = mobileLobby ? titleAimMobile : titleAim;
       if (lobby) {
         const t = state.clock.elapsedTime;
-        const yaw = reduce.current ? 0 : Math.sin(t * 0.16) * 0.08;
-        const bob = reduce.current ? 0 : Math.sin(t * 0.11) * 0.35;
+        const held = cameraHeld();
+        const yaw = reduce.current || held ? 0 : Math.sin(t * 0.16) * 0.08;
+        const bob = reduce.current || held ? 0 : Math.sin(t * 0.11) * 0.35;
         driftOffset.copy(baseEye).sub(baseAim);
         driftOffset.y = 0;
         driftOffset.applyAxisAngle(driftUp, yaw);
@@ -1459,9 +1488,10 @@ function CameraDriver({
         const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
         const inside = frameMode === "in" && !shotLock;
         if (shot) {
-          eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
-          aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
-          applyFov(shot.fov ?? 32);
+          const framed = inside ? fitInterior(camera, shot) : shot;
+          eye.set(framed.eye[0], framed.eye[1], framed.eye[2]);
+          aim.set(framed.aim[0], framed.aim[1], framed.aim[2]);
+          applyFov(framed.fov ?? shot.fov ?? 32);
         } else {
           eye.set(room.x, 2.6, room.z + 8);
           aim.set(room.x, 1.8, room.z);
@@ -1492,7 +1522,7 @@ function CameraDriver({
           camera.position.y = Math.min(3.1, Math.max(1.15, camera.position.y - pointer.current.y * pad));
           camera.position.z = Math.min(room.z + 4.2, Math.max(room.z - 4.4, camera.position.z));
           const span = camera.position.distanceTo(controls.target);
-          if (span < 4 || span > 5.2) {
+          if (camera.aspect >= 1 && (span < 4 || span > 5.2)) {
             const offset = camera.position.clone().sub(controls.target);
             if (offset.lengthSq() > 0.0001) camera.position.copy(controls.target).add(offset.setLength(Math.min(5.2, Math.max(4, span || 4))));
           }
@@ -2008,7 +2038,15 @@ export default function CityMap({
   shotLock?: boolean;
   roomBusy?: boolean;
 }) {
+  const [lean, setLean] = useState(false);
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 800px)");
+    const apply = () => setLean(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
   const [peek, setPeek] = useState<{ x: number; y: number; z: number } | null>(null);
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
@@ -2018,8 +2056,8 @@ export default function CityMap({
   return (
     <Canvas
       className="city-canvas"
-      dpr={dpr}
-      shadows
+      dpr={lean ? 1 : dpr}
+      shadows={!lean}
       camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
       gl={{
         antialias: false,
@@ -2054,7 +2092,7 @@ export default function CityMap({
       </group>
       <Smoke position={[-34, 13.4, -26]} />
       <WindowGlow />
-      {DISTRICTS.filter((district) => district.status === "live").map((district) => (
+      {!lean && DISTRICTS.filter((district) => district.status === "live").map((district) => (
         <pointLight key={`${district.id}-window`} position={[district.x, 5.4, district.z + 12.4]} color="#ff7a28" intensity={22} distance={18} decay={2} />
       ))}
       <mesh position={[12, 16.2, 40]}>
@@ -2066,12 +2104,18 @@ export default function CityMap({
         <boxGeometry args={[1.6, 1.2, 0.18]} />
         <meshStandardMaterial color="#a85a32" emissive="#c94a1a" emissiveIntensity={0.2} />
       </mesh>
-      <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => setDpr([1, 1.5])} />
-      <pointLight position={[-42, 2.4, 18]} intensity={12} color="#ffb060" distance={14} decay={2} />
-      <pointLight position={[46, 2.4, 14]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
-      <pointLight position={[12, 3.2, 46]} intensity={22} color="#ffb070" distance={24} decay={2} />
-      <pointLight position={[-38, 3.2, -16]} intensity={22} color="#ffb070" distance={24} decay={2} />
-      <pointLight position={[-8, 3.6, -32]} intensity={24} color="#ffb070" distance={26} decay={2} />
+      <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => { if (!lean) setDpr([1, 1.5]); }} />
+      {lean ? (
+        <pointLight position={[0, 8, 12]} intensity={18} color="#ffb070" distance={80} decay={2} />
+      ) : (
+        <>
+          <pointLight position={[-42, 2.4, 18]} intensity={12} color="#ffb060" distance={14} decay={2} />
+          <pointLight position={[46, 2.4, 14]} intensity={10} color="#ff9a4a" distance={14} decay={2} />
+          <pointLight position={[12, 3.2, 46]} intensity={22} color="#ffb070" distance={24} decay={2} />
+          <pointLight position={[-38, 3.2, -16]} intensity={22} color="#ffb070" distance={24} decay={2} />
+          <pointLight position={[-8, 3.6, -32]} intensity={24} color="#ffb070" distance={26} decay={2} />
+        </>
+      )}
       {lineup ? (
         <mesh position={[0, 4.2, -3.5]}>
           <planeGeometry args={[52, 16]} />
@@ -2097,13 +2141,16 @@ export default function CityMap({
         makeDefault
         enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}
         enablePan
+        enableZoom
+        enableRotate
         enableDamping
         dampingFactor={0.08}
         autoRotate={false}
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         target={[overviewAim.x, overviewAim.y, overviewAim.z]}
         minPolarAngle={0.35}
         maxPolarAngle={1.5}
-        minDistance={8}
+        minDistance={lean ? 6 : 8}
         maxDistance={360}
       />
     </Canvas>

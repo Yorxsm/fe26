@@ -152,6 +152,57 @@ pub fn upcoming_season_slot(now: u64) -> Slot {
     first_saturday(origin)
 }
 
+fn kind_name(kind: SlotKind) -> &'static str {
+    match kind {
+        SlotKind::Daily => "daily",
+        SlotKind::Weekly => "weekly",
+        SlotKind::Seasonal => "seasonal",
+    }
+}
+
+fn season_containing(now: u64) -> (u64, u64) {
+    let span = SEASON_END.saturating_sub(SEASON_START).max(DAY);
+    if now < SEASON_START {
+        return (SEASON_START, SEASON_END);
+    }
+    let steps = (now - SEASON_START) / span;
+    let start = SEASON_START + steps * span;
+    (start, start + span)
+}
+
+/// One window per room, built from the slots the season already defines.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct RoomWindow {
+    pub room: &'static str,
+    pub kind: &'static str,
+    pub live: bool,
+    pub start_unix: u64,
+    pub end_unix: u64,
+}
+
+fn room_window(room: &'static str, kind: &'static str, start: u64, end: u64, now: u64) -> RoomWindow {
+    RoomWindow {
+        room,
+        kind,
+        live: now >= start && now < end,
+        start_unix: start,
+        end_unix: end,
+    }
+}
+
+pub fn room_windows(now: u64) -> [RoomWindow; 4] {
+    let vault = next_heist(now);
+    let cup = weekly_slot(now);
+    let (open, close) = season_containing(now);
+    let war = upcoming_season_slot(now);
+    [
+        room_window("vault", kind_name(vault.kind), vault.start_unix, vault.end_unix, now),
+        room_window("cup", kind_name(cup.kind), cup.start_unix, cup.end_unix, now),
+        room_window("village", "season", open, close, now),
+        room_window("war", kind_name(war.kind), war.start_unix, war.end_unix, now),
+    ]
+}
+
 fn seasonal(now: u64) -> Option<Slot> {
     if now >= SEASON_END {
         return None;
@@ -806,6 +857,23 @@ mod tests {
         }
         assert_eq!(agent_roster().len(), city_roster().len());
         assert_eq!(agent_roster()[0], "brim.stadium.fe2vi.testnet");
+    }
+
+    #[test]
+    fn each_room_has_its_own_window() {
+        let now = TUESDAY_AFTERNOON;
+        let rooms = room_windows(now);
+        let vault = rooms.iter().find(|row| row.room == "vault").unwrap();
+        let cup = rooms.iter().find(|row| row.room == "cup").unwrap();
+        let village = rooms.iter().find(|row| row.room == "village").unwrap();
+        let war = rooms.iter().find(|row| row.room == "war").unwrap();
+        assert_eq!(vault.start_unix, next_heist(now).start_unix);
+        assert_eq!(cup.start_unix, weekly_slot(now).start_unix);
+        assert_eq!(war.start_unix, upcoming_season_slot(now).start_unix);
+        assert!(village.live);
+        assert!(!vault.live);
+        assert_ne!(vault.start_unix, cup.start_unix);
+        assert_ne!(vault.end_unix, village.end_unix);
     }
 
     #[test]

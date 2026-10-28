@@ -11,6 +11,14 @@ export function AudioHud({ live = false }: { live?: boolean }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (open) document.documentElement.dataset.soundOpen = "1";
+    else delete document.documentElement.dataset.soundOpen;
+    return () => {
+      delete document.documentElement.dataset.soundOpen;
+    };
+  }, [open]);
+
+  useEffect(() => {
     const prefs = audio.hydrate();
     setVolume(prefs.volume);
     if (live || audio.running()) {

@@ -84,6 +84,7 @@ pub fn schedule(now: u64) -> Outcome {
             "daily_len_secs": 3600,
             "weekly_len_secs": 2 * 3600,
             "seasonal_len_secs": 3 * 3600,
+            "rooms": fe2vi_core::room_windows(now),
         }),
         false,
         None,

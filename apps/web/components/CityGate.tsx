@@ -224,6 +224,13 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.holdCamera = showGames || hintsOpen ? "1" : "";
+    return () => {
+      delete document.documentElement.dataset.holdCamera;
+    };
+  }, [showGames, hintsOpen]);
+
+  useEffect(() => {
     if (phase === "cutscene" || phase === "vantage") audio.theme();
     if (phase === "city") audio.city();
   }, [phase]);
@@ -345,13 +352,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   return (
     <>
       <section className="game-root" aria-label="City map">
-        <div className="mobile-gate">
-          <div>
-            <Logo variant="nav" />
-            <h1>This village is 3D.</h1>
-            <p>Open it on a wider screen. The map, the lobby, and the rooms need the full view.</p>
-          </div>
-        </div>
         <div className="city-stage">
           <div className="city-frame">
             {phase === "cutscene" && beat === 0 && (
@@ -519,12 +519,14 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   )}
                   <button
                     type="button"
-                    className="btn btn-icon btn-ghost"
+                    className="btn btn-secondary"
                     onClick={() => setPaused((value) => !value)}
                     aria-pressed={paused}
-                    aria-label={paused ? "Play animation" : "Pause animation"}
+                    aria-label={paused ? "Play" : "Pause"}
+                    title={paused ? "Play" : "Pause"}
                   >
                     {paused ? <Play aria-hidden="true" strokeWidth={1.75} /> : <Pause aria-hidden="true" strokeWidth={1.75} />}
+                    {paused ? "Play" : "Pause"}
                   </button>
                   {(focusId || followIndex !== null) && (
                     <button
