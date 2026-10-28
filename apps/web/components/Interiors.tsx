@@ -4,9 +4,9 @@ import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
-import { useHeistNow } from "@/lib/clock";
+import { useHeistNow, useScheduleClock } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
-import { CHALLENGES, formatCountdown, heistCountdown, mockQuotes } from "@/lib/schedule";
+import { CHALLENGES, formatCountdown, mockQuotes } from "@/lib/schedule";
 
 const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
   "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18] },
@@ -147,16 +147,21 @@ function paintSign(canvas: HTMLCanvasElement, sign: BoardSign, status: string, t
   ctx.font = `500 64px "${mono}", monospace`;
   ctx.fillText(copy.kicker, 320, 78);
   ctx.fillStyle = "#d4d2cc";
-  ctx.font = `700 168px "${display}", sans-serif`;
+  let nameSize = 168;
+  ctx.font = `700 ${nameSize}px "${display}", sans-serif`;
+  while (nameSize > 64 && ctx.measureText(copy.name).width > canvas.width - 380) {
+    nameSize -= 6;
+    ctx.font = `700 ${nameSize}px "${display}", sans-serif`;
+  }
   ctx.fillText(copy.name, 320, 168);
   ctx.fillStyle = toneColor(tone);
-  let statusSize = 112;
+  let statusSize = 72;
   ctx.font = `500 ${statusSize}px "${mono}", monospace`;
-  while (statusSize > 72 && ctx.measureText(status).width > canvas.width - 380) {
+  while (statusSize > 40 && ctx.measureText(status).width > canvas.width - 380) {
     statusSize -= 4;
     ctx.font = `500 ${statusSize}px "${mono}", monospace`;
   }
-  ctx.fillText(status, 320, 400);
+  ctx.fillText(status, 320, 168 + nameSize + 28);
 }
 
 function paintBoard(canvas: HTMLCanvasElement, title: string, rows: BoardRow[], compact: boolean, band: boolean, inset: boolean) {
@@ -280,9 +285,6 @@ function Screen({
   );
 }
 
-function useClock() {
-  return useHeistNow();
-}
 
 function placed(id: string, name: string): FrameBoard {
   const board = FRAME_BOARDS[id]?.find((entry) => entry.name === name);
@@ -327,8 +329,8 @@ function useSeasonBoard(id: string) {
 }
 
 function RoomBoards({ id }: { id: string }) {
-  const now = useClock();
-  const clock = now == null ? null : heistCountdown(now);
+  const now = useHeistNow();
+  const clock = useScheduleClock();
   const clockRow: BoardRow = {
     label: clock?.live ? "LIVE" : "NEXT",
     value: clock ? formatCountdown(clock.secs) : "…",
@@ -386,7 +388,7 @@ function RoomBoards({ id }: { id: string }) {
     );
   }
   if (id === "skin-forge") {
-    const vaultStatus = clock ? `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}` : "NEXT";
+    const signStatus = clock ? `${clock.live ? "LIVE" : "NEXT"} ${formatCountdown(clock.secs)}` : "…";
     return (
       <>
         {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
@@ -398,8 +400,8 @@ function RoomBoards({ id }: { id: string }) {
             size={board.size}
             title={board.name}
             sign={board.sign}
-            status={board.sign === "vault" ? vaultStatus : "LIVE"}
-            tone={board.sign === "vault" && !clock?.live ? "orange" : "green"}
+            status={signStatus}
+            tone={clock?.live ? "green" : "orange"}
           />
         ))}
       </>

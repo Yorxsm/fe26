@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
-import { CountdownChip, EventBanner } from "@/components/SpectatorBoards";
+import { CountdownChip } from "@/components/SpectatorBoards";
 import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
@@ -380,16 +380,29 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               </div>
               <div className="hud-tr ui-in">
                 <CountdownChip compact={frameMode === "in" && Boolean(focusId)} />
-                <EventBanner room="map" compact={frameMode === "in" && Boolean(focusId)} />
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
-                  <QuestLog
-                    items={QUEST_DEFS.map((quest) => ({
-                      id: quest.id,
-                      label: quest.label,
-                      done: save.quests[quest.id],
-                    }))}
-                  />
+                  <div className="hud-aside">
+                    <QuestLog
+                      items={QUEST_DEFS.map((quest) => ({
+                        id: quest.id,
+                        label: quest.label,
+                        done: save.quests[quest.id],
+                      }))}
+                    />
+                    <p className="live-feed num">
+                      <span className="live-dot" aria-hidden="true" />
+                      <Tick value={CITY_AGENTS.length} /> in the city
+                    </p>
+                    <Minimap
+                      spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
+                      active={focusId}
+                      onPick={(id) => {
+                        const district = DISTRICTS.find((entry) => entry.id === id);
+                        if (district) pick(district);
+                      }}
+                    />
+                  </div>
                 )}
               </div>
               {phase === "city" && (
@@ -489,17 +502,17 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     <Home aria-hidden="true" strokeWidth={1.75} />
                     Home
                   </button>
-                  <a className="btn btn-secondary btn-sm" href="/leaderboard">
+                  <a className="btn btn-secondary" href="/leaderboard">
                     <Trophy aria-hidden="true" strokeWidth={1.75} />
                     Leaderboard
                   </a>
                   {DISTRICTS.find((district) => district.id === focusId)?.href ? (
-                    <a className="btn btn-primary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                    <a className="btn btn-secondary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
                       Enter the room
                     </a>
                   ) : (
-                    <button type="button" className="btn btn-primary" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
                       <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
                       Games
                     </button>
@@ -528,22 +541,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   )}
                 </div>
               )}
-              {phase === "city" && (
-                <aside className="hud-br ui-in">
-                  <p className="live-feed num">
-                    <span className="live-dot" aria-hidden="true" />
-                    <Tick value={CITY_AGENTS.length} /> in the city
-                  </p>
-                  <Minimap
-                    spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
-                    active={focusId}
-                    onPick={(id) => {
-                      const district = DISTRICTS.find((entry) => entry.id === id);
-                      if (district) pick(district);
-                    }}
-                  />
-                </aside>
-              )}
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
@@ -566,7 +563,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}
-                onHotspot={setHotspot}
                 shotLock={shotLock}
                 roomBusy={roomBusy}
               />

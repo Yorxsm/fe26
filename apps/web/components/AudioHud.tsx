@@ -1,19 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Volume1, Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX } from "lucide-react";
 import { audio } from "@/lib/audio";
 
 export function AudioHud({ live = false }: { live?: boolean }) {
   const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(0.7);
-  const [quiet, setQuiet] = useState(false);
   const [ready, setReady] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const prefs = audio.hydrate();
     setVolume(prefs.volume);
-    setQuiet(prefs.quiet);
     if (live || audio.running()) {
       setReady(true);
       setMuted(prefs.muted);
@@ -31,56 +30,57 @@ export function AudioHud({ live = false }: { live?: boolean }) {
     };
   }, [live]);
 
+  const silent = muted || !ready || volume === 0;
+
   return (
-    <div className="audio-hud" role="group" aria-label="Sound">
+    <div className="audio-hud">
       <button
         type="button"
-        aria-pressed={!muted && ready}
+        className="btn btn-icon btn-secondary"
+        aria-expanded={open}
+        aria-label={silent ? "Sound off" : "Sound"}
         onClick={() => {
-          if (!ready || muted) {
+          if (!ready) {
             audio.unlock();
             audio.setMuted(false);
             setReady(true);
             setMuted(false);
-            return;
           }
-          audio.setMuted(true);
-          setMuted(true);
+          setOpen((value) => !value);
         }}
       >
-        {muted || !ready ? <Volume2 aria-hidden="true" strokeWidth={1.75} /> : <VolumeX aria-hidden="true" strokeWidth={1.75} />}
-        {muted || !ready ? "Unmute" : "Mute"}
+        {silent ? <VolumeX aria-hidden="true" strokeWidth={1.75} /> : <Volume2 aria-hidden="true" strokeWidth={1.75} />}
       </button>
-      <label>
-        Volume
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={volume}
-          style={{ ["--pct" as string]: `${Math.round(volume * 100)}%` }}
-          aria-valuetext={`${Math.round(volume * 100)} percent`}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            setVolume(next);
-            audio.setVolume(next);
-          }}
-        />
-      </label>
-      <button
-        type="button"
-        className="btn-quiet"
-        aria-pressed={quiet}
-        onClick={() => {
-          const next = !quiet;
-          setQuiet(next);
-          audio.setQuiet(next);
-        }}
-      >
-        <Volume1 aria-hidden="true" strokeWidth={1.75} />
-        {quiet ? "Quiet on" : "Quiet"}
-      </button>
+      {open ? (
+        <div className="audio-pop" role="group" aria-label="Volume">
+          <label>
+            Volume
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              style={{ ["--pct" as string]: `${Math.round(volume * 100)}%` }}
+              aria-valuetext={`${Math.round(volume * 100)} percent`}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setVolume(next);
+                audio.setVolume(next);
+                if (next === 0) {
+                  audio.setMuted(true);
+                  setMuted(true);
+                  return;
+                }
+                audio.unlock();
+                audio.setMuted(false);
+                setReady(true);
+                setMuted(false);
+              }}
+            />
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }

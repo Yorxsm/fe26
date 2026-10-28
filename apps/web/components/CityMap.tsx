@@ -1975,52 +1975,6 @@ function FrameStats({ count }: { count: number }) {
   return null;
 }
 
-const HOTSPOTS: Record<string, Array<{ x: number; y: number; z: number; tip: string }>> = {
-  "vault-quarter": [
-    { x: 0, y: 1.6, z: -4.2, tip: "Score boards. Each vault action adds points." },
-    { x: 0, y: 1.2, z: 4.6, tip: "Vault door. The crew comes and goes through here." },
-  ],
-  "trading-village": [
-    { x: 0, y: 1.5, z: -4, tip: "Tape. A fill adds points." },
-  ],
-  "war-room": [
-    { x: 0, y: 1.1, z: -1, tip: "Table. Flags are only for sandboxes this arena hosts." },
-  ],
-  "skin-forge": [
-    { x: 0, y: 1.5, z: -4, tip: "Hall boards. The schedule and the season live here." },
-  ],
-  "cup-stadium": [
-    { x: 0, y: 2.4, z: -3, tip: "Scoreboard. A round adds points." },
-  ],
-};
-
-function RoomHotspots({ roomId, onHotspot }: { roomId: string; onHotspot: (tip: string) => void }) {
-  const origin = ROOM_XZ[roomId];
-  const spots = HOTSPOTS[roomId];
-  if (!origin || !spots) return null;
-  return (
-    <group>
-      {spots.map((spot) => (
-        <mesh
-          key={spot.tip}
-          position={[origin[0] + spot.x, spot.y, origin[1] + spot.z]}
-          onClick={(event) => {
-            event.stopPropagation();
-            onHotspot(spot.tip);
-          }}
-          onDoubleClick={(event) => {
-            event.stopPropagation();
-            onHotspot(spot.tip);
-          }}
-        >
-          <sphereGeometry args={[0.22, 10, 8]} />
-          <meshBasicMaterial color="#2fb86a" transparent opacity={0.45} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 export default function CityMap({
   paused,
   mode,
@@ -2035,7 +1989,6 @@ export default function CityMap({
   onPick,
   onFollow,
   onUnavailable,
-  onHotspot,
   shotLock = false,
   roomBusy = false,
 }: {
@@ -2052,7 +2005,6 @@ export default function CityMap({
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
-  onHotspot: (tip: string) => void;
   shotLock?: boolean;
   roomBusy?: boolean;
 }) {
@@ -2091,7 +2043,6 @@ export default function CityMap({
       <Nature />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
       <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
-      {openInterior ? <RoomHotspots roomId={openInterior} onHotspot={onHotspot} /> : null}
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />

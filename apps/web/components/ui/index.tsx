@@ -165,7 +165,7 @@ export function QuestLog({ items }: { items: { id: string; label: string; done: 
           <li key={item.id}>
             <span className={item.done ? "live-dot" : "dot-idle"} aria-hidden="true" />
             {item.label}
-            <span className="sr-only">{item.done ? ", done" : ", open"}</span>
+            <span className="sr-only">{item.done ? ". Done." : ". Not done yet."}</span>
           </li>
         ))}
       </ul>

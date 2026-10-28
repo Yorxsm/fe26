@@ -2,14 +2,13 @@
 
 import { Calendar, Clock, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useHeistNow } from "@/lib/clock";
+import { useScheduleClock } from "@/lib/clock";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
   exampleEventLive,
   exampleHeadline,
   formatCountdown,
-  heistCountdown,
   heistRows,
   localRange,
   mockQuotes,
@@ -29,8 +28,9 @@ function useNow() {
 }
 
 export function CountdownChip({ compact = false }: { compact?: boolean }) {
-  const now = useHeistNow();
-  if (now == null) {
+  void compact;
+  const clock = useScheduleClock();
+  if (clock == null) {
     return (
       <span className="chip">
         <Clock size={14} aria-hidden="true" />
@@ -38,13 +38,11 @@ export function CountdownChip({ compact = false }: { compact?: boolean }) {
       </span>
     );
   }
-  const slot = nextHeist(now);
-  const clock = heistCountdown(now);
-  const label = clock.live ? `LIVE ${formatCountdown(clock.secs)}` : `Next heist in ${formatCountdown(clock.secs)}`;
+  const label = clock.live ? `Live ${formatCountdown(clock.secs)}` : `Next heist ${formatCountdown(clock.secs)}`;
   return (
     <span className="chip">
       <Clock size={14} aria-hidden="true" />
-      {compact ? label : `${label} · ${slot.kind} · ${localRange(slot.start, slot.end)}`}
+      {label}
     </span>
   );
 }

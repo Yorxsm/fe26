@@ -29,10 +29,10 @@ export const FRAME_BOARDS: Record<string, FrameBoard[]> = {
   "skin-forge": [
     { name: "HALL", at: [-2.6, 5.15, -5.78], size: [4.6, 1.35] },
     { name: "SEASON", at: [2.7, 5.15, -5.78], size: [4.4, 1.35] },
-    { name: "VAULT", at: [-4.7, 3.45, -5.72], size: [1.62, 0.98], sign: "vault" },
-    { name: "CUP", at: [-1.6, 3.45, -5.72], size: [1.62, 0.98], sign: "cup" },
-    { name: "FLOOR", at: [1.6, 3.45, -5.72], size: [1.62, 0.98], sign: "floor" },
-    { name: "WAR", at: [4.7, 3.45, -5.72], size: [1.62, 0.98], sign: "war" },
+    { name: "VAULT", at: [-2.7, 2.15, -5.72], size: [1.48, 0.9], sign: "vault" },
+    { name: "CUP", at: [-0.9, 2.15, -5.72], size: [1.48, 0.9], sign: "cup" },
+    { name: "FLOOR", at: [0.9, 2.15, -5.72], size: [1.48, 0.9], sign: "floor" },
+    { name: "WAR", at: [2.7, 2.15, -5.72], size: [1.48, 0.9], sign: "war" },
   ],
   "cup-stadium": [{ name: "CUP", at: [0, 2.15, -1.2], size: [4.4, 1.15] }],
 };

@@ -236,13 +236,19 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
   const from = ways[index % ways.length];
   const to = ways[(index + 2) % ways.length];
   const door: [number, number] = [((index % 3) - 1) * 1.8, -3.2];
+  const lane = crew.findIndex((entry) => entry.index === index);
   const clear = (x: number, z: number) => {
     let lx = x - ox;
     let lz = z - oz;
-    if (lz > -3.2) lz = -3.2;
-    if (Math.abs(lx) < 1.5) lx = lx < 0 ? -2.1 : 2.1;
-    lx = Math.min(4.1, Math.max(-4.1, lx));
-    lz = Math.max(-4.4, lz);
+    if (roomId === "skin-forge") {
+      lx = [-3.8, 0, 3.8][Math.max(0, lane)] ?? 0;
+      lz = -1.4;
+    } else {
+      if (lz > -3.2) lz = -3.2;
+      if (Math.abs(lx) < 1.5) lx = lx < 0 ? -2.1 : 2.1;
+      lx = Math.min(4.1, Math.max(-4.1, lx));
+      lz = Math.max(-4.4, lz);
+    }
     return { x: ox + lx, z: oz + lz };
   };
   const walk = (a: [number, number], b: [number, number], u: number) => {
@@ -298,9 +304,9 @@ export const INTERIOR_CAST: Record<string, CastPose[]> = {
     { index: 7, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -39.7, z: -25.7, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -36.1, z: -25.9, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 6, x: -37.9, z: -27.15, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 4, x: -40.8, z: -26.6, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 7, x: -38, z: -27.4, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 6, x: -35.2, z: -26.6, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
     { index: 2, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
