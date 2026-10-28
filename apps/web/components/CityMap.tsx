@@ -1,19 +1,9 @@
 "use client";
 
-import { Billboard, Html, OrbitControls, PerformanceMonitor, Text, useGLTF, useProgress } from "@react-three/drei";
+import { Billboard, Html, OrbitControls, Text, useGLTF, useProgress } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import {
-  BloomEffect,
-  DepthOfFieldEffect,
-  EffectComposer,
-  EffectPass,
-  NormalPass,
-  RenderPass,
-  SSAOEffect,
-  ToneMappingEffect,
-  ToneMappingMode,
-} from "postprocessing";
+import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode } from "postprocessing";
 import { Interiors } from "@/components/Interiors";
 import { Nature } from "@/components/Nature";
 import { World } from "@/components/World";
@@ -41,6 +31,104 @@ const ROOM_PREFIX: Record<string, string> = {
 };
 
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
+const pickMark = { name: "", x: 0, z: 0, at: 0 };
+
+function showPick(name: string, x: number, z: number) {
+  pickMark.name = name;
+  pickMark.x = x;
+  pickMark.z = z;
+  pickMark.at = performance.now();
+  const node = document.getElementById("pick-flash");
+  if (!node) return;
+  node.hidden = false;
+  node.textContent = name;
+}
+
+function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
+  return (
+    <group>
+      {DISTRICTS.map((district) => (
+        <mesh
+          key={district.id}
+          position={[district.x, 5, district.z]}
+          onClick={(event: ThreeEvent<MouseEvent>) => {
+            event.stopPropagation();
+            showPick(district.name, district.x, district.z);
+            onPick(district);
+          }}
+        >
+          <boxGeometry args={[14, 12, 14]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function AgentTargets({
+  agents,
+  paused,
+  onFollow,
+}: {
+  agents: CityAgent[];
+  paused: boolean;
+  onFollow: (index: number) => void;
+}) {
+  const group = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    const root = group.current;
+    if (!root) return;
+    const time = state.clock.elapsedTime;
+    for (let index = 0; index < agents.length; index += 1) {
+      const pose = placeAgent(index, time, paused);
+      const child = root.children[index];
+      if (!child) continue;
+      child.position.set(pose.x, 1.1, pose.z);
+    }
+  });
+  return (
+    <group ref={group}>
+      {agents.map((agent, index) => (
+        <mesh
+          key={agent.accountId}
+          onClick={(event: ThreeEvent<MouseEvent>) => {
+            event.stopPropagation();
+            showPick(agent.name, event.object.position.x, event.object.position.z);
+            onFollow(index);
+          }}
+        >
+          <boxGeometry args={[1.4, 2.4, 1.4]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+            <div className="name-tag" data-agent={agent.name}>
+              <span className="live-dot" aria-hidden="true" />
+              {agent.name}
+            </div>
+          </Html>
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function PickRing() {
+  const mesh = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    const ring = mesh.current;
+    if (!ring) return;
+    const fresh = pickMark.name !== "" && performance.now() - pickMark.at < 1600;
+    ring.visible = fresh;
+    if (!fresh) return;
+    ring.position.set(pickMark.x, 0.2, pickMark.z);
+  });
+  return (
+    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+      <ringGeometry args={[2.2, 2.7, 28]} />
+      <meshBasicMaterial color="#c94a1a" toneMapped={false} />
+    </mesh>
+  );
+}
+
 const overviewEye = new THREE.Vector3(-32, 16, 58);
 const overviewAim = new THREE.Vector3(14, 6, -4);
 /**
@@ -395,7 +483,8 @@ function Kits({
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = true;
+      mesh.raycast = () => undefined;
       const grade = buildingGrade(label);
       if (grade && mesh.material) {
         const atlasKey = key || "kit";
@@ -548,7 +637,8 @@ function dress(root: THREE.Object3D, finish?: PaintFinish, screen?: string) {
     if (district) mesh.userData.district = district;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.frustumCulled = false;
+    mesh.frustumCulled = true;
+    mesh.raycast = () => undefined;
     if (label.startsWith("tree.")) mesh.visible = false;
     if (ROOM_PREFIX[prefix] && !label.endsWith(".pad")) mesh.visible = false;
   });
@@ -662,6 +752,7 @@ function mergeStatic(root: THREE.Object3D, skip: (mesh: THREE.Mesh) => boolean, 
     batch.castShadow = list.some((mesh) => mesh.castShadow);
     batch.receiveShadow = list.some((mesh) => mesh.receiveShadow);
     batch.frustumCulled = true;
+    batch.raycast = () => undefined;
     const district = perDistrict ? districtOf(list[0]) : "";
     if (district) batch.userData.district = district;
     batch.userData.name = sourceName(list[0]);
@@ -722,8 +813,19 @@ function Station({
       }
       return false;
     }, true);
+    root.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh) mesh.raycast = () => undefined;
+    });
     return root;
   }, [gltf.scene]);
+  const roofs = useMemo(() => {
+    const list: THREE.Object3D[] = [];
+    scene.traverse((node) => {
+      if (sourceName(node).split(".").includes("roof")) list.push(node);
+    });
+    return list;
+  }, [scene]);
   useLayoutEffect(() => {
     paintScreen(scene, "market.screen", paintMarket);
     paintScreen(scene, "stadium.screen", paintStadium);
@@ -735,13 +837,12 @@ function Station({
     const wheel = scene.getObjectByName("vault.wheel");
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
-    scene.traverse((node) => {
-      if (node.userData.mergedAway) return;
+    for (const node of roofs) {
+      if (node.userData.mergedAway) continue;
       const bits = sourceName(node).split(".");
-      if (!bits.includes("roof")) return;
       // The market kit is the exterior. The shell roof sits in front of it and reads as a black slab.
       node.visible = bits[0] !== openPrefix && bits[0] !== "market";
-    });
+    }
     const holo = scene.getObjectByName("war.holo");
     if (holo) holo.rotateY(delta * 0.8);
     const beacon = scene.getObjectByName("war.beacon") as THREE.Mesh | undefined;
@@ -797,6 +898,7 @@ function Station({
                 position={[door[0], 0, door[1]]}
                 onClick={(event: ThreeEvent<MouseEvent>) => {
                   event.stopPropagation();
+                  showPick(district.name, district.x, district.z);
                   onPick(district);
                 }}
               >
@@ -995,12 +1097,16 @@ function AgentMesh({
     applyLook(cloned, skin, "trait");
     cloned.traverse((node) => {
       const mesh = node as THREE.Mesh;
-      if (mesh.isMesh) mesh.frustumCulled = true;
+      if (mesh.isMesh) {
+        mesh.frustumCulled = true;
+        mesh.raycast = () => undefined;
+      }
     });
     return cloned;
   }, [gltf.scene, skin]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
   const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
+  const faceTick = useRef(index % 4);
   const saccade = useRef({ next: 0.4 + (index % 4) * 0.3, x: 0, y: 0 });
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
@@ -1136,7 +1242,9 @@ function AgentMesh({
         group.current.rotation.y = pose.rot;
       }
     }
-    if (tag.current) {
+    faceTick.current += 1;
+    const paintUi = faceTick.current % 3 === 0;
+    if (tag.current && paintUi) {
       tag.current.visible = Boolean(group.current?.visible) && shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
       tag.current.position.y = AGENT_SCALE * 1.05 + (stationed ? 0 : tagLift(index, state.clock.elapsedTime, paused));
       const chip = tagEl.current;
@@ -1149,7 +1257,7 @@ function AgentMesh({
         else tagSlots.delete(index);
       }
     }
-    if (face && group.current?.visible) {
+    if (face && group.current?.visible && paintUi) {
       const now = state.clock.elapsedTime + index * 0.37;
       if (now >= blink.current.next && blink.current.active <= 0) {
         blink.current.active = 0.14;
@@ -1208,11 +1316,23 @@ function AgentMesh({
           <ParticleTrail kind={skin.trail % 4} />
         </group>
       ) : null}
+      <mesh
+        position={[0, 1.1, 0]}
+        onClick={(event: ThreeEvent<MouseEvent>) => {
+          event.stopPropagation();
+          showPick(agent.name, poseRef.current.x, poseRef.current.z);
+          onFollow(index);
+        }}
+      >
+        <boxGeometry args={[1.1, 2.2, 1.1]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <primitive
         object={scene}
         scale={AGENT_SCALE}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
+          showPick(agent.name, poseRef.current.x, poseRef.current.z);
           onFollow(index);
         }}
         onDoubleClick={(event: ThreeEvent<MouseEvent>) => {
@@ -1241,31 +1361,12 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
   shotKind.current = shot;
   const grade = useMemo(() => {
     const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
-    const normal = new NormalPass(scene, camera, { resolutionScale: 0.5 });
-    const dof = new DepthOfFieldEffect(camera, { focusDistance: 18, focusRange: 8, bokehScale: 0.2, resolutionScale: 0.5 });
-    const ssao = new SSAOEffect(camera, normal.texture, {
-      samples: 9,
-      rings: 4,
-      intensity: 0.12,
-      radius: 0.08,
-      luminanceInfluence: 0.65,
-      bias: 0.04,
-    });
-    composer.addPass(normal);
     composer.addPass(new RenderPass(scene, camera));
-    // NormalPass draws the scene with shadows off. RenderPass draws the shadow map, then the color.
-    // SSAO, depth of field, bloom, and ACES share the one EffectPass below. That is 3 composer passes.
     composer.addPass(
-      new EffectPass(
-        camera,
-        ssao,
-        dof,
-        new BloomEffect({ intensity: 0.07, luminanceThreshold: 0.86, luminanceSmoothing: 0.18, mipmapBlur: true }),
-        new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
-      ),
+      new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC })),
     );
     postBudget.composerPasses = composer.passes.length;
-    return { composer, dof };
+    return { composer };
   }, [camera, gl, scene]);
 
   useLayoutEffect(() => {
@@ -1280,13 +1381,7 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
   );
 
   useFrame((_, delta) => {
-    if (!grade.dof.target) grade.dof.target = new THREE.Vector3();
-    camera.getWorldDirection(aim);
-    const kind = shotKind.current;
-    gl.toneMappingExposure = kind === "interior" ? 0.95 : 1;
-    const focusDistance = kind === "interior" ? 5.4 : kind === "hero" ? 26 : 48;
-    grade.dof.target.copy(camera.position).addScaledVector(aim, focusDistance);
-    grade.dof.bokehScale = kind === "overview" ? 0.015 : 0;
+    gl.toneMappingExposure = shotKind.current === "interior" ? 0.95 : 1;
     grade.composer.render(delta);
   }, 1);
 
@@ -2132,7 +2227,6 @@ export default function CityMap({
 }) {
   const crew = [...CITY_AGENTS, ...visitors];
   const [lean, setLean] = useState(false);
-  const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 800px)");
     const apply = () => setLean(query.matches);
@@ -2149,8 +2243,8 @@ export default function CityMap({
   return (
     <Canvas
       className="city-canvas"
-      dpr={lean ? 1 : dpr}
-      shadows={!lean}
+      dpr={1}
+      shadows={false}
       camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
       gl={{
         antialias: false,
@@ -2161,7 +2255,7 @@ export default function CityMap({
       }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.NoToneMapping;
-        gl.shadowMap.enabled = true;
+        gl.shadowMap.enabled = false;
         gl.shadowMap.type = THREE.PCFSoftShadowMap;
         gl.domElement.addEventListener("webglcontextlost", (event) => {
           event.preventDefault();
@@ -2197,7 +2291,8 @@ export default function CityMap({
         <boxGeometry args={[1.6, 1.2, 0.18]} />
         <meshStandardMaterial color="#a85a32" emissive="#c94a1a" emissiveIntensity={0.2} />
       </mesh>
-      <PerformanceMonitor flipflops={4} onDecline={() => setDpr(1)} onIncline={() => { if (!lean) setDpr([1, 1.5]); }} />
+      <BuildingHits onPick={onPick} />
+      <PickRing />
       {lean ? (
         <pointLight position={[0, 8, 12]} intensity={18} color="#ffb070" distance={80} decay={2} />
       ) : (
@@ -2220,10 +2315,22 @@ export default function CityMap({
       <FrameAudit />
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
-      ) : (
+      ) : poster || lineup || street || mode === "cutscene" ? (
         (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : crew).map((agent, index) => (
           <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
+      ) : (
+        <>
+          <ImpostorCrowd
+            count={crew.length}
+            hide={focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]}
+            paused={paused}
+          />
+          <AgentTargets agents={crew} paused={paused} onFollow={onFollow} />
+          {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]).map((index) => (
+            <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
+          ))}
+        </>
       )}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
@@ -2250,3 +2357,12 @@ export default function CityMap({
     </Canvas>
   );
 }
+
+useGLTF.preload("/models/kits.glb");
+useGLTF.preload("/models/station.glb");
+useGLTF.preload("/models/agent.glb");
+useGLTF.preload("/models/interior-vault.glb");
+useGLTF.preload("/models/interior-market.glb");
+useGLTF.preload("/models/interior-war.glb");
+useGLTF.preload("/models/interior-forge.glb");
+useGLTF.preload("/models/interior-stadium.glb");

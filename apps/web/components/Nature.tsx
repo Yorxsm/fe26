@@ -164,12 +164,12 @@ function GrassField({ source, uTime }: { source: THREE.Mesh; uTime: { value: num
   }, [source, uTime]);
   const anchor = useRef(new THREE.Vector2(999, 999));
   const camera = useThree((state) => state.camera);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
   useFrame(() => {
     const x = camera.position.x;
     const z = camera.position.z;
     if ((x - anchor.current.x) ** 2 + (z - anchor.current.y) ** 2 < 16) return;
     anchor.current.set(x, z);
-    const dummy = new THREE.Object3D();
     for (let index = 0; index < 1400; index += 1) {
       const angle = index * 2.399;
       const radius = (index % 38) * 0.55;
@@ -218,10 +218,13 @@ export function Nature() {
     });
   }, [gltf.scene, uTime]);
   const grass = gltf.scene.getObjectByName("grass.a") as THREE.Mesh | undefined;
+  const hidden = useMemo(() => new THREE.Matrix4().makeScale(0, 0, 0), []);
+  const parked = useRef(new THREE.Vector3(999, 999, 999));
   useFrame(({ clock }) => {
     uTime.value = clock.elapsedTime;
+    if (camera.position.distanceToSquared(parked.current) < 4) return;
+    parked.current.copy(camera.position);
     camera.getWorldDirection(view.current);
-    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
     fields.forEach((field) => {
       if (!field) return;
       const spots = field.userData.spots as Spot[] | undefined;

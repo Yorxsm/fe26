@@ -1301,6 +1301,24 @@ body, p, li, label, .lede, .meta, .subtitle, .caption-detail, td, .num, .ribbon 
   line-height: 0;
 }
 .loading { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.pick-flash {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  z-index: 24;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 8px 16px;
+  background: #141416;
+  color: #d4d2cc;
+  font-family: var(--display);
+  font-size: var(--type-h3);
+  line-height: 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 0 #8a3110;
+  pointer-events: none;
+}
+.pick-flash[hidden] { display: none; }
 .loading-screen {
   position: fixed;
   inset: 0;

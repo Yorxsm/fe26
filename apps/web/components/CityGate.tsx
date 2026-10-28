@@ -335,6 +335,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function leaveRoom() {
+    const flash = document.getElementById("pick-flash");
+    if (flash) flash.hidden = true;
     setHotspot(null);
     markRoomTransition();
     audio.crowd(false);
@@ -409,6 +411,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   return (
     <>
       <section className="game-root" aria-label="City map">
+        <div id="pick-flash" className="pick-flash" hidden />
         <div className="city-stage">
           <div className="city-frame">
             {phase === "cutscene" && beat === 0 && (
