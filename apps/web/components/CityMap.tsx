@@ -872,24 +872,24 @@ function Station({
       />
       {DISTRICTS.map((district) => {
         const label = roofLabel(district.id);
-        const plate = Math.max(2.4, label.length * 0.34);
+        const plate = Math.max(6.4, label.length * 0.72);
         const door = BUILDING_DOOR[district.id];
         return (
           <group key={district.id}>
-            <Billboard position={[district.x, 11.2, district.z]}>
-              <mesh position={[0, 0, -0.08]}>
-                <planeGeometry args={[plate + 0.36, 0.78]} />
+            <Billboard position={[district.x, 9.4, district.z]}>
+              <mesh position={[0, 0, -0.12]}>
+                <planeGeometry args={[plate + 0.7, 1.7]} />
                 <meshStandardMaterial color="#141416" roughness={0.6} />
               </mesh>
-              <mesh position={[-plate / 2 + 0.08, 0, -0.02]}>
-                <planeGeometry args={[0.08, 0.5]} />
+              <mesh position={[-plate / 2 + 0.16, 0, -0.04]}>
+                <planeGeometry args={[0.14, 1.15]} />
                 <meshStandardMaterial color="#2fb86a" />
               </mesh>
-              <mesh position={[0, -0.3, -0.02]}>
-                <planeGeometry args={[plate, 0.06]} />
+              <mesh position={[0, -0.68, -0.04]}>
+                <planeGeometry args={[plate, 0.12]} />
                 <meshStandardMaterial color="#c94a1a" />
               </mesh>
-              <Text font={DISPLAY_FONT} fontSize={0.28} color="#d4d2cc" anchorX="center" anchorY="middle">
+              <Text font={DISPLAY_FONT} fontSize={0.72} color="#d4d2cc" anchorX="center" anchorY="middle" maxWidth={plate - 0.8}>
                 {label}
               </Text>
             </Billboard>
