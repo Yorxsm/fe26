@@ -56,7 +56,15 @@ cd ../../workers/api
 npx wrangler deploy
 ```
 
-`npm run deploy` sets `NEXT_PUBLIC_FE2VI_API_URL=https://api.fe2vi.space`, builds with OpenNext, and runs `wrangler deploy` for the web worker. The API `wrangler.toml` runs `worker-build` before deploy. Leave `FE2VI_INTENTS_LIVE` at `0`.
+`npm run deploy` runs the Workers preview check, then `wrangler deploy` for the web worker. The API `wrangler.toml` runs `worker-build` before deploy. Leave `FE2VI_INTENTS_LIVE` at `0`.
+
+Before every push of the web app, from `apps/web`:
+
+```bash
+npm run preview:check
+```
+
+That builds with OpenNext (`NEXT_PUBLIC_FE2VI_API_URL=https://api.fe2vi.space`) and requires `opennextjs-cloudflare preview` (workerd) to return 200 for `/`, `/?room=vault`, `/lobby`, and `/leaderboard`. A Node `next start` does not count. The check is also the first step of `npm run deploy`.
 
 `fe2vi watch --game-id g1 --once` polls `FE2VI_API_URL` when that variable is set, and otherwise polls the heist view through `FE2VI_RPC_URL`. The CLI refuses any RPC URL that contains `mainnet`.
 
