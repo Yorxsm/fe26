@@ -47,6 +47,45 @@ export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; 
   return { agent: fixtureAgent(id) ?? null, source: "fixture" };
 }
 
+export type PublicRow = {
+  rank: number;
+  agent: string;
+  name: string;
+  colour: string;
+  points: number;
+  games: number;
+  vault: number;
+  cup: number;
+  village: number;
+  war: number;
+};
+
+export type RecentPoint = {
+  room: string;
+  points: number;
+  unix: number;
+  label: string;
+};
+
+export async function loadLeaderboard(
+  windowName: string,
+  room: string,
+  agent?: string,
+): Promise<{ source: "relay" | "fixture"; rows: PublicRow[]; recent: RecentPoint[] }> {
+  const base = apiBase();
+  if (!base) return { source: "fixture", rows: [], recent: [] };
+  try {
+    const query = new URLSearchParams({ window: windowName, room });
+    if (agent) query.set("agent", agent);
+    const response = await fetch(`${base}/v1/leaderboard?${query}`, { cache: "no-store" });
+    if (!response.ok) return { source: "fixture", rows: [], recent: [] };
+    const body = (await response.json()) as { rows?: PublicRow[]; recent?: RecentPoint[] | null };
+    return { source: "relay", rows: body.rows ?? [], recent: body.recent ?? [] };
+  } catch {
+    return { source: "fixture", rows: [], recent: [] };
+  }
+}
+
 export function fixtureFeed(id: string): FeedEvent[] {
   return fixtureEvents.filter((event) => event.game_id === id);
 }

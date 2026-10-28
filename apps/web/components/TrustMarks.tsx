@@ -8,10 +8,6 @@ export function TrustMarks({ trust, templateId }: { trust: Trust; templateId?: s
     : "Unknown game";
   return (
     <div className="stamps" aria-label="Trust labels">
-      <span className={trust.hash_pinned ? "stamp" : "stamp warn"}>{trust.hash_pinned ? "Hash pinned" : "Hash missing"}</span>
-      <span className={trust.within_platform_caps ? "stamp" : "stamp warn"}>
-        {trust.within_platform_caps ? "Within caps" : "Over cap"}
-      </span>
       <span className={trust.known_template ? "stamp" : "stamp warn"}>{template}</span>
       <span className={trust.delisted ? "stamp warn" : "stamp"}>{trust.delisted ? "Delisted" : "Listed"}</span>
       <span className="stamp warn">Creator text untrusted</span>

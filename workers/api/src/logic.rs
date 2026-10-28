@@ -219,6 +219,13 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ),
         ("GET", ["v1", "village", "tape"]) => crate::surface::tape(query_now(incoming.path)),
         ("GET", ["v1", "schedule"]) => crate::surface::schedule(query_now(incoming.path)),
+        ("GET", ["v1", "leaderboard"]) => crate::surface::public_board(
+            query_param(incoming.path, "window"),
+            query_param(incoming.path, "room"),
+            query_param(incoming.path, "agent"),
+            query_now(incoming.path),
+        ),
+        ("GET", ["v1", "rules"]) => crate::surface::point_rules(),
         ("GET", ["v1", "heist", "leaderboard"]) => crate::surface::heist_board(
             query_param(incoming.path, "window"),
             query_now(incoming.path),

@@ -213,6 +213,59 @@ export const CUTSCENE_CAST: CastPose[][] = [
   ],
 ];
 
+const ROOM_WAYS: Array<[number, number]> = [
+  [-3.2, -3.4],
+  [2.6, -3.1],
+  [0.2, -0.6],
+  [-2.4, 1.2],
+  [2.2, 1.4],
+  [0, 2.4],
+];
+
+/** Walk, idle, emote, and a trip to the south door. Clocks differ per agent. */
+export function interiorPose(roomId: string, index: number, time: number, busy: boolean) {
+  const crew = INTERIOR_CAST[roomId];
+  const member = crew?.find((entry) => entry.index === index);
+  const origin = ROOM_XZ[roomId];
+  if (!member || !origin) return null;
+  const [ox, oz] = origin;
+  const span = (busy ? 12 : 18) * (0.82 + (index % 4) * 0.09);
+  const phase = ((time + index * 2.6) % span) / span;
+  const shift = (index % 3) * 0.35;
+  const ways = ROOM_WAYS.map(([x, z], step) => [x + shift * (step % 2 === 0 ? 1 : -1), z] as [number, number]);
+  const from = ways[index % ways.length];
+  const to = ways[(index + 2) % ways.length];
+  const door: [number, number] = [((index % 3) - 1) * 0.8, 1.6];
+  const walk = (a: [number, number], b: [number, number], u: number) => {
+    const clamped = Math.min(1, Math.max(0, u));
+    return {
+      x: ox + a[0] + (b[0] - a[0]) * clamped,
+      z: oz + a[1] + (b[1] - a[1]) * clamped,
+      rot: Math.atan2(b[0] - a[0], b[1] - a[1]),
+      clip: "walk" as const,
+      visible: true,
+    };
+  };
+  if (phase < 0.42) {
+    const u = phase / 0.42;
+    const ping = u < 0.5 ? u * 2 : (1 - u) * 2;
+    return walk(from, to, ping);
+  }
+  if (phase < 0.58) {
+    return { x: ox + to[0], z: oz + to[1], rot: Math.PI, clip: "idle" as const, visible: true };
+  }
+  if (phase < 0.72) {
+    return { x: ox + to[0], z: oz + to[1], rot: Math.PI, clip: "celebrate" as const, visible: true };
+  }
+  if (phase < 0.84) {
+    return { x: ox + from[0] * 0.4, z: oz - 2.2, rot: 0, clip: "idle" as const, visible: true };
+  }
+  const doorU = (phase - 0.84) / 0.16;
+  if (doorU < 0.45) return walk(from, door, doorU / 0.45);
+  if (doorU < 0.62) return { x: ox + door[0], z: oz + door[1], rot: 0, clip: "walk" as const, visible: false };
+  return walk(door, to, (doorU - 0.62) / 0.38);
+}
+
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
   // World meters. Flank the boards; the frame audit rejects anyone on a screen or under 3 m.

@@ -90,6 +90,73 @@ pub fn schedule(now: u64) -> Outcome {
     )
 }
 
+pub fn public_board(
+    window_raw: Option<&str>,
+    room_raw: Option<&str>,
+    agent: Option<&str>,
+    now: u64,
+) -> Outcome {
+    let Some(window) = fe2vi_core::BoardWindow::parse(window_raw.unwrap_or("season")) else {
+        return http(
+            400,
+            "application/json",
+            r#"{"error":"window must be today, week, season, or all"}"#.into(),
+            false,
+            None,
+        );
+    };
+    let room = match room_raw.unwrap_or("all") {
+        "all" => None,
+        other => match fe2vi_core::PointRoom::parse(other) {
+            Some(room) => Some(room),
+            None => {
+                return http(
+                    400,
+                    "application/json",
+                    r#"{"error":"room must be all, vault, cup, village, or war"}"#.into(),
+                    false,
+                    None,
+                );
+            }
+        },
+    };
+    let rows = fe2vi_core::public_leaderboard(now, window, room);
+    let recent = agent.map(|id| fe2vi_core::recent_results(now, id, window));
+    json(
+        200,
+        &serde_json::json!({
+            "window": window.as_str(),
+            "room": room.map(|room| room.as_str()).unwrap_or("all"),
+            "now": now,
+            "source": "mock",
+            "rows": rows,
+            "recent": recent,
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn point_rules() -> Outcome {
+    let war: Vec<serde_json::Value> = fe2vi_core::challenges()
+        .iter()
+        .map(|challenge| serde_json::json!({ "id": challenge.id, "points": challenge.points }))
+        .collect();
+    json(
+        200,
+        &serde_json::json!({
+            "source": "config",
+            "heist": { "scout": fe2vi_core::POINT_SCOUT, "hide": fe2vi_core::POINT_SCOUT, "steal": fe2vi_core::POINT_STEAL, "sabotage_hit": fe2vi_core::POINT_SABOTAGE },
+            "cup": { "round": fe2vi_core::POINT_SCOUT },
+            "village": { "fill": fe2vi_core::POINT_SCOUT },
+            "war": war,
+            "note": "Points only. Cup rounds and village fills use the heist scout value. War flags use the challenge totals."
+        }),
+        false,
+        None,
+    )
+}
+
 pub fn heist_board(window_raw: Option<&str>, now: u64) -> Outcome {
     let Some(window) = fe2vi_core::HeistWindow::parse(window_raw.unwrap_or("today")) else {
         return http(

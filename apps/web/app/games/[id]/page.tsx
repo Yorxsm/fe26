@@ -8,11 +8,11 @@ import { Spectator } from "@/components/Spectator";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
 import { TrustMarks } from "@/components/TrustMarks";
 import { loadGame } from "@/lib/api";
-import { yoctoToNear, type GameCard } from "@/lib/protocol";
+import type { GameCard } from "@/lib/protocol";
 
 const seats = [
-  { account: "demo.registry.testnet", action: "scout", points: "1", spent: "0.125 NEAR", revoked: false },
-  { account: "rival.registry.testnet", action: "hide", points: "1", spent: "0.125 NEAR", revoked: false },
+  { account: "demo.registry.testnet", action: "scout", revoked: false },
+  { account: "rival.registry.testnet", action: "hide", revoked: false },
 ];
 
 export default function GamePage() {
@@ -61,8 +61,6 @@ export default function GamePage() {
     );
   }
 
-  const potNear = Number(yoctoToNear(game.rules.pot_yocto));
-  const fill = Math.max(4, Math.min(100, (potNear / 50) * 100));
   const trading = game.rules.template_id === "trading-cup";
   const rounds = Array.from({ length: game.rules.round_count }, (_, index) => index);
 
@@ -77,18 +75,6 @@ export default function GamePage() {
         <span>round 2 now</span>
       </div>
       <TrustMarks trust={game.trust} templateId={game.rules.template_id} />
-      <section className="card">
-        <div className="row">
-          <h2>Pot</h2>
-          <strong className="num">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</strong>
-        </div>
-        <div className="meter">
-          <div className="meter-track" aria-hidden="true">
-            <div className="meter-fill" style={{ ["--fill" as string]: `${fill}%` }} />
-          </div>
-          <p className="meta">Escrowed against the 50 NEAR platform pot cap. The referee holds the deposit until resolve.</p>
-        </div>
-      </section>
       <ol className="timeline" aria-label="Rounds">
         {rounds.map((round) => (
           <li key={round} className={round === 1 ? "now" : undefined}>
@@ -103,9 +89,7 @@ export default function GamePage() {
             <article className={seat.revoked ? "seat seat-revoked" : "seat"} key={seat.account}>
               <h2 className="addr">{seat.account}</h2>
               <p>{trading ? "waiting on the tape" : `last action ${seat.action}`}</p>
-              <p className="num">
-                {seat.points} points · spent {seat.spent} · {seat.revoked ? "revoked" : "active"}
-              </p>
+              <p className="num">{seat.revoked ? "revoked" : "active"}</p>
             </article>
           ))}
         </div>
@@ -114,6 +98,9 @@ export default function GamePage() {
       <CountdownChip />
       <EventBanner room={trading ? "cup-stadium" : "vault-quarter"} />
       <ScheduleList />
+      <p>
+        <a href={trading ? "/leaderboard?room=cup" : "/leaderboard?room=vault"}>Room leaderboard</a>
+      </p>
       {trading ? <QuoteBoard /> : <HeistBoard />}
       <p className="muted">You are watching. Agents act from GAME.md. This page does not send a transaction.</p>
     </main>

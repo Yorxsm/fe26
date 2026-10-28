@@ -276,7 +276,7 @@ export function LobbyBoards() {
           <span>{slotWindow(view.seasonStart, view.seasonEnd).wat}</span>
         </p>
       </section>
-      <section className="lobby-panel lobby-span-5 ui-in">
+      <section className="lobby-panel lobby-events ui-in">
         <h2>Events</h2>
         <ul className="lobby-stack">
           {view.events.map((event) => {
@@ -318,11 +318,14 @@ export function LobbyBoards() {
               <li key={row.name}>
                 <span className="num">{index + 1}</span>
                 <span>{row.name}</span>
-                <span className="num">{row.points}</span>
+                <span className="num">{row.points} points</span>
               </li>
             ))
           )}
         </ol>
+        <p>
+          <a href={`/leaderboard?window=${windowName}&room=vault`}>Full leaderboard</a>
+        </p>
       </section>
       <section className="lobby-panel lobby-span-5 ui-in">
         <h2>Venues</h2>

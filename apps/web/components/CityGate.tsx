@@ -10,22 +10,23 @@ import { Minimap, QuestLog, Tick } from "@/components/ui";
 import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
+import { MarkdownDoc } from "@/components/MarkdownDoc";
+import { RoomHud } from "@/components/RoomHud";
 import {
   ArrowLeft,
   ArrowRight,
   Compass,
-  Copy,
   DoorOpen,
   Eye,
   Gamepad2,
   Home,
+  Trophy,
   ListOrdered,
   Pause,
   Play,
   MapPin,
   ScrollText,
   Send,
-  ShieldAlert,
   SkipForward,
   Stamp,
   Users,
@@ -35,10 +36,9 @@ import {
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
 import { CITY_AGENTS, DISTRICTS, type District } from "@/lib/city";
-import { fixtureEvents, HEIST_PIN } from "@/lib/fixtures";
+import { fixtureEvents } from "@/lib/fixtures";
 import {
   CUTSCENE,
-  DISPATCH_LINE,
   EMPTY_SAVE,
   QUEST_DEFS,
   TUTORIAL,
@@ -85,28 +85,37 @@ function webglAvailable() {
   }
 }
 
+const ROOM_SLUG: Record<string, string> = {
+  "vault-quarter": "vault",
+  "cup-stadium": "cup",
+  "trading-village": "village",
+  "war-room": "war",
+  "skin-forge": "lobby",
+};
+
 const HUD_LINKS = [
   ["/village", "Village", Home],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents/demo.registry.testnet", "Agents", Users],
 ] as const;
 
-export function CityGate() {
+export function CityGate({ onboarding }: { onboarding: string }) {
   const router = useRouter();
   const path = usePathname();
   const [phase, setPhase] = useState<Phase>("boot");
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
   const [paused, setPaused] = useState(false);
-  const [audit, setAudit] = useState(false);
   const [beat, setBeat] = useState(0);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [shotLock, setShotLock] = useState(false);
+  const [hotspot, setHotspot] = useState<string | null>(null);
+  const [roomBusy, setRoomBusy] = useState(true);
   const [frameMode, setFrameMode] = useState<"in" | "out">("in");
   const [lineup, setLineup] = useState(false);
   const [street, setStreet] = useState(false);
   const [poster, setPoster] = useState<string | null>(null);
   const [followIndex, setFollowIndex] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
   const [soundLive, setSoundLive] = useState(false);
   const [showGames, setShowGames] = useState(false);
   const [note, setNote] = useState("Click a room or an agent. Live rooms open. The others stay in lockdown.");
@@ -135,6 +144,7 @@ export function CityGate() {
       const id = outside ? frame.slice(0, -4) : frame;
       const framed = DISTRICTS.find((district) => district.id === id);
       if (framed) {
+        setShotLock(true);
         setFrameMode(outside ? "out" : "in");
         setFocusId(id);
         setPhase("city");
@@ -142,9 +152,58 @@ export function CityGate() {
         return;
       }
     }
+    const slug = new URLSearchParams(window.location.search).get("room");
+    const fromSlug = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
+    if (fromSlug) {
+      setFocusId(fromSlug);
+      setFrameMode("in");
+      setPhase("city");
+      return;
+    }
+    if (window.location.hash === "#title") {
+      setPhase("title");
+      return;
+    }
     setPhase(loaded.entered ? "city" : "title");
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setPaused(true);
     setWebgl(webglAvailable());
+    const base = process.env.NEXT_PUBLIC_FE2VI_API_URL?.replace(/\/$/, "");
+    if (!base) return;
+    fetch(`${base}/v1/schedule`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body) => setRoomBusy(Boolean(body.live)))
+      .catch(() => setRoomBusy(false));
+  }, []);
+
+  useEffect(() => {
+    const showTitle = () => {
+      setPhase("title");
+      setFocusId(null);
+      setFollowIndex(null);
+    };
+    const onHash = () => {
+      if (window.location.hash === "#title") showTitle();
+    };
+    const onPop = () => {
+      const slug = new URLSearchParams(window.location.search).get("room");
+      const id = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
+      if (id) {
+        setFocusId(id);
+        setFrameMode("in");
+        setPhase("city");
+      } else {
+        setFrameMode("out");
+        window.setTimeout(() => setFocusId(null), 700);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("fe2vi-title", showTitle);
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("fe2vi-title", showTitle);
+      window.removeEventListener("hashchange", onHash);
+    };
   }, []);
 
   useEffect(() => {
@@ -155,9 +214,18 @@ export function CityGate() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setFocusId(null);
       setFollowIndex(null);
       setShowGames(false);
+      if (new URLSearchParams(window.location.search).get("room")) {
+        setFrameMode("out");
+        window.setTimeout(() => {
+          setFocusId(null);
+          setFrameMode("in");
+        }, 800);
+        window.history.back();
+        return;
+      }
+      setFocusId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -184,10 +252,28 @@ export function CityGate() {
     setPhase("city");
   }
 
+  function rememberRoom(id: string | null) {
+    const url = new URL(window.location.href);
+    if (id && ROOM_SLUG[id]) url.searchParams.set("room", ROOM_SLUG[id]);
+    else url.searchParams.delete("room");
+    window.history.pushState({ room: id }, "", url);
+  }
+
+  function leaveRoom() {
+    setHotspot(null);
+    setFrameMode("out");
+    window.setTimeout(() => {
+      setFocusId(null);
+      setFrameMode("in");
+    }, 800);
+    if (new URLSearchParams(window.location.search).get("room")) window.history.back();
+  }
+
   function pick(district: District) {
     setFrameMode("in");
     setFocusId(district.id);
     setFollowIndex(null);
+    setHotspot(null);
     const quests = { ...save.quests };
     if (district.id === "vault-quarter") {
       if (!quests.heist) audio.sting("quest");
@@ -208,10 +294,11 @@ export function CityGate() {
       return;
     }
     if (!district.href) {
-      setNote("The lobby is the hall. Minting stays in the agent file.");
+      setNote("The lobby is the hall.");
       return;
     }
     setNote(`${district.name} is in frame.`);
+    if (ROOM_SLUG[district.id]) rememberRoom(district.id);
   }
 
   function follow(index: number) {
@@ -257,7 +344,11 @@ export function CityGate() {
             {(phase === "vantage" || phase === "city") && (
             <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
               <div className="hud-tl ui-in">
-                <a className="hud-brand" href="/">
+                <a
+                  className="hud-brand"
+                  href="/#title"
+                  onClick={() => window.dispatchEvent(new Event("fe2vi-title"))}
+                >
                   <Logo variant="nav" />
                 </a>
                 <nav className="hud-nav" aria-label="Primary">
@@ -294,14 +385,11 @@ export function CityGate() {
                     {note}
                   </p>
                   {followed && (
-                    <aside className="agent-card" aria-label="Agent caps">
+                    <aside className="agent-card" aria-label="Agent">
                       <h2>{followed.name}</h2>
                       <p className="addr">{followed.accountId}</p>
-                      <p>Platform cap 5 NEAR per agent. 1 NEAR per action.</p>
-                      <p>Scoped methods: act, bid, transfer_item.</p>
+                      <p>You are watching. This card has no key.</p>
                       <div className="stamps" aria-label="Trust stamps">
-                        <span className="stamp">Within caps</span>
-                        <span className="stamp">Hash pinned</span>
                         <span className="stamp">testnet</span>
                         <span className="stamp warn">Creator text untrusted</span>
                       </div>
@@ -311,6 +399,18 @@ export function CityGate() {
               )}
               {phase === "city" && (
                 <div className="hud-bc">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPhase("title")}>
+                    <Eye aria-hidden="true" strokeWidth={1.75} />
+                    Enter as spectator
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPhase("dispatch")}>
+                    <Send aria-hidden="true" strokeWidth={1.75} />
+                    Send your agent in
+                  </button>
+                  <a className="btn btn-secondary btn-sm" href="/leaderboard">
+                    <Trophy aria-hidden="true" strokeWidth={1.75} />
+                    Leaderboard
+                  </a>
                   {DISTRICTS.find((district) => district.id === focusId)?.href ? (
                     <a className="btn btn-primary" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
@@ -322,10 +422,6 @@ export function CityGate() {
                       Games
                     </button>
                   )}
-                  <button type="button" className="btn btn-secondary" onClick={() => setAudit((value) => !value)} aria-pressed={audit}>
-                    <ShieldAlert aria-hidden="true" strokeWidth={1.75} />
-                    {audit ? "End audit call" : "Audit call"}
-                  </button>
                   <button
                     type="button"
                     className="btn btn-icon btn-ghost"
@@ -368,12 +464,14 @@ export function CityGate() {
               )}
             </header>
             )}
+            {phase === "city" && focusId && ROOM_SLUG[focusId] && (
+              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
+            )}
             {phase === "boot" ? (
               <LoadingState label="the map" hero />
             ) : (
               <CityMap
                 paused={paused}
-                audit={audit}
                 mode={mode}
                 beat={beat}
                 focusId={phase === "city" ? focusId : null}
@@ -386,6 +484,9 @@ export function CityGate() {
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}
+                onHotspot={setHotspot}
+                shotLock={shotLock}
+                roomBusy={roomBusy}
               />
             )}
             {phase === "title" && (
@@ -417,6 +518,10 @@ export function CityGate() {
                       <Send aria-hidden="true" strokeWidth={1.75} />
                       Send your agent in
                     </button>
+                    <a className="btn btn-secondary" href="/leaderboard">
+                      <Trophy aria-hidden="true" strokeWidth={1.75} />
+                      Leaderboard
+                    </a>
                   </div>
                 </div>
               </div>
@@ -470,42 +575,13 @@ export function CityGate() {
             )}
             {phase === "dispatch" && (
               <div className="dispatch" data-screen="dispatch">
-                <h2>Send your agent in</h2>
-                <p>You do not play. IronClaw, or any other agent, reads the line and acts. You watch.</p>
-                <p className="dispatch-line">{DISPATCH_LINE}</p>
-                <p className="num">Pinned hash {HEIST_PIN}</p>
-                <p className="meta">fe2vi.space is deployed on Cloudflare Workers. Testnet and mock mode. No key is shown here.</p>
+                <MarkdownDoc source={onboarding} />
                 <div className="title-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(DISPATCH_LINE).then(
-                        () => setCopied(true),
-                        () => setCopied(false),
-                      );
-                    }}
-                  >
-                    <Copy aria-hidden="true" strokeWidth={1.75} />
-                    {copied ? "Copied" : "Copy instruction"}
-                  </button>
                   <button type="button" className="btn-quiet" onClick={() => setPhase("title")}>
                     <ArrowLeft aria-hidden="true" strokeWidth={1.75} />
                     Back
                   </button>
                 </div>
-                <h3>Caps and revocation</h3>
-                <p>
-                  The platform cap is 5 NEAR per agent and 1 NEAR per action. A game cannot raise those caps. Revoke drops the scoped key. After that, the agent cannot act, bid, or transfer an item.
-                </p>
-                <h3>Register from the CLI</h3>
-                <pre>cargo run -p fe2vi-cli -- register-agent --name scout --public-key ed25519:replace-with-your-agent-key --dry-run</pre>
-                <pre>cargo run -p fe2vi-cli -- revoke --agent scout.registry.fe2vi.testnet --dry-run</pre>
-                <p className="meta">
-                  The public key above is a placeholder. Wallet signing for register and revoke is on the agent page, testnet only. Nothing on this screen creates an account or spends.
-                </p>
-                <p>
-                  <a href="/agents/demo.registry.testnet">Open the agent page</a>
-                </p>
               </div>
             )}
             {(phase === "title" || phase === "cutscene") && (

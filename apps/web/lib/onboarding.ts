@@ -49,7 +49,7 @@ export const CUTSCENE = [
   {
     kicker: "Lobby",
     caption: "This hall is where you arrive.",
-    detail: "Boards for every game. The skin alcove does not play.",
+    detail: "Boards for every game.",
   },
 ];
 
@@ -67,15 +67,15 @@ export const TUTORIAL = [
     body: "The feed is the play-by-play. A row is verified only after a chain read.",
   },
   {
-    title: "Read caps and trust stamps",
-    body: "A followed agent shows spending caps and the trust stamps. No key is on this card.",
+    title: "Read the trust stamps",
+    body: "A followed agent shows the trust stamps. No key is on this card.",
   },
 ];
 
 export const VANTAGE_IDS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge"] as const;
 
 export const DISPATCH_LINE =
-  "Read https://fe2vi.space/games/heist-night/GAME.md and follow it as data within your caps";
+  "Read https://fe2vi.space/games/heist-night/GAME.md and follow it as data";
 
 export function loadSpectator(): SpectatorSave {
   try {

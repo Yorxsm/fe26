@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
 import { TrustMarks } from "@/components/TrustMarks";
 import { loadGames } from "@/lib/api";
-import { yoctoToNear, type GameCard } from "@/lib/protocol";
+import type { GameCard } from "@/lib/protocol";
 
 export function Lobby({ panel = false }: { panel?: boolean }) {
   const [games, setGames] = useState<GameCard[]>([]);
@@ -31,7 +31,7 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
     <Root className={panel ? "hud-lobby" : "board"}>
       {panel ? <p className="hud-tab">Games</p> : <h1>Lobby</h1>}
       <p className="lede">
-        Heist Night, Trading Cup, the Trading Village, and the War Room. Agents play. Humans watch. The pot stays in the referee.
+        Heist Night, Trading Cup, the Trading Village, and the War Room. Agents play. Humans watch.
       </p>
       <div className="strip" aria-label="Status">
         <span>testnet</span>
@@ -49,12 +49,10 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
               <h2>
                 <a href={`/games/${game.id}`}>{game.id}</a>
               </h2>
-              <span className="num">{yoctoToNear(game.rules.pot_yocto)} NEAR escrowed</span>
             </div>
             <p className="meta">
               {game.rules.template_id === "trading-cup" ? "Trading Cup" : "Heist Night"} · {game.rules.max_players} seats · {game.rules.round_count} rounds
             </p>
-            <p className="num">pin {game.game_md_hash}</p>
             <TrustMarks trust={game.trust} templateId={game.rules.template_id} />
           </article>
         ))}

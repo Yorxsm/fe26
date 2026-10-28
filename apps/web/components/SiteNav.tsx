@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { DoorOpen, Home, Map, Menu, Users, X, type LucideIcon } from "lucide-react";
+import { DoorOpen, Home, Map, Menu, Trophy, Users, X, type LucideIcon } from "lucide-react";
 
 const LINKS: Array<readonly [string, string, LucideIcon]> = [
-  ["/", "Map", Map],
-  ["/village", "Village", Home],
+  ["/#title", "Home", Home],
+  ["/leaderboard", "Board", Trophy],
+  ["/village", "Village", Map],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents/demo.registry.testnet", "Agents", Users],
 ];
@@ -21,9 +22,19 @@ export function SiteNav() {
       </button>
       <nav className={open ? "site-nav open" : "site-nav"} aria-label="Primary">
         {LINKS.map(([href, label, Icon]) => {
-          const current = href === "/" ? path === "/" : href.startsWith("/agents") ? path.startsWith("/agents") : path === href || path.startsWith(`${href}/`);
+          const current = href === "/#title" ? path === "/" : href.startsWith("/agents") ? path.startsWith("/agents") : path === href || path.startsWith(`${href}/`);
           return (
-            <a key={href} href={href} aria-current={current ? "page" : undefined} onClick={() => setOpen(false)}>
+            <a
+              key={href}
+              href={href}
+              aria-current={current ? "page" : undefined}
+              onClick={(event) => {
+                setOpen(false);
+                if (href !== "/#title") return;
+                window.dispatchEvent(new Event("fe2vi-title"));
+                if (window.location.pathname === "/" && window.location.hash === "#title") event.preventDefault();
+              }}
+            >
               <Icon aria-hidden="true" strokeWidth={1.75} />
               {label}
             </a>

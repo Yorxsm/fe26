@@ -17,13 +17,13 @@ import {
 import { Interiors } from "@/components/Interiors";
 import { Nature } from "@/components/Nature";
 import { World } from "@/components/World";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { FRAME_BOARDS } from "@/lib/boards";
-import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, type CityAgent, type District } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -60,7 +60,19 @@ const BEAT_PREFIX: Array<string | null> = [null, "vault", "market", "war", "stad
 const BEAT_IDS: Array<string | null> = [null, "vault-quarter", "trading-village", "war-room", "cup-stadium", "skin-forge"];
 const BEATS = CUTSCENE_SHOTS;
 
-type Rig = { target: THREE.Vector3; update: () => void; autoRotate: boolean; enabled: boolean };
+type Rig = {
+  target: THREE.Vector3;
+  update: () => void;
+  autoRotate: boolean;
+  enabled: boolean;
+  enableDamping: boolean;
+  dampingFactor: number;
+  minDistance: number;
+  maxDistance: number;
+  enablePan: boolean;
+  minPolarAngle: number;
+  maxPolarAngle: number;
+};
 
 const aim = new THREE.Vector3();
 const eye = new THREE.Vector3();
@@ -903,11 +915,12 @@ function AgentMesh({
   agent,
   index,
   paused,
-  audit,
   focusId,
   lineup,
   poster,
   onFollow,
+  onPeek,
+  roomBusy = false,
   mode = "play",
   beat = 0,
   frameMode = "out",
@@ -916,11 +929,12 @@ function AgentMesh({
   agent: CityAgent;
   index: number;
   paused: boolean;
-  audit: boolean;
   focusId: string | null;
   lineup: boolean;
   poster: string | null;
   onFollow: (index: number) => void;
+  onPeek?: (at: { x: number; y: number; z: number }) => void;
+  roomBusy?: boolean;
   mode?: "orbit" | "cutscene" | "play";
   beat?: number;
   frameMode?: "in" | "out";
@@ -928,6 +942,7 @@ function AgentMesh({
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
   const group = useRef<THREE.Group>(null);
+  const poseRef = useRef({ x: 0, y: 1.4, z: 0 });
   const tag = useRef<THREE.Group>(null);
   const clipName = useRef("");
   const clipAction = useRef<THREE.AnimationAction | null>(null);
@@ -985,13 +1000,16 @@ function AgentMesh({
     const roomCrew = frameMode === "in" && focusId ? INTERIOR_CAST[focusId] : undefined;
     const stationed = scripted ? undefined : roomCrew?.find((entry) => entry.index === index);
     if (scripted) pose = { x: scripted.x, y: 0, z: scripted.z, rot: scripted.rot };
-    else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
+    const roomMove = stationed && focusId ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
+    if (roomMove) {
+      pose = { x: roomMove.x, y: 0, z: roomMove.z, rot: roomMove.rot };
+    } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
       applyLook(scene, skin, nextMood);
     }
-    const speed = scripted ? scripted.speed : stationed ? stationed.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+    const speed = roomMove?.clip === "walk" ? 1.4 : scripted ? scripted.speed : stationed ? stationed.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
     const planted = !poster && !stationed?.clip && speed < 0.4;
     const fading = clipFade.current;
     if (fading.length) {
@@ -1019,7 +1037,7 @@ function AgentMesh({
       }
     } else {
       const holdStill = lineup || (poster !== null && poster !== "street") || (paused && poster !== "street");
-      const nextClip = stationed?.clip ? stationed.clip : holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
+      const nextClip = roomMove ? roomMove.clip : stationed?.clip ? stationed.clip : holdStill || planted ? "idle" : nextMood === "happy" ? "celebrate" : nextMood === "alarm" ? "caught" : "walk";
       if (clipName.current !== nextClip) {
         const prev = clipAction.current;
         const clip = gltf.animations.find((entry) => entry.name === nextClip);
@@ -1054,9 +1072,17 @@ function AgentMesh({
     const bodyBox = cover.canvas ? agentOnScreen(pose.x, pose.z, state.camera, cover.canvas) : null;
     const underChip = Boolean(bodyBox && cover.bottom.some((rect) => rectsOverlap(bodyBox, rect)));
     if (group.current) {
-      group.current.visible = shown && !underChip;
+      group.current.visible = shown && !underChip && roomMove?.visible !== false;
+      poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
-      group.current.rotation.y = pose.rot;
+      if (roomMove) {
+        let turn = pose.rot - group.current.rotation.y;
+        while (turn > Math.PI) turn -= Math.PI * 2;
+        while (turn < -Math.PI) turn += Math.PI * 2;
+        group.current.rotation.y += turn * Math.min(1, delta * 6);
+      } else {
+        group.current.rotation.y = pose.rot;
+      }
     }
     if (tag.current) {
       tag.current.visible = shown && !underChip && mode !== "cutscene" && poster !== "face" && poster !== "walk" && poster !== "skins" && poster !== "trails" && poster !== "expressions" && poster !== "eyes" && poster !== "front6" && poster !== "q34";
@@ -1065,9 +1091,7 @@ function AgentMesh({
       if (chip && group.current) {
         const dist = state.camera.position.distanceTo(group.current.position);
         chip.classList.toggle("far", dist > 16);
-        const rect = chip.getBoundingClientRect();
-        const covered = cover.tags.some((hud) => rectsOverlap(rect, hud));
-        const hidden = covered || !tag.current.visible;
+        const hidden = !tag.current.visible;
         chip.style.visibility = hidden ? "hidden" : "visible";
         if (!hidden) stackNameTag(index, tag.current, state.camera, state.size, chip);
         else tagSlots.delete(index);
@@ -1139,10 +1163,14 @@ function AgentMesh({
           event.stopPropagation();
           onFollow(index);
         }}
+        onDoubleClick={(event: ThreeEvent<MouseEvent>) => {
+          event.stopPropagation();
+          onPeek?.(poseRef.current);
+        }}
       />
       <group ref={tag} position={[0, 5.2, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
-          <div ref={tagEl} className={audit ? "name-tag audit" : "name-tag"} data-agent={agent.name}>
+          <div ref={tagEl} className="name-tag" data-agent={agent.name}>
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
           </div>
@@ -1245,6 +1273,8 @@ function CameraDriver({
   street,
   poster,
   lobby,
+  shotLock,
+  peek,
 }: {
   mode: "orbit" | "cutscene" | "play";
   beat: number;
@@ -1256,12 +1286,36 @@ function CameraDriver({
   street: boolean;
   poster: string | null;
   lobby: boolean;
+  shotLock: boolean;
+  peek: { x: number; y: number; z: number } | null;
 }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as Rig | null;
   const reduce = useRef(false);
   const wasDriving = useRef(false);
   const homing = useRef(false);
+  const pointer = useRef({ x: 0, y: 0, down: false });
+  const latched = useRef<string | null>(null);
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
+      pointer.current.y = event.clientY / window.innerHeight * 2 - 1;
+    };
+    const down = () => {
+      pointer.current.down = true;
+    };
+    const up = () => {
+      pointer.current.down = false;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerdown", down);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
   useLayoutEffect(() => {
     reduce.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }, []);
@@ -1391,6 +1445,7 @@ function CameraDriver({
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room) {
         const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
+        const inside = frameMode === "in" && !shotLock;
         if (shot) {
           eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
           aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
@@ -1398,6 +1453,27 @@ function CameraDriver({
         } else {
           eye.set(room.x, 2.6, room.z + 8);
           aim.set(room.x, 1.8, room.z);
+        }
+        if (frameMode === "out" || latched.current !== focusId && camera.position.distanceTo(eye) > 0.55) {
+          latched.current = null;
+        }
+        const settled = inside && (latched.current === focusId || camera.position.distanceTo(eye) < 0.55);
+        if (settled) {
+          latched.current = focusId;
+          rig.enabled = true;
+          rig.enableDamping = true;
+          rig.dampingFactor = 0.08;
+          rig.minDistance = 1.6;
+          rig.maxDistance = 5.2;
+          rig.enablePan = true;
+          rig.minPolarAngle = 0.85;
+          rig.maxPolarAngle = 1.35;
+          rig.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
+          const pad = pointer.current.down || reduce.current ? 0 : 0.18;
+          camera.position.x = Math.min(room.x + 4.6, Math.max(room.x - 4.6, camera.position.x + pointer.current.x * pad));
+          camera.position.y = Math.min(3.1, Math.max(1.15, camera.position.y - pointer.current.y * pad));
+          camera.position.z = Math.min(room.z + 4.2, Math.max(room.z - 4.4, camera.position.z));
+          return;
         }
         drive = true;
       }
@@ -1527,14 +1603,12 @@ function StressCrowd({
   count,
   fullDetail,
   paused,
-  audit,
   focusId,
   onFollow,
 }: {
   count: number;
   fullDetail: boolean;
   paused: boolean;
-  audit: boolean;
   focusId: string | null;
   onFollow: (index: number) => void;
 }) {
@@ -1562,7 +1636,6 @@ function StressCrowd({
           agent={CITY_AGENTS[index % CITY_AGENTS.length]}
           index={index}
           paused={paused}
-          audit={audit}
           focusId={focusId}
           lineup={false}
           poster={null}
@@ -1878,9 +1951,54 @@ function FrameStats({ count }: { count: number }) {
   return null;
 }
 
+const HOTSPOTS: Record<string, Array<{ x: number; y: number; z: number; tip: string }>> = {
+  "vault-quarter": [
+    { x: 0, y: 1.6, z: -4.2, tip: "Score boards. Points for each vault action are listed by /v1/rules." },
+    { x: 0, y: 1.2, z: 4.6, tip: "Vault door. The crew comes and goes through here." },
+  ],
+  "trading-village": [
+    { x: 0, y: 1.5, z: -4, tip: "Tape. Village fills award the scout point value from /v1/rules." },
+  ],
+  "war-room": [
+    { x: 0, y: 1.1, z: -1, tip: "Table. Flags are only for sandboxes this arena hosts." },
+  ],
+  "skin-forge": [
+    { x: 0, y: 1.5, z: -4, tip: "Hall boards. The schedule and the season live here." },
+  ],
+  "cup-stadium": [
+    { x: 0, y: 2.4, z: -3, tip: "Scoreboard. A cup round awards the scout point value from /v1/rules." },
+  ],
+};
+
+function RoomHotspots({ roomId, onHotspot }: { roomId: string; onHotspot: (tip: string) => void }) {
+  const origin = ROOM_XZ[roomId];
+  const spots = HOTSPOTS[roomId];
+  if (!origin || !spots) return null;
+  return (
+    <group>
+      {spots.map((spot) => (
+        <mesh
+          key={spot.tip}
+          position={[origin[0] + spot.x, spot.y, origin[1] + spot.z]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onHotspot(spot.tip);
+          }}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onHotspot(spot.tip);
+          }}
+        >
+          <sphereGeometry args={[0.22, 10, 8]} />
+          <meshBasicMaterial color="#2fb86a" transparent opacity={0.45} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 export default function CityMap({
   paused,
-  audit,
   mode,
   beat,
   focusId,
@@ -1893,9 +2011,11 @@ export default function CityMap({
   onPick,
   onFollow,
   onUnavailable,
+  onHotspot,
+  shotLock = false,
+  roomBusy = false,
 }: {
   paused: boolean;
-  audit: boolean;
   mode: "orbit" | "cutscene" | "play";
   beat: number;
   focusId: string | null;
@@ -1908,8 +2028,12 @@ export default function CityMap({
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
+  onHotspot: (tip: string) => void;
+  shotLock?: boolean;
+  roomBusy?: boolean;
 }) {
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
+  const [peek, setPeek] = useState<{ x: number; y: number; z: number } | null>(null);
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
@@ -1943,6 +2067,7 @@ export default function CityMap({
       <Nature />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
       <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
+      {openInterior ? <RoomHotspots roomId={openInterior} onHotspot={onHotspot} /> : null}
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
@@ -1982,21 +2107,23 @@ export default function CityMap({
       <DrawProbe />
       <FrameAudit />
       {crowdOn ? (
-        <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} audit={audit} focusId={focusId} onFollow={onFollow} />
+        <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
       ) : (
         (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
-          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} audit={audit} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} mode={mode} beat={beat} frameMode={frameMode} />
+          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
       )}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />
-      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} />
+      <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} shotLock={shotLock} peek={peek} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
       <OrbitControls
         makeDefault
-        enabled={!focusId && followIndex === null && mode !== "cutscene" && !lineup && !street}
-        enablePan={false}
+        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}
+        enablePan
+        enableDamping
+        dampingFactor={0.08}
         autoRotate={false}
         target={[overviewAim.x, overviewAim.y, overviewAim.z]}
         minPolarAngle={0.35}

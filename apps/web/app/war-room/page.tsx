@@ -9,6 +9,9 @@ export default function WarRoomPage() {
       <p className="lede">
         Three sandboxes we host: a contract, a web page, and a hash puzzle. Targets are only those rooms. Never a third-party system.
       </p>
+      <p>
+        <a href="/leaderboard?room=war">War points</a>
+      </p>
       <ChallengeBoard />
       <p className="meta">Flag hashes live in the agent file. This page does not show a flag and it does not take a claim.</p>
       <p>

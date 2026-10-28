@@ -340,6 +340,18 @@ body:has(.game-root) { overflow: hidden; height: 100vh; }
   max-width: none;
   margin: 0;
   padding: 0;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+.shell:has(.game-root) > .site-foot {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 8;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .shell:has(.game-root) > .top { display: none; }
 .game-root {
@@ -1015,8 +1027,10 @@ button.enter { min-height: 48px; font-size: var(--type-small); }
     text-align: center;
   }
   /* The lobby is framed for a phone. The gate returns once play starts. */
-  .game-root:has(.title-screen) .city-stage { display: block; }
-  .game-root:has(.title-screen) .mobile-gate { display: none; }
+  .game-root:has(.title-screen) .city-stage,
+  .game-root:has(.room-hud) .city-stage { display: block; }
+  .game-root:has(.title-screen) .mobile-gate,
+  .game-root:has(.room-hud) .mobile-gate { display: none; }
   .title-screen { padding-top: 88px; align-items: stretch; }
   .title-lockup { padding: 0 16px 16px; width: 100%; }
   .title-actions { flex-direction: column; width: 100%; }
@@ -1511,25 +1525,41 @@ button.pronounce:focus-visible {
 .room-frame .hud-bl,
 .room-frame .hud-nav { display: none; }
 .room-frame .hud-tr { width: auto; }
+.room-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 12;
+  display: grid;
+  gap: var(--space-sm);
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: auto;
+}
+.room-panel {
+  background: #141416;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--space-md);
+}
+.room-panel h2 { font-size: var(--type-h3); }
+.room-panel p { margin: 0 0 var(--space-sm); }
 
 .lobby {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--space-md);
-  align-items: stretch;
+  align-items: start;
 }
 .lobby-span-12 { grid-column: 1 / -1; }
-.lobby-span-7 { grid-column: span 7; }
-.lobby-span-5 { grid-column: span 5; }
+.lobby-span-7 { grid-column: span 8; }
+.lobby-span-5 { grid-column: span 4; }
+.lobby-events { grid-column: span 4; }
 .lobby-panel {
   background: #141416;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: var(--space-md);
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
 }
 .lobby-hero {
   display: grid;
@@ -1578,6 +1608,7 @@ button.pronounce:focus-visible {
   align-items: center;
 }
 .lobby-when { display: grid; gap: 2px; min-width: 0; }
+.lobby-when span { white-space: nowrap; }
 .lobby-rank li {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1597,8 +1628,7 @@ button.pronounce:focus-visible {
 .lobby-quote .meta { grid-column: 1 / -1; }
 .lobby-live { color: var(--green); }
 .lobby-quiet { color: var(--ink-secondary); }
-.lobby-slot .num,
-.lobby-stack .num { overflow-wrap: anywhere; }
+.lobby-stack .num { overflow-wrap: normal; }
 .lobby-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1691,7 +1721,55 @@ button.pronounce:focus-visible {
     width: 48px;
     padding: 0;
   }
-  .nav-wrap { margin-left: auto; }
-  .site-nav { display: none; width: 100%; flex-basis: 100%; }
-  .site-nav.open { display: flex; flex-direction: column; align-items: stretch; }
+  .nav-wrap { margin-left: auto; position: relative; }
+  .site-nav { display: none; }
+  .site-nav.open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    position: absolute;
+    top: 56px;
+    right: 0;
+    z-index: 30;
+    min-width: 200px;
+    background: #141416;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: var(--space-sm);
+  }
+  .site-nav.open a { min-height: 44px; }
 }
+
+.podium {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: var(--space-sm);
+  align-items: end;
+  list-style: none;
+  margin: 0 0 var(--space-md);
+  padding: 0;
+}
+.podium button, .rank-chip {
+  width: 100%;
+  background: #1e1e21;
+  color: #d4d2cc;
+  border: 0;
+  box-shadow: 0 4px 0 #121214;
+  border-radius: 8px;
+  min-height: 48px;
+  height: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--body);
+  font-size: var(--type-small);
+}
+.podium-first button { min-height: 72px; background: #141416; }
+.rank-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rank-chip { display: inline-flex; align-items: center; gap: 8px; width: auto; }

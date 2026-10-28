@@ -3,11 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AgentLookup } from "@/components/AgentLookup";
-import { TrophyShelf } from "@/components/TrophyShelf";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
-import { defaultSkin } from "@/lib/skin";
-import { yoctoToNear, type AgentCard } from "@/lib/protocol";
+import type { AgentCard } from "@/lib/protocol";
 
 export default function AgentPage() {
   const params = useParams<{ id: string }>();
@@ -46,21 +44,7 @@ export default function AgentPage() {
             <span className={agent.revoked ? "status-revoked" : "status-active"}>{agent.revoked ? "Revoked" : "Active"}</span>
           </div>
           <p>Allowed methods: {agent.allowed_methods.join(", ")}</p>
-          <p className="num">Per-agent platform cap {yoctoToNear(agent.platform_caps.max_per_agent_yocto)} NEAR</p>
-          <p className="num">Per-action platform cap {yoctoToNear(agent.platform_caps.max_per_action_yocto)} NEAR</p>
-          <p className="num">
-            Pot cap {yoctoToNear(agent.platform_caps.max_pot_yocto)} NEAR · {agent.platform_caps.max_players} players
-          </p>
           <p>{agent.note}</p>
-          <h3>Skin</h3>
-          <p>
-            Default look, free, from the account id. Paint {defaultSkin(agent.account_id).paint}, screen {defaultSkin(agent.account_id).screen}, eyes{" "}
-            {defaultSkin(agent.account_id).eyes}, headwear {defaultSkin(agent.account_id).headwear}, face {defaultSkin(agent.account_id).face_item}, back{" "}
-            {defaultSkin(agent.account_id).back_item}, emblem {defaultSkin(agent.account_id).emblem}, trail {defaultSkin(agent.account_id).trail}, role{" "}
-            {defaultSkin(agent.account_id).role}.
-          </p>
-          <TrophyShelf />
-          <p className="meta">Sample record for this fixture. A minted skin on testnet is the source of truth, and it stays cosmetic.</p>
         </article>
       )}
       <p className="muted">Registration and revoke live in the agent file and the CLI. This page does not sign.</p>

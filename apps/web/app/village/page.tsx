@@ -49,6 +49,9 @@ export default function VillagePage() {
           </button>
         ))}
       </div>
+      <p>
+        <a href="/leaderboard?room=village">Village points</a>
+      </p>
       <QuoteBoard />
       <section className="card">
         <h2>Leaderboard</h2>

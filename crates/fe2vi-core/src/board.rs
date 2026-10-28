@@ -302,18 +302,107 @@ pub fn countdown_secs(now: u64) -> u64 {
     }
 }
 
-/// A mock score time that always falls inside `now`'s today, week, or season.
-fn score_unix(now: u64, index: usize) -> u64 {
-    let day = day_start(now);
+/// Heist awards already defined in `score_actions`. Other rooms use that same unit
+/// or the challenge point values. Nothing here is a new scale.
+pub const POINT_SCOUT: u32 = 1;
+pub const POINT_STEAL: u32 = 3;
+pub const POINT_SABOTAGE: u32 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PointRoom {
+    Vault,
+    Cup,
+    Village,
+    War,
+}
+
+impl PointRoom {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "vault" => Some(Self::Vault),
+            "cup" => Some(Self::Cup),
+            "village" => Some(Self::Village),
+            "war" => Some(Self::War),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Vault => "vault",
+            Self::Cup => "cup",
+            Self::Village => "village",
+            Self::War => "war",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoardWindow {
+    Today,
+    Week,
+    Season,
+    All,
+}
+
+impl BoardWindow {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "today" => Some(Self::Today),
+            "week" => Some(Self::Week),
+            "season" => Some(Self::Season),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Today => "today",
+            Self::Week => "week",
+            Self::Season => "season",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PointAward {
+    pub agent: String,
+    pub name: String,
+    pub colour: String,
+    pub room: PointRoom,
+    pub points: u32,
+    pub unix: u64,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PublicRow {
+    pub rank: u32,
+    pub agent: String,
+    pub name: String,
+    pub colour: String,
+    pub points: u32,
+    pub games: u32,
+    pub vault: u32,
+    pub cup: u32,
+    pub village: u32,
+    pub war: u32,
+}
+
+const COLOURS: [&str; 10] = [
+    "#c94a1a", "#2fb86a", "#d4d2cc", "#8a3110", "#8f7a4a", "#2f8a56", "#8b4548", "#a85a32",
+    "#5e6a70", "#8b8a86",
+];
+
+fn week_start(now: u64) -> u64 {
     let since_monday = (weekday(now) + 6) % 7;
-    let week = day.saturating_sub(since_monday * DAY);
-    let raw = match index {
-        0 => day.saturating_add(60),
-        1 => day.saturating_add(120),
-        2 => week.saturating_add(3600),
-        3 => week.saturating_add(7200),
-        n => SEASON_START.saturating_add((n as u64) * DAY),
-    };
+    day_start(now).saturating_sub(since_monday * DAY)
+}
+
+fn at_or_before(now: u64, raw: u64) -> u64 {
     if raw > now {
         now
     } else {
@@ -321,44 +410,195 @@ fn score_unix(now: u64, index: usize) -> u64 {
     }
 }
 
-fn window_start(now: u64, window: HeistWindow) -> u64 {
-    match window {
-        HeistWindow::Today => day_start(now),
-        HeistWindow::Week => {
-            let since_monday = (weekday(now) + 6) % 7;
-            day_start(now) - since_monday * DAY
+/// Several awards per agent, spread across today, this week, and the season.
+/// A wider window therefore sums to at least as many points.
+pub fn mock_awards(now: u64) -> Vec<PointAward> {
+    let day = day_start(now);
+    let week = week_start(now);
+    let war_points = [100u32, 150, 80];
+    let mut awards = Vec::new();
+    for (index, agent) in city_roster().iter().enumerate() {
+        let colour = COLOURS[index % COLOURS.len()];
+        let push =
+            |awards: &mut Vec<PointAward>, room: PointRoom, points: u32, unix: u64, label: &str| {
+                let unix = at_or_before(now, unix);
+                awards.push(PointAward {
+                    agent: agent.account_id.to_string(),
+                    name: agent.name.to_string(),
+                    colour: colour.to_string(),
+                    room,
+                    points,
+                    unix,
+                    label: label.to_string(),
+                });
+            };
+        let today_vault = if index == 0 { POINT_STEAL } else { POINT_SCOUT };
+        push(
+            &mut awards,
+            PointRoom::Vault,
+            today_vault,
+            day.saturating_add(60 + index as u64),
+            "heist scout",
+        );
+        push(
+            &mut awards,
+            PointRoom::Vault,
+            POINT_STEAL,
+            week.saturating_add(3600 + (index as u64) * 60),
+            "heist steal",
+        );
+        push(
+            &mut awards,
+            PointRoom::Vault,
+            POINT_SABOTAGE,
+            SEASON_START.saturating_add((index as u64 + 1) * DAY),
+            "heist sabotage",
+        );
+        push(
+            &mut awards,
+            PointRoom::Cup,
+            POINT_SCOUT,
+            day.saturating_add(180 + index as u64),
+            "cup round",
+        );
+        push(
+            &mut awards,
+            PointRoom::Village,
+            POINT_SCOUT,
+            week.saturating_add(7200 + (index as u64) * 90),
+            "village fill",
+        );
+        if index % 3 == 0 {
+            push(
+                &mut awards,
+                PointRoom::War,
+                war_points[index % 3],
+                SEASON_START.saturating_add((index as u64 + 2) * DAY),
+                "war flag",
+            );
         }
-        HeistWindow::Season => SEASON_START,
+    }
+    awards
+}
+
+fn in_window(now: u64, window: BoardWindow, unix: u64) -> bool {
+    if unix > now {
+        return false;
+    }
+    match window {
+        BoardWindow::All => true,
+        BoardWindow::Today => unix >= day_start(now),
+        BoardWindow::Week => unix >= week_start(now),
+        BoardWindow::Season => unix >= SEASON_START && unix < SEASON_END,
+    }
+}
+
+fn heist_window(window: HeistWindow) -> BoardWindow {
+    match window {
+        HeistWindow::Today => BoardWindow::Today,
+        HeistWindow::Week => BoardWindow::Week,
+        HeistWindow::Season => BoardWindow::Season,
     }
 }
 
 pub fn heist_leaderboard(now: u64, window: HeistWindow) -> Vec<HeistRow> {
-    let start = window_start(now, window);
-    let mut rows: Vec<HeistRow> = city_roster()
-        .iter()
-        .enumerate()
-        .filter_map(|(index, agent)| {
-            let unix = score_unix(now, index);
-            if unix < start || unix > now || unix >= SEASON_END {
-                return None;
-            }
-            if window == HeistWindow::Season && unix < SEASON_START {
-                return None;
-            }
-            Some(HeistRow {
-                agent: agent.account_id.to_string(),
-                name: agent.name.to_string(),
-                points: 30u32.saturating_sub(index as u32),
-            })
+    ranked(now, heist_window(window), Some(PointRoom::Vault))
+        .into_iter()
+        .map(|row| HeistRow {
+            agent: row.agent,
+            name: row.name,
+            points: row.points,
         })
+        .collect()
+}
+
+pub fn public_leaderboard(
+    now: u64,
+    window: BoardWindow,
+    room: Option<PointRoom>,
+) -> Vec<PublicRow> {
+    ranked(now, window, room)
+}
+
+pub fn recent_results(now: u64, account_id: &str, window: BoardWindow) -> Vec<PointAward> {
+    let mut rows: Vec<PointAward> = mock_awards(now)
+        .into_iter()
+        .filter(|award| award.agent == account_id && in_window(now, window, award.unix))
         .collect();
+    rows.sort_by(|left, right| right.unix.cmp(&left.unix));
+    rows.truncate(8);
+    rows
+}
+
+fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicRow> {
+    let mut rows: Vec<PublicRow> = Vec::new();
+    for award in mock_awards(now) {
+        if !in_window(now, window, award.unix) {
+            continue;
+        }
+        if let Some(row) = rows.iter_mut().find(|row| row.agent == award.agent) {
+            add_room(row, award.room, award.points);
+            row.games = row.games.saturating_add(1);
+        } else {
+            let mut row = PublicRow {
+                rank: 0,
+                agent: award.agent.clone(),
+                name: award.name.clone(),
+                colour: award.colour.clone(),
+                points: 0,
+                games: 1,
+                vault: 0,
+                cup: 0,
+                village: 0,
+                war: 0,
+            };
+            add_room(&mut row, award.room, award.points);
+            rows.push(row);
+        }
+    }
+    if let Some(room) = room {
+        for row in &mut rows {
+            row.points = room_points(row, room);
+            row.games = mock_awards(now)
+                .iter()
+                .filter(|award| {
+                    award.agent == row.agent
+                        && award.room == room
+                        && in_window(now, window, award.unix)
+                })
+                .count() as u32;
+        }
+    }
+    rows.retain(|row| row.points > 0);
     rows.sort_by(|left, right| {
         right
             .points
             .cmp(&left.points)
             .then_with(|| left.agent.cmp(&right.agent))
     });
+    for (index, row) in rows.iter_mut().enumerate() {
+        row.rank = index as u32 + 1;
+    }
     rows
+}
+
+fn add_room(row: &mut PublicRow, room: PointRoom, points: u32) {
+    match room {
+        PointRoom::Vault => row.vault = row.vault.saturating_add(points),
+        PointRoom::Cup => row.cup = row.cup.saturating_add(points),
+        PointRoom::Village => row.village = row.village.saturating_add(points),
+        PointRoom::War => row.war = row.war.saturating_add(points),
+    }
+    row.points = row.points.saturating_add(points);
+}
+
+fn room_points(row: &PublicRow, room: PointRoom) -> u32 {
+    match room {
+        PointRoom::Vault => row.vault,
+        PointRoom::Cup => row.cup,
+        PointRoom::Village => row.village,
+        PointRoom::War => row.war,
+    }
 }
 
 pub fn challenges() -> &'static [Challenge] {
@@ -519,10 +759,22 @@ mod tests {
         let today = heist_leaderboard(TUESDAY_AFTERNOON, HeistWindow::Today);
         let week = heist_leaderboard(TUESDAY_AFTERNOON, HeistWindow::Week);
         let season = heist_leaderboard(TUESDAY_AFTERNOON, HeistWindow::Season);
-        assert_eq!(today.len(), 2);
+        assert!(!today.is_empty());
         assert_eq!(today[0].name, "Mason");
-        assert!(week.len() > today.len());
-        assert!(season.len() > week.len());
+        assert!(week.len() >= today.len());
+        assert!(season.len() >= week.len());
+        let mason = |rows: &[HeistRow]| rows.iter().find(|row| row.name == "Mason").unwrap().points;
+        assert!(mason(&today) < mason(&week));
+        assert!(mason(&week) <= mason(&season));
+        let wide = public_leaderboard(TUESDAY_AFTERNOON, BoardWindow::Season, None);
+        let narrow = public_leaderboard(TUESDAY_AFTERNOON, BoardWindow::Today, None);
+        let mason_all =
+            |rows: &[PublicRow]| rows.iter().find(|row| row.name == "Mason").unwrap().points;
+        assert!(mason_all(&narrow) < mason_all(&wide));
+        assert!(
+            public_leaderboard(TUESDAY_AFTERNOON, BoardWindow::All, None)[0].points
+                >= mason_all(&wide)
+        );
         assert_eq!(challenges().len(), 3);
         assert!(live_events(TUESDAY_AFTERNOON).is_empty());
         let example = hosted_events()
