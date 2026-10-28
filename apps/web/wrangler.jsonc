@@ -8,11 +8,12 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  // Served at fe2vi.space and www.fe2vi.space as Workers Custom Domains.
+  // fe2vi.space and www.fe2vi.space are the intro. testnet.fe2vi.space is the full app.
   "workers_dev": false,
   "routes": [
     { "pattern": "fe2vi.space", "custom_domain": true },
-    { "pattern": "www.fe2vi.space", "custom_domain": true }
+    { "pattern": "www.fe2vi.space", "custom_domain": true },
+    { "pattern": "testnet.fe2vi.space", "custom_domain": true }
   ],
   "vars": {
     "FE2VI_NETWORK": "testnet",

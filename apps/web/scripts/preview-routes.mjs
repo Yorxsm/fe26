@@ -71,7 +71,7 @@ if (!up) {
 
 let failed = false;
 for (const route of routes) {
-  const response = await fetch(origin + route);
+  const response = await fetch(origin + route, { redirect: "manual" });
   const body = await response.text();
   const broken = body.includes("readFileSync is not implemented") || body.includes("Internal Server Error");
   console.log(`${response.status} ${route}${broken ? " BODY_ERROR" : ""}`);
