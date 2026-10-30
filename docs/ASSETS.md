@@ -78,6 +78,21 @@ Interior rooms are built by `tools/blender/dress_interiors.py`, then `tools/blen
 | Quaternius Furniture Pack | https://quaternius.com/packs/furniture.html | CC0 1.0 | 2026-10-27 |
 | Poly Haven camera, rack, cart, cables, wood floor | https://polyhaven.com/license | CC0 1.0 | 2026-10-27 |
 
+### Street props
+
+The village street set is loaded from `apps/web/public/models/props/` by `apps/web/components/Props.tsx`. Each source is a Poly Haven 1k glTF set, re-exported by Blender 5.2 with 512px WebP textures at roughly 4.6 MB total. Props have shadows and environment lighting, but no raycast target, so clicks still select the building or agent behind them. `?props=0` turns the set off.
+
+| File | Source | License |
+| --- | --- | --- |
+| `painted_wooden_bench.glb` | [painted_wooden_bench](https://polyhaven.com/a/painted_wooden_bench), Poly Haven | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `planter_box_01.glb`, `planter_box_02.glb` | [planter_box_01](https://polyhaven.com/a/planter_box_01), [planter_box_02](https://polyhaven.com/a/planter_box_02), Poly Haven | CC0 1.0 |
+| `wooden_crate_01.glb` | [wooden_crate_01](https://polyhaven.com/a/wooden_crate_01), Poly Haven | CC0 1.0 |
+| `wooden_barrels_01.glb` | [wooden_barrels_01](https://polyhaven.com/a/wooden_barrels_01), Poly Haven | CC0 1.0 |
+| `CoffeeCart_01.glb` | [CoffeeCart_01](https://polyhaven.com/a/CoffeeCart_01), Poly Haven | CC0 1.0 |
+| `dining_table.glb` | [dining_table](https://polyhaven.com/a/dining_table), Poly Haven | CC0 1.0 |
+| `wicker_basket_01.glb` | [wicker_basket_01](https://polyhaven.com/a/wicker_basket_01), Poly Haven | CC0 1.0 |
+| `food_apple_01.glb` | [food_apple_01](https://polyhaven.com/a/food_apple_01), Poly Haven | CC0 1.0 |
+
 Kenney characters stay unused. The agents stay the original figures.
 
 | File | Source | License |

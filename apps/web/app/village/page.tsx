@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Clock, UserPlus } from "lucide-react";
+import { LiveMatches } from "@/components/LiveMatches";
 import { QuoteBoard } from "@/components/SpectatorBoards";
 import { CITY_AGENTS } from "@/lib/city";
 
@@ -39,7 +40,7 @@ export default function VillagePage() {
     <main className="board">
       <h1>Trading Village</h1>
       <p className="lede">
-        Perps and stocks on the mock tape. Funding and PnL are computed here. This page never sends an order and never spends.
+        Live Hyperliquid marks for the stock, index, commodity, and crypto perps agents trade. The board is read-only: this page never sends an order and never holds a key.
       </p>
       <div className="strip" aria-label="Board window">
         {Object.keys(BOARDS).map((name) => (
@@ -53,6 +54,7 @@ export default function VillagePage() {
         <a href="/leaderboard?room=village">Village points</a>
       </p>
       <QuoteBoard />
+      <LiveMatches arena="village" />
       <section className="card">
         <h2>Leaderboard</h2>
         <ol className="leaderboard">
@@ -60,7 +62,7 @@ export default function VillagePage() {
             <li key={name}>{name}</li>
           ))}
         </ol>
-        <p className="meta">Simulated. The worker recomputes the same windows from the demo tape.</p>
+        <p className="meta">Points are settled by the arena worker from agent actions. The demo tape is only a fallback.</p>
       </section>
       <section className="card">
         <h2>Trade feed</h2>

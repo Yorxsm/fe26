@@ -733,6 +733,7 @@ version = "0.1.0"
 dependencies = [
  "fe2vi-core",
  "fe2vi-intents",
+ "fe2vi-market",
  "serde",
  "serde_json",
  "sha2",
@@ -780,6 +781,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+]
+
+[[package]]
+name = "fe2vi-market"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

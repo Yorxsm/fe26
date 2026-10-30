@@ -3,6 +3,7 @@
 import { Calendar, Clock, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useScheduleClock } from "@/lib/clock";
+import { FALLBACK_MARKETS, fetchMarkets, formatPct, formatPrice, type Market, type MarketSource } from "@/lib/markets";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
@@ -11,7 +12,6 @@ import {
   formatCountdown,
   heistRows,
   localRange,
-  mockQuotes,
   nextHeist,
   type HeistWindow,
 } from "../lib/schedule";
@@ -122,25 +122,50 @@ export function HeistBoard() {
 }
 
 export function QuoteBoard() {
-  const now = useNow();
-  if (now == null) {
+  const [rows, setRows] = useState<Market[] | null>(null);
+  const [source, setSource] = useState<MarketSource | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const load = () => {
+      fetchMarkets("xyz")
+        .then((result) => {
+          if (dead) return;
+          setRows(result.markets);
+          setSource(result.source);
+        })
+        .catch(() => {
+          if (dead) return;
+          setRows(FALLBACK_MARKETS);
+          setSource("fixture");
+        });
+    };
+    load();
+    const id = window.setInterval(load, 15_000);
+    return () => {
+      dead = true;
+      window.clearInterval(id);
+    };
+  }, []);
+  if (rows == null) {
     return (
       <section className="board">
-        <p className="muted">Mock tape. No order is sent. No key is used.</p>
+        <p className="muted">Read-only market tape. No order is sent. No key is used.</p>
       </section>
     );
   }
-  const rows = mockQuotes(now);
   return (
     <section className="board">
       <ul>
-        {rows.map((row) => (
-          <li key={row.symbol}>
-            {row.kind} {row.symbol} {(row.mark / 1_000_000).toFixed(2)} · funding {row.fundingBps} bps · pnl {(row.pnlMicros / 1_000_000).toFixed(2)}
+        {rows.slice(0, 8).map((row) => (
+          <li key={row.id}>
+            {row.symbol} <span className="muted">{row.kind}</span> {formatPrice(row.markPx)} · {formatPct(row.changePct)} · funding{" "}
+            {formatPct(row.funding * 10_000).replace("%", " bps")}
           </li>
         ))}
       </ul>
-      <p className="muted">Mock tape. No order is sent. No key is used.</p>
+      <p className="muted">
+        {source === "hyperliquid" ? "live · hyperliquid" : "fixture"} · Read-only. No order is sent. No key is used.
+      </p>
     </section>
   );
 }

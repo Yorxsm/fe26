@@ -4,6 +4,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import type { QualityTier } from "@/lib/city";
 
 const skyVertex = `
   varying vec3 vPos;
@@ -73,7 +74,7 @@ function EnvironmentLight() {
       env = pmrem.fromEquirectangular(texture).texture;
       sky = texture;
       scene.environment = env;
-      scene.environmentIntensity = 0.08;
+      scene.environmentIntensity = 0.3;
       pmrem.dispose();
     });
     return () => {
@@ -217,7 +218,9 @@ function Fireflies() {
   );
 }
 
-export function World() {
+export function World({ quality = "medium" }: { quality?: QualityTier }) {
+  const shadowSize = quality === "high" ? 2048 : 1024;
+  const shadows = quality !== "low";
   return (
     <>
       <Sky />
@@ -226,22 +229,22 @@ export function World() {
       <StreetLamps />
       <GroundMist />
       <Fireflies />
-      <hemisphereLight args={["#d2c4ae", "#5a4c3c", 0.9]} />
-      <ambientLight intensity={0.66} color="#74604c" />
+      <hemisphereLight args={["#d2c4ae", "#5a4c3c", 0.72]} />
+      <ambientLight intensity={0.45} color="#74604c" />
       <directionalLight
         position={[78, 9, 18]}
         intensity={0.38}
         color="#ffb07a"
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.001}
-        shadow-normalBias={0.12}
-        shadow-camera-near={8}
-        shadow-camera-far={320}
-        shadow-camera-left={-120}
-        shadow-camera-right={120}
-        shadow-camera-top={120}
-        shadow-camera-bottom={-120}
+        castShadow={shadows}
+        shadow-mapSize={[shadowSize, shadowSize]}
+        shadow-bias={-0.0008}
+        shadow-normalBias={0.08}
+        shadow-camera-near={1}
+        shadow-camera-far={240}
+        shadow-camera-left={-86}
+        shadow-camera-right={86}
+        shadow-camera-top={86}
+        shadow-camera-bottom={-86}
       />
       <directionalLight position={[-32, 24, 58]} intensity={1.15} color="#ffc49a" />
       <pointLight position={[-19, 5, 32]} color="#ffc48a" intensity={32} distance={26} decay={1} />

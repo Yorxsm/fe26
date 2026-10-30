@@ -641,6 +641,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 onPick={pick}
                 onFollow={follow}
                 onUnavailable={() => setWebgl(false)}
+                onClearFocus={() => {
+                  setFocusId(null);
+                  setFollowIndex(null);
+                }}
                 shotLock={shotLock}
                 roomBusy={roomBusy}
                 visitors={visitors}

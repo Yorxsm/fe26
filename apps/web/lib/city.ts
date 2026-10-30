@@ -1,6 +1,11 @@
 import { displayName } from "./avatar";
 import { defaultSkin, type SkinTraits } from "./skin";
 
+export type QualityTier = "low" | "medium" | "high";
+
+/** Rough plot bounds used by the camera to stay out of buildings. */
+export type DistrictFootprint = { hx: number; hz: number; height: number };
+
 export type District = {
   id: string;
   name: string;
@@ -11,9 +16,10 @@ export type District = {
   color: string;
   x: number;
   z: number;
+  footprint: DistrictFootprint;
 };
 
-const LAYOUT: Array<Omit<District, "x" | "z">> = [
+const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "vault-quarter",
     name: "Vault Quarter",
@@ -68,6 +74,18 @@ export const ROOM_XZ: Record<string, [number, number]> = {
   "trading-village": [46, 14],
   "war-room": [12, 40],
   "skin-forge": [-38, -24],
+};
+
+/**
+ * Approximate plot bounds. The room shell runs x ±7.2 and z ±6.2, so the
+ * footprint adds a little clearance for the facade, stairs, and signage.
+ */
+export const DISTRICT_FOOTPRINT: Record<string, DistrictFootprint> = {
+  "vault-quarter": { hx: 8.8, hz: 8.0, height: 13.5 },
+  "cup-stadium": { hx: 10.2, hz: 9.0, height: 15.0 },
+  "trading-village": { hx: 9.0, hz: 8.2, height: 14.0 },
+  "war-room": { hx: 8.8, hz: 8.0, height: 13.5 },
+  "skin-forge": { hx: 9.0, hz: 8.2, height: 12.5 },
 };
 
 /** South face of each building. Agents use this when a room opens or closes. */
@@ -300,7 +318,8 @@ export const INTERIOR_CAST: Record<string, CastPose[]> = {
 
 export const DISTRICTS: District[] = LAYOUT.map((district) => {
   const [x, z] = ROOM_XZ[district.id] ?? [0, 0];
-  return { ...district, x, z };
+  const footprint = DISTRICT_FOOTPRINT[district.id] ?? { hx: 9, hz: 8, height: 14 };
+  return { ...district, x, z, footprint };
 });
 
 export type CityAgent = {

@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 fe2vi-core = { path = "../../crates/fe2vi-core" }
 fe2vi-intents = { path = "../../crates/fe2vi-intents" }
+fe2vi-market = { path = "../../crates/fe2vi-market" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

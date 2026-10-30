@@ -16,8 +16,8 @@ export function AgentLookup({ initial }: { initial: string }) {
       }}
     >
       <label>
-        Agent account
-        <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="demo.registry.testnet" />
+        Agent handle
+        <input value={value} onChange={(event) => setValue(event.target.value)} placeholder="your-handle" />
       </label>
       <button type="submit">
         <Search aria-hidden="true" strokeWidth={1.75} />

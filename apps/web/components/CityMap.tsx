@@ -3,9 +3,10 @@
 import { Billboard, Html, OrbitControls, Text, useGLTF, useProgress } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode } from "postprocessing";
+import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode } from "postprocessing";
 import { Interiors } from "@/components/Interiors";
 import { Nature } from "@/components/Nature";
+import { Props } from "@/components/Props";
 import { World } from "@/components/World";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -13,7 +14,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
 import { FRAME_BOARDS } from "@/lib/boards";
-import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -190,6 +191,18 @@ function PickRing() {
   );
 }
 
+function InteriorBackdrop({ id }: { id: string | null }) {
+  if (!id) return null;
+  const room = DISTRICTS.find((district) => district.id === id);
+  if (!room) return null;
+  return (
+    <mesh position={[room.x, 2.4, room.z]}>
+      <sphereGeometry args={[22, 20, 14]} />
+      <meshBasicMaterial color="#08090c" side={THREE.BackSide} fog={false} />
+    </mesh>
+  );
+}
+
 const overviewEye = new THREE.Vector3(-32, 16, 58);
 const overviewAim = new THREE.Vector3(14, 6, -4);
 /**
@@ -230,6 +243,147 @@ const FULL_CAP = 24;
 const CULL_DISTANCE = 140;
 /** Composer passes, filled when the grade is built. Shadow maps are not in this list. */
 const postBudget = { composerPasses: 0 };
+
+const GROUND_CAMERA_Y = 1.2;
+const CAMERA_RADIUS = 0.55;
+const INTERIOR_HX = 6.4;
+const INTERIOR_HZ = 5.6;
+const INTERIOR_MIN_DISTANCE = 3.2;
+const INTERIOR_MAX_DISTANCE = 7.5;
+
+function detectQuality(): QualityTier {
+  if (typeof window === "undefined") return "medium";
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const narrow = window.matchMedia("(max-width: 800px)").matches;
+  const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4;
+  if (reduce || narrow || cores <= 4) return "low";
+  if (cores >= 8) return "high";
+  return "medium";
+}
+
+function dprForQuality(tier: QualityTier) {
+  if (typeof window === "undefined") return 1;
+  const cap = tier === "high" ? 2 : tier === "medium" ? 1.5 : 1;
+  return Math.min(window.devicePixelRatio || 1, cap);
+}
+
+function dampFov(camera: THREE.PerspectiveCamera, target: number, delta: number, instant: boolean) {
+  if (instant || Math.abs(camera.fov - target) < 0.01) {
+    if (camera.fov !== target) {
+      camera.fov = target;
+      camera.updateProjectionMatrix();
+    }
+    return;
+  }
+  camera.fov += (target - camera.fov) * (1 - Math.exp(-delta * 5.5));
+  if (Math.abs(camera.fov - target) < 0.01) camera.fov = target;
+  camera.updateProjectionMatrix();
+}
+
+/**
+ * Keep a camera out of the ground and building plots. The focused room is
+ * ignored so the authored interior approach can pass through its own door.
+ */
+function collideCamera(position: THREE.Vector3, target: THREE.Vector3, ignoreId: string | null) {
+  if (position.y < GROUND_CAMERA_Y) position.y = GROUND_CAMERA_Y;
+  const dx = position.x - target.x;
+  const dy = position.y - target.y;
+  const dz = position.z - target.z;
+  let best = 1;
+  for (const district of DISTRICTS) {
+    if (district.id === ignoreId) continue;
+    const fp = district.footprint;
+    if (position.y > fp.height + CAMERA_RADIUS) continue;
+    const minX = district.x - fp.hx - CAMERA_RADIUS;
+    const maxX = district.x + fp.hx + CAMERA_RADIUS;
+    const minY = -CAMERA_RADIUS;
+    const maxY = fp.height + CAMERA_RADIUS;
+    const minZ = district.z - fp.hz - CAMERA_RADIUS;
+    const maxZ = district.z + fp.hz + CAMERA_RADIUS;
+    const targetInside =
+      target.x > minX && target.x < maxX &&
+      target.y > minY && target.y < maxY &&
+      target.z > minZ && target.z < maxZ;
+    if (targetInside) continue;
+    let tmin = 0;
+    let tmax = 1;
+    let miss = false;
+    if (Math.abs(dx) < 1e-6) {
+      if (target.x < minX || target.x > maxX) miss = true;
+    } else {
+      let a = (minX - target.x) / dx;
+      let b = (maxX - target.x) / dx;
+      if (a > b) { const swap = a; a = b; b = swap; }
+      if (a > tmin) tmin = a;
+      if (b < tmax) tmax = b;
+      if (tmin > tmax) miss = true;
+    }
+    if (!miss && Math.abs(dy) < 1e-6) {
+      if (target.y < minY || target.y > maxY) miss = true;
+    } else if (!miss) {
+      let a = (minY - target.y) / dy;
+      let b = (maxY - target.y) / dy;
+      if (a > b) { const swap = a; a = b; b = swap; }
+      if (a > tmin) tmin = a;
+      if (b < tmax) tmax = b;
+      if (tmin > tmax) miss = true;
+    }
+    if (!miss && Math.abs(dz) < 1e-6) {
+      if (target.z < minZ || target.z > maxZ) miss = true;
+    } else if (!miss) {
+      let a = (minZ - target.z) / dz;
+      let b = (maxZ - target.z) / dz;
+      if (a > b) { const swap = a; a = b; b = swap; }
+      if (a > tmin) tmin = a;
+      if (b < tmax) tmax = b;
+      if (tmin > tmax) miss = true;
+    }
+    if (miss || tmin < 0 || tmin > tmax) continue;
+    if (tmin < best) best = tmin;
+  }
+  if (best >= 1) {
+    for (const district of DISTRICTS) {
+      if (district.id === ignoreId) continue;
+      const fp = district.footprint;
+      const hx = fp.hx + CAMERA_RADIUS;
+      const hz = fp.hz + CAMERA_RADIUS;
+      const offsetX = position.x - district.x;
+      const offsetZ = position.z - district.z;
+      const inside =
+        position.y < fp.height + CAMERA_RADIUS &&
+        Math.abs(offsetX) < hx &&
+        Math.abs(offsetZ) < hz;
+      if (!inside) continue;
+      const pushX = hx - Math.abs(offsetX);
+      const pushZ = hz - Math.abs(offsetZ);
+      if (pushX < pushZ) position.x = district.x + (offsetX < 0 ? -hx : hx);
+      else position.z = district.z + (offsetZ < 0 ? -hz : hz);
+    }
+    if (position.y < GROUND_CAMERA_Y) position.y = GROUND_CAMERA_Y;
+    return;
+  }
+  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const pull = length > 0.001 ? Math.min(0.5 / length, 0.45) : 0;
+  const t = Math.max(0, best - pull);
+  position.set(target.x + dx * t, target.y + dy * t, target.z + dz * t);
+  if (position.y < GROUND_CAMERA_Y) position.y = GROUND_CAMERA_Y;
+}
+
+function clampInteriorCamera(position: THREE.Vector3, room: District) {
+  position.x = Math.min(room.x + INTERIOR_HX, Math.max(room.x - INTERIOR_HX, position.x));
+  position.y = Math.min(4.05, Math.max(1.25, position.y));
+  position.z = Math.min(room.z + INTERIOR_HZ, Math.max(room.z - INTERIOR_HZ, position.z));
+}
+
+function applyIdleDrift(camera: THREE.PerspectiveCamera, rig: Rig, time: number, held: boolean) {
+  if (held) return;
+  if (camera.position.distanceTo(overviewEye) > 2.6) return;
+  if (rig.target.distanceTo(overviewAim) > 3.5) return;
+  driftOffset.copy(camera.position).sub(rig.target);
+  driftOffset.applyAxisAngle(driftUp, Math.sin(time * 0.12) * 0.0009);
+  camera.position.copy(rig.target).add(driftOffset);
+  camera.lookAt(rig.target);
+}
 
 type ScreenRect = { left: number; right: number; top: number; bottom: number };
 const projectPoint = new THREE.Vector3();
@@ -587,15 +741,8 @@ function Kits({
     mergeStatic(cloned, () => false, true);
     return cloned;
   }, [gltf.scene]);
-  useLayoutEffect(() => {
-    const openId = beatId ?? (frameMode === "in" ? focusId : null);
-    scene.traverse((node) => {
-      if (node.userData.mergedAway) return;
-      const id = node.userData.district as string | undefined;
-      if (!id) return;
-      node.visible = !(openId === id && INTERIOR_IDS.has(id));
-    });
-  }, [scene, focusId, frameMode, beatId]);
+  const openId = beatId ?? (frameMode === "in" ? focusId : null);
+  useConcealGroups(scene, openId && INTERIOR_IDS.has(openId) ? openId : null);
   return (
     <primitive
       object={scene}
@@ -825,6 +972,84 @@ function mergeStatic(root: THREE.Object3D, skip: (mesh: THREE.Mesh) => boolean, 
   }
 }
 
+const CONCEAL_SECONDS = 0.26;
+type ConcealStep = { group: THREE.Group; from: number; to: number };
+
+/** Move each district's meshes under one pivot so a room can shrink toward its plot. */
+function buildDistrictGroups(root: THREE.Object3D) {
+  root.updateMatrixWorld(true);
+  const groups = new Map<string, THREE.Group>();
+  const nodes: THREE.Object3D[] = [];
+  root.traverse((node) => {
+    if (node.userData.mergedAway) return;
+    const id = node.userData.district;
+    if (typeof id !== "string" || !INTERIOR_IDS.has(id)) return;
+    nodes.push(node);
+  });
+  for (const node of nodes) {
+    const id = node.userData.district as string;
+    let group = groups.get(id);
+    if (!group) {
+      group = new THREE.Group();
+      group.name = `district-${id}`;
+      const district = DISTRICTS.find((entry) => entry.id === id);
+      if (district) group.position.set(district.x, 0, district.z);
+      root.add(group);
+      root.updateMatrixWorld(true);
+      groups.set(id, group);
+    }
+    group.attach(node);
+  }
+  return groups;
+}
+
+/** Quick scale-down/up instead of an instant unmount when a room opens. */
+function useConcealGroups(root: THREE.Object3D, concealedId: string | null) {
+  const groups = useMemo(() => buildDistrictGroups(root), [root]);
+  const steps = useRef<ConcealStep[]>([]);
+  const started = useRef(0);
+  const active = useRef<string | null | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    if (active.current === concealedId) return;
+    active.current = concealedId;
+    started.current = performance.now();
+    const next: ConcealStep[] = [];
+    for (const [id, group] of groups) {
+      const to = id === concealedId ? 0 : 1;
+      const from = group.visible ? group.scale.x : 0.001;
+      if (Math.abs(from - to) < 0.001) {
+        group.scale.setScalar(to === 0 ? 0.001 : 1);
+        group.visible = to !== 0;
+        continue;
+      }
+      group.visible = true;
+      next.push({ group, from, to });
+    }
+    steps.current = next;
+  }, [concealedId, groups]);
+
+  useFrame(() => {
+    const list = steps.current;
+    if (!list.length) return;
+    const age = (performance.now() - started.current) / 1000;
+    const t = Math.min(1, age / CONCEAL_SECONDS);
+    const eased = t * t * (3 - 2 * t);
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const step = list[index];
+      const value = step.from + (step.to - step.from) * eased;
+      step.group.scale.setScalar(Math.max(0.001, value));
+      if (t >= 1) {
+        step.group.visible = step.to > 0.5;
+        step.group.scale.setScalar(step.to > 0.5 ? 1 : 0.001);
+        list.splice(index, 1);
+      }
+    }
+  });
+
+  return groups;
+}
+
 function moodFor(x: number, z: number): Mood {
   let bestId = "";
   let bestDistance = Infinity;
@@ -892,9 +1117,8 @@ function Station({
     paintScreen(scene, "stadium.screen", paintStadium);
     paintScreen(scene, "war.map", paintWarMap);
   }, [scene]);
+  useConcealGroups(scene, concealed ? focusId : null);
   useFrame((state, delta) => {
-    scene.visible = !concealed;
-    if (concealed) return;
     const wheel = scene.getObjectByName("vault.wheel");
     if (wheel) wheel.rotateY(delta * 0.35);
     const openPrefix = Object.entries(ROOM_PREFIX).find(([, id]) => id === focusId)?.[0] ?? beatPrefix;
@@ -1418,7 +1642,7 @@ function AgentMesh({
   );
 }
 
-function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
+function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; quality: QualityTier }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
@@ -1428,12 +1652,32 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
   const grade = useMemo(() => {
     const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(
-      new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC })),
-    );
+    if (quality === "low") {
+      composer.addPass(
+        new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC })),
+      );
+    } else {
+      composer.addPass(
+        new EffectPass(
+          camera,
+          new BloomEffect({
+            intensity: quality === "high" ? 0.4 : 0.24,
+            luminanceThreshold: 0.82,
+            luminanceSmoothing: 0.18,
+            mipmapBlur: true,
+            radius: 0.55,
+            levels: 5,
+          }),
+          new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
+        ),
+      );
+    }
+    if (quality === "high") {
+      composer.addPass(new EffectPass(camera, new SMAAEffect()));
+    }
     postBudget.composerPasses = composer.passes.length;
     return { composer };
-  }, [camera, gl, scene]);
+  }, [camera, gl, quality, scene]);
 
   useLayoutEffect(() => {
     grade.composer.setSize(size.width, size.height);
@@ -1451,6 +1695,16 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview" }) {
     grade.composer.render(delta);
   }, 1);
 
+  return null;
+}
+
+function QualitySettings({ quality }: { quality: QualityTier }) {
+  const gl = useThree((state) => state.gl);
+  useLayoutEffect(() => {
+    gl.toneMapping = THREE.NoToneMapping;
+    gl.shadowMap.enabled = quality !== "low";
+    gl.shadowMap.type = THREE.PCFSoftShadowMap;
+  }, [gl, quality]);
   return null;
 }
 
@@ -1517,6 +1771,7 @@ function widenOrbit(controls: Rig | null) {
   controls.maxDistance = 360;
   controls.minPolarAngle = 0.35;
   controls.maxPolarAngle = 1.5;
+  controls.enablePan = true;
   const delta = (controls as Rig & { _sphericalDelta?: { set: (x: number, y: number, z: number) => void } })._sphericalDelta;
   delta?.set(0, 0, 0);
 }
@@ -1556,6 +1811,13 @@ function CameraDriver({
   const pointer = useRef({ x: 0, y: 0, down: false });
   const latched = useRef<string | null>(null);
   const depart = useRef<{ from: THREE.Vector3; at: number } | null>(null);
+  const fovTarget = useRef<number | null>(null);
+  const lastFocus = useRef<string | null>(null);
+  const vantageReady = useRef(false);
+  const tripMid = useRef(new THREE.Vector3());
+  const tripUp = useRef(new THREE.Vector3());
+  const tripDown = useRef(new THREE.Vector3());
+  const interiorOffset = useRef(new THREE.Vector3());
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -1586,19 +1848,24 @@ function CameraDriver({
     const driving = mode === "cutscene" || lineup || street || Boolean(poster) || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
+    if (lastFocus.current !== focusId) {
+      lastFocus.current = focusId;
+      latched.current = null;
+      depart.current = null;
+      if (focusId) homing.current = false;
+    }
+    const vantage = mode === "orbit" && !lobby && !poster && !lineup && !street;
+    if (!vantage) vantageReady.current = false;
     rig.autoRotate = false;
-    const applyFov = (fov: number) => {
-      if (Math.abs(camera.fov - fov) < 0.05) return;
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-    };
+    if (fovTarget.current === null) fovTarget.current = camera.fov;
+
     if (mode === "orbit") {
-      applyFov(lobby ? 46 : 48);
-      rig.enabled = false;
-      const mobileLobby = lobby && camera.aspect < 0.7;
-      const baseEye = mobileLobby ? titleEyeMobile : titleEye;
-      const baseAim = mobileLobby ? titleAimMobile : titleAim;
+      fovTarget.current = lobby ? 46 : 48;
       if (lobby) {
+        rig.enabled = false;
+        const mobileLobby = camera.aspect < 0.7;
+        const baseEye = mobileLobby ? titleEyeMobile : titleEye;
+        const baseAim = mobileLobby ? titleAimMobile : titleAim;
         const t = state.clock.elapsedTime;
         const held = cameraHeld();
         const yaw = reduce.current || held ? 0 : Math.sin(t * 0.16) * 0.08;
@@ -1609,26 +1876,54 @@ function CameraDriver({
         eye.copy(baseAim).add(driftOffset);
         eye.y = baseEye.y + bob;
         aim.copy(baseAim);
-      } else {
-        aim.copy(overviewAim);
-        eye.copy(overviewEye);
+        const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 2);
+        rig.target.lerp(aim, blend);
+        camera.position.lerp(eye, blend);
+        camera.lookAt(rig.target);
+        dampFov(camera, fovTarget.current, delta, reduce.current);
+        return;
       }
-      const blend = reduce.current || lobby ? 1 : 1 - Math.exp(-delta * 2);
-      rig.target.lerp(aim, blend);
-      camera.position.lerp(eye, blend);
+      if (!vantageReady.current) {
+        const far = camera.position.distanceTo(overviewEye) > 8;
+        if (far && !reduce.current) {
+          rig.enabled = false;
+          widenOrbit(controls);
+          aim.copy(overviewAim);
+          eye.copy(overviewEye);
+          const blend = 1 - Math.exp(-delta * 3);
+          rig.target.lerp(aim, blend);
+          camera.position.lerp(eye, blend);
+          collideCamera(camera.position, rig.target, null);
+          camera.lookAt(rig.target);
+          dampFov(camera, fovTarget.current, delta, false);
+          return;
+        }
+        widenOrbit(controls);
+        rig.target.copy(overviewAim);
+        if (far) camera.position.copy(overviewEye);
+        vantageReady.current = true;
+      }
+      rig.enabled = true;
+      const held = cameraHeld() || pointer.current.down || reduce.current;
+      applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
+      collideCamera(camera.position, rig.target, null);
       camera.lookAt(rig.target);
+      dampFov(camera, fovTarget.current, delta, reduce.current);
       return;
     }
+
     if (!driving && homing.current) {
       rig.enabled = false;
       widenOrbit(controls);
-      applyFov(48);
+      fovTarget.current = 48;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 4);
       rig.target.lerp(aim, blend);
       camera.position.lerp(eye, blend);
+      collideCamera(camera.position, rig.target, null);
       camera.lookAt(rig.target);
+      dampFov(camera, fovTarget.current, delta, reduce.current);
       if (camera.position.distanceTo(overviewEye) < 0.6) {
         camera.position.copy(overviewEye);
         rig.target.copy(overviewAim);
@@ -1639,69 +1934,83 @@ function CameraDriver({
     }
     rig.enabled = !driving;
     let drive = false;
+    let collide = true;
+    let ignoreId: string | null = null;
     if (mode === "cutscene") {
       const shot = BEATS[Math.min(beat, BEATS.length - 1)];
       aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
       eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
-      applyFov(shot.fov ?? 50);
+      fovTarget.current = shot.fov ?? 50;
       drive = true;
+      collide = false;
     } else if (poster === "front6") {
       eye.set(0, 3.42 * fit, 17);
       aim.set(0, 3.32 * fit, 0);
-      applyFov(56);
+      fovTarget.current = 56;
       drive = true;
+      collide = false;
     } else if (poster === "q34") {
       eye.set(5.4, 3.55 * fit, 15.5);
       aim.set(0, 3.2 * fit, 0);
-      applyFov(54);
+      fovTarget.current = 54;
       drive = true;
+      collide = false;
     } else if (poster === "expressions") {
       eye.set(0, 3.5 * fit, 16.5);
       aim.set(0, 3.3 * fit, 0);
-      applyFov(46);
+      fovTarget.current = 46;
       drive = true;
+      collide = false;
     } else if (poster === "eyes") {
       eye.set(0, 7.2 * fit, 14);
       aim.set(0, 2.6 * fit, -0.8);
-      applyFov(42);
+      fovTarget.current = 42;
       drive = true;
+      collide = false;
     } else if (poster === "gear") {
       eye.set(9, 4.4 * fit, 18);
       aim.set(0, 2.2 * fit, 0);
-      applyFov(42);
+      fovTarget.current = 42;
       drive = true;
+      collide = false;
     } else if (poster === "face") {
       eye.set(FACE_SHOT.eye[0], FACE_SHOT.eye[1], FACE_SHOT.eye[2]);
       aim.set(FACE_SHOT.aim[0], FACE_SHOT.aim[1], FACE_SHOT.aim[2]);
-      applyFov(FACE_SHOT.fov ?? 28);
+      fovTarget.current = FACE_SHOT.fov ?? 28;
       drive = true;
+      collide = false;
     } else if (poster === "walk") {
       eye.set(WALK_SHOT.eye[0], WALK_SHOT.eye[1], WALK_SHOT.eye[2]);
       aim.set(WALK_SHOT.aim[0], WALK_SHOT.aim[1], WALK_SHOT.aim[2]);
-      applyFov(WALK_SHOT.fov ?? 42);
+      fovTarget.current = WALK_SHOT.fov ?? 42;
       drive = true;
+      collide = false;
     } else if (poster === "trails") {
       eye.set(0, 3.5 * fit, 16);
       aim.set(0, 2.3 * fit, 0);
-      applyFov(42);
+      fovTarget.current = 42;
       drive = true;
+      collide = false;
     } else if (poster === "skins") {
       eye.set(0, 16 * fit, 26);
       aim.set(0, 2 * fit, 0);
-      applyFov(48);
+      fovTarget.current = 48;
       drive = true;
+      collide = false;
     } else if (lineup) {
       eye.set(LINEUP_SHOT.eye[0], LINEUP_SHOT.eye[1], LINEUP_SHOT.eye[2]);
       aim.set(LINEUP_SHOT.aim[0], LINEUP_SHOT.aim[1], LINEUP_SHOT.aim[2]);
-      applyFov(LINEUP_SHOT.fov ?? 50);
+      fovTarget.current = LINEUP_SHOT.fov ?? 50;
       drive = true;
+      collide = false;
     } else if (street) {
       eye.set(STREET_SHOT.eye[0], STREET_SHOT.eye[1], STREET_SHOT.eye[2]);
       aim.set(STREET_SHOT.aim[0], STREET_SHOT.aim[1], STREET_SHOT.aim[2]);
-      applyFov(STREET_SHOT.fov ?? 52);
+      fovTarget.current = STREET_SHOT.fov ?? 52;
       drive = true;
+      collide = false;
     } else if (followIndex !== null) {
-      applyFov(32);
+      fovTarget.current = 32;
       const pose = placeAgent(followIndex, state.clock.elapsedTime, paused);
       const aheadX = Math.sin(pose.rot);
       const aheadZ = Math.cos(pose.rot);
@@ -1711,21 +2020,23 @@ function CameraDriver({
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room && frameMode === "out") {
+        fovTarget.current = 48;
         if (!depart.current) depart.current = { from: camera.position.clone(), at: state.clock.elapsedTime };
         const trip = depart.current;
         const t = Math.min(1, (state.clock.elapsedTime - trip.at) / 1.15);
         const ease = t * t * (3 - 2 * t);
-        const mid = trip.from.clone().lerp(overviewEye, 0.45);
+        const mid = tripMid.current.copy(trip.from).lerp(overviewEye, 0.45);
         mid.y = Math.max(18, trip.from.y + 8, overviewEye.y);
-        const up = trip.from.clone().lerp(mid, ease);
-        const down = mid.clone().lerp(overviewEye, ease);
+        const up = tripUp.current.copy(trip.from).lerp(mid, ease);
+        const down = tripDown.current.copy(mid).lerp(overviewEye, ease);
         camera.position.copy(up.lerp(down, ease));
         rig.target.lerp(overviewAim, Math.min(1, ease + 0.2));
+        collideCamera(camera.position, rig.target, room.id);
         camera.lookAt(rig.target);
-        applyFov(48);
         widenOrbit(controls);
         if (controls) controls.enabled = false;
         latched.current = null;
+        dampFov(camera, fovTarget.current, delta, reduce.current);
         if (t >= 1) {
           camera.position.copy(overviewEye);
           rig.target.copy(overviewAim);
@@ -1742,11 +2053,12 @@ function CameraDriver({
           const framed = inside ? fitInterior(camera, shot) : shot;
           eye.set(framed.eye[0], framed.eye[1], framed.eye[2]);
           aim.set(framed.aim[0], framed.aim[1], framed.aim[2]);
-          applyFov(framed.fov ?? shot.fov ?? 32);
+          fovTarget.current = framed.fov ?? shot.fov ?? 32;
         } else {
           eye.set(room.x, 2.6, room.z + 8);
           aim.set(room.x, 1.8, room.z);
         }
+        ignoreId = room.id;
         if (frameMode === "out" || latched.current !== focusId && camera.position.distanceTo(eye) > 0.55) {
           latched.current = null;
         }
@@ -1761,38 +2073,45 @@ function CameraDriver({
           latched.current = focusId;
           controls.enabled = true;
           controls.enableDamping = true;
-          controls.dampingFactor = 0.08;
-          controls.minDistance = 4;
-          controls.maxDistance = 5.2;
-          controls.enablePan = true;
-          controls.minPolarAngle = 0.85;
-          controls.maxPolarAngle = 1.35;
+          controls.dampingFactor = 0.075;
+          controls.minDistance = INTERIOR_MIN_DISTANCE;
+          controls.maxDistance = INTERIOR_MAX_DISTANCE;
+          controls.enablePan = false;
+          controls.minPolarAngle = 0.7;
+          controls.maxPolarAngle = 1.4;
           controls.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
-          const pad = pointer.current.down || reduce.current ? 0 : 0.18;
-          camera.position.x = Math.min(room.x + 4.6, Math.max(room.x - 4.6, camera.position.x + pointer.current.x * pad));
-          camera.position.y = Math.min(3.1, Math.max(1.15, camera.position.y - pointer.current.y * pad));
-          camera.position.z = Math.min(room.z + 4.2, Math.max(room.z - 4.4, camera.position.z));
-          const span = camera.position.distanceTo(controls.target);
-          if (camera.aspect >= 1 && (span < 4 || span > 5.2)) {
-            const offset = camera.position.clone().sub(controls.target);
-            if (offset.lengthSq() > 0.0001) camera.position.copy(controls.target).add(offset.setLength(Math.min(5.2, Math.max(4, span || 4))));
+          clampInteriorCamera(camera.position, room);
+          interiorOffset.current.copy(camera.position).sub(controls.target);
+          const span = interiorOffset.current.length();
+          if (span > INTERIOR_MAX_DISTANCE && span > 0.001) {
+            interiorOffset.current.setLength(INTERIOR_MAX_DISTANCE);
+            camera.position.copy(controls.target).add(interiorOffset.current);
+            clampInteriorCamera(camera.position, room);
           }
           controls.update();
+          dampFov(camera, fovTarget.current, delta, reduce.current);
           return;
         }
         drive = true;
       }
     }
-    if (!drive) return;
-    const blend = reduce.current || camera.position.distanceTo(eye) > 18 ? 1 : 1 - Math.exp(-delta * 6);
-    if (blend === 1) {
-      rig.target.copy(aim);
-      camera.position.copy(eye);
-    } else {
-      rig.target.lerp(aim, blend);
-      camera.position.lerp(eye, blend);
+    if (!drive) {
+      if (mode === "play" && !lineup && !street && !poster && followIndex === null && !focusId) {
+        const held = cameraHeld() || pointer.current.down || reduce.current;
+        applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
+        collideCamera(camera.position, rig.target, null);
+        if (!held) camera.lookAt(rig.target);
+      }
+      dampFov(camera, fovTarget.current, delta, reduce.current);
+      return;
     }
-    camera.lookAt(aim);
+    if (collide) collideCamera(eye, aim, ignoreId);
+    const blend = reduce.current ? 1 : 1 - Math.exp(-delta * (camera.position.distanceTo(eye) > 18 ? 3.6 : 6));
+    rig.target.lerp(aim, blend);
+    camera.position.lerp(eye, blend);
+    if (collide) collideCamera(camera.position, rig.target, ignoreId);
+    camera.lookAt(rig.target);
+    dampFov(camera, fovTarget.current, delta, reduce.current);
   });
   return null;
 }
@@ -2270,6 +2589,7 @@ export default function CityMap({
   onPick,
   onFollow,
   onUnavailable,
+  onClearFocus,
   shotLock = false,
   roomBusy = false,
   visitors = [],
@@ -2287,18 +2607,31 @@ export default function CityMap({
   onPick: (district: District) => void;
   onFollow: (index: number) => void;
   onUnavailable: () => void;
+  onClearFocus?: () => void;
   shotLock?: boolean;
   roomBusy?: boolean;
   visitors?: CityAgent[];
 }) {
   const crew = [...CITY_AGENTS, ...visitors];
   const [lean, setLean] = useState(false);
+  const [quality, setQuality] = useState<QualityTier>("medium");
+  const [dpr, setDpr] = useState(1);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 800px)");
-    const apply = () => setLean(query.matches);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => {
+      const tier = detectQuality();
+      setLean(query.matches);
+      setQuality(tier);
+      setDpr(dprForQuality(tier));
+    };
     apply();
     query.addEventListener("change", apply);
-    return () => query.removeEventListener("change", apply);
+    reduce.addEventListener("change", apply);
+    return () => {
+      query.removeEventListener("change", apply);
+      reduce.removeEventListener("change", apply);
+    };
   }, []);
   const [peek, setPeek] = useState<{ x: number; y: number; z: number } | null>(null);
   const [crowd] = useState(readCrowd);
@@ -2309,11 +2642,11 @@ export default function CityMap({
   return (
     <Canvas
       className="city-canvas"
-      dpr={1}
-      shadows={false}
+      dpr={dpr}
+      shadows={quality !== "low"}
       camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
       gl={{
-        antialias: false,
+        antialias: quality !== "low",
         alpha: false,
         powerPreference: "default",
         failIfMajorPerformanceCaveat: false,
@@ -2321,17 +2654,25 @@ export default function CityMap({
       }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.NoToneMapping;
-        gl.shadowMap.enabled = false;
+        gl.shadowMap.enabled = quality !== "low";
         gl.shadowMap.type = THREE.PCFSoftShadowMap;
         gl.domElement.addEventListener("webglcontextlost", (event) => {
           event.preventDefault();
           onUnavailable();
         });
       }}
+      onDoubleClick={() => {
+        if (mode === "cutscene" || poster || lineup || street) return;
+        setPeek(null);
+        onClearFocus?.();
+      }}
     >
       <color attach="background" args={["#070a1a"]} />
-      <World />
+      <QualitySettings quality={quality} />
+      <World quality={quality} />
       <Nature />
+      <Props />
+      <InteriorBackdrop id={openInterior} />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
       <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
       <group position={[-42, 6.4, 33]}>
@@ -2404,7 +2745,7 @@ export default function CityMap({
       <Ears paused={paused} />
       <LoadReporter />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} shotLock={shotLock} peek={peek} />
-      <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} />
+      <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} quality={quality} />
       <OrbitControls
         makeDefault
         enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}

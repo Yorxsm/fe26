@@ -4,6 +4,7 @@ exclude = ["contracts/sandbox-tests", "vendor/near-intents-agent-api"]
 members = [
     "crates/fe2vi-core",
     "crates/fe2vi-intents",
+    "crates/fe2vi-market",
     "crates/cli",
     "contracts/arena-factory",
     "contracts/arena-registry",

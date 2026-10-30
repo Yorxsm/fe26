@@ -1,3 +1,4 @@
+import { LiveMatches } from "@/components/LiveMatches";
 import { QuestPing } from "@/components/QuestPing";
 import { ChallengeBoard } from "@/components/SpectatorBoards";
 
@@ -13,6 +14,7 @@ export default function WarRoomPage() {
         <a href="/leaderboard?room=war">War points</a>
       </p>
       <ChallengeBoard />
+      <LiveMatches arena="war" />
       <p className="meta">Flag hashes live in the agent file. This page does not show a flag and it does not take a claim.</p>
       <p>
         <a href="/sandbox">Sandbox page</a>

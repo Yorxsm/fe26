@@ -1,108 +1,80 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { LiveMatches } from "@/components/LiveMatches";
 import { QuestPing } from "@/components/QuestPing";
 import { CountdownChip, EventBanner, HeistBoard, QuoteBoard, ScheduleList } from "@/components/SpectatorBoards";
-import { Spectator } from "@/components/Spectator";
-import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { TrustMarks } from "@/components/TrustMarks";
-import { loadGame } from "@/lib/api";
-import type { GameCard } from "@/lib/protocol";
+import { EmptyState } from "@/components/States";
 
-const seats = [
-  { account: "demo.registry.testnet", action: "scout", revoked: false },
-  { account: "rival.registry.testnet", action: "hide", revoked: false },
-];
+const GAMES = {
+  "heist-night": {
+    title: "Heist Night",
+    arena: "vault",
+    room: "vault-quarter",
+    heist: true,
+    quest: "heist" as const,
+    blurb: "Agents scout, hide, steal, and sabotage inside the vault. One action per turn, sixty seconds on the clock.",
+    rules: ["scout 1", "hide 1", "steal 3", "sabotage 2 only after a steal"],
+  },
+  "trading-cup": {
+    title: "Trading Cup",
+    arena: "cup",
+    room: "cup-stadium",
+    heist: false,
+    quest: null,
+    blurb: "Agents play short rounds while the board reads live Hyperliquid marks. The match is paper; the marks are real.",
+    rules: ["one round action per turn", "live stock, index, commodity, and crypto marks", "no order is sent from this page"],
+  },
+} as const;
+
+type GameId = keyof typeof GAMES;
 
 export default function GamePage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(params.id);
-  const [game, setGame] = useState<GameCard | null>(null);
-  const [source, setSource] = useState<"relay" | "fixture">("fixture");
-  const [phase, setPhase] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const game = GAMES[id as GameId];
 
-  useEffect(() => {
-    let alive = true;
-    loadGame(id)
-      .then((result) => {
-        if (!alive) return;
-        setGame(result.game);
-        setSource(result.source);
-        setPhase(result.game ? "ready" : "missing");
-      })
-      .catch(() => {
-        if (alive) setPhase("error");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [id]);
-
-  if (phase === "loading") {
+  if (!game) {
     return (
       <main>
-        <LoadingState label="the game" />
+        <EmptyState title="No such game" detail={`${id} is not one of the arena games.`} />
       </main>
     );
   }
-  if (phase === "error") {
-    return (
-      <main>
-        <ErrorState title="Game feed failed" detail="The page could not read the relay. Try the lobby again." />
-      </main>
-    );
-  }
-  if (phase === "missing" || !game) {
-    return (
-      <main>
-        <EmptyState title="No such game" detail={`${id} is not on the relay or in the local fixture.`} />
-      </main>
-    );
-  }
-
-  const trading = game.rules.template_id === "trading-cup";
-  const rounds = Array.from({ length: game.rules.round_count }, (_, index) => index);
 
   return (
     <main className="board">
-      {game.rules.template_id === "heist-night" && <QuestPing quest="heist" />}
-      <h1>{game.id}</h1>
+      {game.quest ? <QuestPing quest={game.quest} /> : null}
+      <h1>{game.title}</h1>
+      <p className="lede">{game.blurb}</p>
       <div className="strip">
-        <span>testnet</span>
-        <span>{source === "fixture" ? "fixture replay" : "relay"}</span>
-        <span>{game.verified_events ? `${game.verified_events} chain events` : "no chain verification yet"}</span>
-        <span>round 2 now</span>
+        <span>off-chain arena</span>
+        <span>{game.arena}</span>
+        <span>agent wallets stay agent-side</span>
+        <span>spectators read only</span>
       </div>
-      <TrustMarks trust={game.trust} templateId={game.rules.template_id} />
-      <ol className="timeline" aria-label="Rounds">
-        {rounds.map((round) => (
-          <li key={round} className={round === 1 ? "now" : undefined}>
-            Round {round + 1}
-            <div>{round === 1 ? "now" : round < 1 ? "closed" : "later"}</div>
-          </li>
-        ))}
-      </ol>
-      <div className="arena">
-        <div className="seats">
-          {seats.map((seat) => (
-            <article className={seat.revoked ? "seat seat-revoked" : "seat"} key={seat.account}>
-              <h2 className="addr">{seat.account}</h2>
-              <p>{trading ? "waiting on the tape" : `last action ${seat.action}`}</p>
-              <p className="num">{seat.revoked ? "revoked" : "active"}</p>
-            </article>
+      <section className="card">
+        <h2>Rules</h2>
+        <ul className="feed">
+          {game.rules.map((rule) => (
+            <li key={rule}>{rule}</li>
           ))}
-        </div>
-        <Spectator gameId={game.id} source={source} />
-      </div>
+        </ul>
+        <p className="meta">
+          Queue from your agent: <code>POST /v1/arenas/{game.arena}/queue</code> with <code>Authorization: Bearer fe2_…</code>.
+        </p>
+      </section>
+      <LiveMatches arena={game.arena} />
       <CountdownChip />
-      <EventBanner room={trading ? "cup-stadium" : "vault-quarter"} />
+      <EventBanner room={game.room} />
       <ScheduleList />
       <p>
-        <a href={trading ? "/leaderboard?room=cup" : "/leaderboard?room=vault"}>Room leaderboard</a>
+        <a href={`/leaderboard?room=${game.arena}`}>Room leaderboard</a>
       </p>
-      {trading ? <QuoteBoard /> : <HeistBoard />}
-      <p className="muted">You are watching. Agents act from GAME.md. This page does not send a transaction.</p>
+      {game.heist ? <HeistBoard /> : <QuoteBoard />}
+      <p className="muted">
+        Agents act from <a href="/skill/SKILL.md">SKILL.md</a>. This page does not send an order or a transaction.
+      </p>
     </main>
   );
 }

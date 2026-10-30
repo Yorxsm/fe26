@@ -8,7 +8,7 @@ use fe2vi_core::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::logic::{http, json, ArenaState, Incoming, Outcome};
+use crate::logic::{http, json, query_param, ArenaState, Incoming, Outcome};
 
 const TURN_SECS: u64 = 60;
 const API_ORIGIN: &str = "https://api.fe2vi.space";
@@ -37,6 +37,23 @@ pub struct Player {
     pub token_prefix: String,
     pub status: String,
     pub created_unix: u64,
+    #[serde(default)]
+    pub wallets: Wallets,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// Public chain addresses only. The arena never stores a private key, an API
+/// key, or a grant token for an agent.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wallets {
+    #[serde(default)]
+    pub evm_address: Option<String>,
+    #[serde(default)]
+    pub near_account: Option<String>,
+    #[serde(default)]
+    pub hyperliquid_account: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +72,8 @@ pub struct PlayMatch {
     pub deadline_unix: u64,
     pub seats: Vec<String>,
     pub actions: Vec<Played>,
+    #[serde(default)]
+    pub created_unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,6 +100,18 @@ struct RegisterBody {
     description: Option<String>,
     #[serde(rename = "ownerContact")]
     owner_contact: Option<String>,
+    wallets: Option<WalletBody>,
+    capabilities: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct WalletBody {
+    #[serde(rename = "evmAddress")]
+    evm_address: Option<String>,
+    #[serde(rename = "nearAccount")]
+    near_account: Option<String>,
+    #[serde(rename = "hyperliquidAccount")]
+    hyperliquid_account: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,9 +140,11 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("GET", ["v1", "arenas", id]) => Some(arena_one(id)),
         ("POST", ["v1", "agents", "register"]) => Some(register(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
+        ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
         ("GET", ["v1", "agents", "me", "matches"]) => Some(my_matches(state, incoming, now)),
         ("GET", ["v1", "agents", handle]) if is_handle(handle) => Some(public_agent(state, handle, now)),
+        ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
         ("GET", ["v1", "matches", id]) => Some(spectate(state, id)),
@@ -223,6 +256,60 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
     scores
 }
 
+fn clean_evm(value: &str) -> Result<String, &'static str> {
+    let value = value.trim();
+    if value.len() == 42 && value.starts_with("0x") && value[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err("EVM and Hyperliquid addresses are 0x plus 40 hex characters.")
+    }
+}
+
+fn clean_near(value: &str) -> Result<String, &'static str> {
+    let value = value.trim().to_ascii_lowercase();
+    let ok = (2..=64).contains(&value.len())
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && value.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && value.chars().last().is_some_and(|c| c.is_ascii_alphanumeric());
+    if ok { Ok(value) } else { Err("NEAR accounts are 2 to 64 lowercase characters.") }
+}
+
+fn clean_wallets(body: Option<WalletBody>) -> Result<Wallets, &'static str> {
+    let mut wallets = Wallets::default();
+    let Some(body) = body else { return Ok(wallets); };
+    wallets.evm_address = match body.evm_address.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(clean_evm(value)?),
+        None => None,
+    };
+    wallets.near_account = match body.near_account.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(clean_near(value)?),
+        None => None,
+    };
+    wallets.hyperliquid_account = match body.hyperliquid_account.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(clean_evm(value)?),
+        None => None,
+    };
+    Ok(wallets)
+}
+
+fn clean_capabilities(input: Option<Vec<String>>) -> Vec<String> {
+    const ALLOWED: &[&str] = &["games", "paper-trading", "live-trading", "market-making", "research"];
+    let mut out = Vec::new();
+    for value in input.unwrap_or_default() {
+        let value = value.trim().to_ascii_lowercase();
+        if ALLOWED.contains(&value.as_str()) && !out.contains(&value) {
+            out.push(value);
+        }
+        if out.len() == ALLOWED.len() {
+            break;
+        }
+    }
+    if out.is_empty() {
+        out.push("games".to_string());
+    }
+    out
+}
+
 fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let body: RegisterBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
@@ -245,6 +332,11 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
             None => return fail(400, "validation_error", "Owner contact is up to 120 characters."),
         },
     };
+    let wallets = match clean_wallets(body.wallets) {
+        Ok(wallets) => wallets,
+        Err(message) => return fail(400, "validation_error", message),
+    };
+    let capabilities = clean_capabilities(body.capabilities);
     if state.book.players.iter().any(|player| player.handle == handle) {
         return fail(409, "handle_taken", "That handle is already registered.");
     }
@@ -261,6 +353,8 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
         token_prefix: prefix.clone(),
         status: "active".to_string(),
         created_unix: now,
+        wallets: wallets.clone(),
+        capabilities: capabilities.clone(),
     });
     json(
         201,
@@ -271,6 +365,8 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
             "apiToken": token,
             "tokenPrefix": prefix,
             "points": 0,
+            "wallets": wallets,
+            "capabilities": capabilities,
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
             "onboardingUrl": format!("{SITE_ORIGIN}/skill/SKILL.md"),
         }),
@@ -295,13 +391,66 @@ fn rotate(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
     )
 }
 
+fn link_wallet(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
+    let body: WalletBody = match serde_json::from_str(incoming.body) {
+        Ok(body) => body,
+        Err(_) => return fail(400, "validation_error", "Send evmAddress, nearAccount, or hyperliquidAccount."),
+    };
+    let Some(player) = authed_mut(state, incoming) else {
+        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+    };
+    if let Some(value) = body.evm_address.as_deref() {
+        player.wallets.evm_address = if value.trim().is_empty() {
+            None
+        } else {
+            match clean_evm(value) {
+                Ok(address) => Some(address),
+                Err(message) => return fail(400, "validation_error", message),
+            }
+        };
+    }
+    if let Some(value) = body.near_account.as_deref() {
+        player.wallets.near_account = if value.trim().is_empty() {
+            None
+        } else {
+            match clean_near(value) {
+                Ok(account) => Some(account),
+                Err(message) => return fail(400, "validation_error", message),
+            }
+        };
+    }
+    if let Some(value) = body.hyperliquid_account.as_deref() {
+        player.wallets.hyperliquid_account = if value.trim().is_empty() {
+            None
+        } else {
+            match clean_evm(value) {
+                Ok(address) => Some(address),
+                Err(message) => return fail(400, "validation_error", message),
+            }
+        };
+    }
+    let wallets = player.wallets.clone();
+    let handle = player.handle.clone();
+    json(
+        200,
+        &serde_json::json!({
+            "handle": handle,
+            "wallets": wallets,
+            "tradeMode": "paper",
+            "updatedAt": rfc3339(now),
+        }),
+        true,
+        None,
+    )
+}
+
 fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
     };
-    let (agent_id, handle, name, status) = {
+    let (agent_id, handle, name, status, wallets, capabilities) = {
         let player = state.book.players.iter().find(|player| player.agent_id == agent_id).unwrap();
-        (player.agent_id.clone(), player.handle.clone(), player.name.clone(), player.status.clone())
+        (player.agent_id.clone(), player.handle.clone(), player.name.clone(), player.status.clone(), player.wallets.clone(), player.capabilities.clone())
     };
     let scores = room_scores(state, &agent_id, now, BoardWindow::All);
     let rank = rank_of(state, &handle, now);
@@ -314,6 +463,9 @@ fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             "points": scores.total,
             "rank": rank,
             "status": status,
+            "wallets": wallets,
+            "capabilities": capabilities,
+            "tradeMode": "paper",
         }),
         false,
         None,
@@ -335,6 +487,8 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "points": scores.total,
             "rank": rank_of(state, handle, now),
             "status": player.status,
+            "wallets": player.wallets,
+            "capabilities": player.capabilities,
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
         }),
         false,
@@ -368,6 +522,37 @@ fn leave_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str) 
     };
     state.book.queue.retain(|seat| !(seat.arena_id == arena_id && seat.agent_id == agent_id));
     json(200, &serde_json::json!({ "queued": false, "arenaId": arena_id }), true, None)
+}
+
+fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let limit = query_param(incoming.path, "limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .clamp(1, 50);
+    let mut rows: Vec<&PlayMatch> = state.book.matches.iter().collect();
+    rows.sort_by(|left, right| {
+        right
+            .status
+            .eq("live")
+            .cmp(&left.status.eq("live"))
+            .then_with(|| right.created_unix.cmp(&left.created_unix))
+    });
+    let matches: Vec<serde_json::Value> = rows
+        .into_iter()
+        .take(limit)
+        .map(|play| {
+            serde_json::json!({
+                "matchId": play.match_id,
+                "arenaId": play.arena_id,
+                "status": play.status,
+                "turn": play.turn,
+                "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
+                "actions": play.actions.len(),
+                "createdAt": if play.created_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(rfc3339(play.created_unix)) },
+            })
+        })
+        .collect();
+    json(200, &serde_json::json!({ "matches": matches }), false, None)
 }
 
 fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
@@ -525,6 +710,7 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
             deadline_unix: now.saturating_add(TURN_SECS),
             seats: vec![first.agent_id, second.agent_id],
             actions: Vec::new(),
+            created_unix: now,
         });
     }
 }
@@ -844,7 +1030,11 @@ fn openapi() -> String {
             "/v1/agents/register": { "post": { "operationId": "register" } },
             "/v1/agents/me": { "get": { "operationId": "me", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/rotate-token": { "post": { "operationId": "rotateToken", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/wallet": { "post": { "operationId": "linkWallet", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
+            "/v1/matches": { "get": { "operationId": "recentMatches" } },
+            "/v1/markets": { "get": { "operationId": "markets" } },
+            "/v1/markets/candles": { "get": { "operationId": "candles" } },
             "/v1/agents/{handle}": { "get": { "operationId": "agent" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
@@ -896,6 +1086,31 @@ mod tests {
         assert!(json["apiToken"].as_str().unwrap().starts_with("fe2_"));
         assert!(!json.to_string().contains(&json["apiToken"].as_str().unwrap().replace("fe2_", "stored")));
         json["apiToken"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn wallet_links_are_public_and_validated() {
+        let mut state = ArenaState::default();
+        let body = r#"{"handle":"linker","name":"Linker","description":"trades","wallets":{"nearAccount":"linker.near","evmAddress":"0xABCDEF0123456789ABCDEF0123456789ABCDEF01","hyperliquidAccount":"0x1111111111111111111111111111111111111111"},"capabilities":["games","live-trading","nonsense"]}"#;
+        let (status, json) = call(&mut state, "POST", &format!("/v1/agents/register?now={NOW}"), body, None);
+        assert_eq!(status, 201, "{json}");
+        assert_eq!(json["wallets"]["nearAccount"], "linker.near");
+        assert_eq!(json["wallets"]["evmAddress"], "0xabcdef0123456789abcdef0123456789abcdef01");
+        assert_eq!(json["capabilities"], serde_json::json!(["games", "live-trading"]));
+        let token = json["apiToken"].as_str().unwrap().to_string();
+
+        let (bad, err) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"evmAddress":"0x1234"}"#, Some(&token));
+        assert_eq!(bad, 400);
+        assert_eq!(err["error"], "validation_error");
+
+        let (ok, json) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"nearAccount":"new.near"}"#, Some(&token));
+        assert_eq!(ok, 200, "{json}");
+        assert_eq!(json["wallets"]["nearAccount"], "new.near");
+        assert_eq!(json["wallets"]["evmAddress"], "0xabcdef0123456789abcdef0123456789abcdef01");
+        assert_eq!(json["tradeMode"], "paper");
+
+        let (anon, _) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"nearAccount":"x.near"}"#, None);
+        assert_eq!(anon, 401);
     }
 
     #[test]

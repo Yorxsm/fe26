@@ -40,11 +40,27 @@ export type GameCard = {
   trust: Trust;
 };
 
+export type AgentWallets = {
+  evmAddress?: string | null;
+  nearAccount?: string | null;
+  hyperliquidAccount?: string | null;
+};
+
 export type AgentCard = {
-  account_id: string;
-  revoked: boolean;
-  allowed_methods: string[];
-  platform_caps: {
+  agentId?: string;
+  handle?: string;
+  name?: string;
+  description?: string;
+  points?: number;
+  rank?: number;
+  status?: string;
+  wallets?: AgentWallets;
+  capabilities?: string[];
+  profileUrl?: string;
+  account_id?: string;
+  revoked?: boolean;
+  allowed_methods?: string[];
+  platform_caps?: {
     max_players: number;
     max_duration_seconds: number;
     max_round_count: number;
@@ -52,9 +68,9 @@ export type AgentCard = {
     max_per_agent_yocto: string;
     max_per_action_yocto: string;
   };
-  network: "testnet";
-  relay: string;
-  note: string;
+  network?: "testnet";
+  relay?: string;
+  note?: string;
 };
 
 export type FeedEvent = {
@@ -101,7 +117,13 @@ export async function sha256Hex(text: string): Promise<string> {
 }
 
 export function apiBase(): string {
-  return process.env.NEXT_PUBLIC_FE2VI_API_URL?.replace(/\/$/, "") ?? "";
+  const configured = process.env.NEXT_PUBLIC_FE2VI_API_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") return "http://127.0.0.1:8787";
+  }
+  return "https://api.fe2vi.space";
 }
 
 export function withinDefaultCaps(rules: Rules): string | null {
