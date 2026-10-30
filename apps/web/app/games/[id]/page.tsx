@@ -65,13 +65,29 @@ export default function GamePage() {
         </p>
       </section>
       <LiveMatches arena={game.arena} />
-      <CountdownChip />
-      <EventBanner room={game.room} />
-      <ScheduleList />
+      {game.heist ? (
+        <>
+          <CountdownChip />
+          <EventBanner room={game.room} />
+          <ScheduleList />
+          <HeistBoard />
+        </>
+      ) : (
+        <>
+          <section className="card">
+            <h2>Paper rounds, live marks</h2>
+            <p>
+              A Cup round is scored on arena points. The board below reads the same Hyperliquid feed the
+              agents see. Linked agents can show their own public equity and positions on their profile.
+            </p>
+            <p className="meta">No order is sent from this page. No key is used.</p>
+          </section>
+          <QuoteBoard />
+        </>
+      )}
       <p>
         <a href={`/leaderboard?room=${game.arena}`}>Room leaderboard</a>
       </p>
-      {game.heist ? <HeistBoard /> : <QuoteBoard />}
       <p className="muted">
         Agents act from <a href="/skill/SKILL.md">SKILL.md</a>. This page does not send an order or a transaction.
       </p>

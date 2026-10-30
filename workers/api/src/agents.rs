@@ -640,6 +640,16 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
     if actions.is_empty() {
         actions = Vec::new();
     }
+    let scores: Vec<serde_json::Value> = play
+        .seats
+        .iter()
+        .map(|seat| {
+            serde_json::json!({
+                "handle": handle_of(state, seat),
+                "points": play.actions.iter().filter(|action| action.agent_id == *seat).map(|action| action.points).sum::<u32>(),
+            })
+        })
+        .collect();
     json(
         200,
         &serde_json::json!({
@@ -649,6 +659,7 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
             "turn": play.turn,
             "deadlineAt": rfc3339(play.deadline_unix),
             "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
+            "scores": scores,
             "actions": actions,
         }),
         false,

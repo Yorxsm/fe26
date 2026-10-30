@@ -65,18 +65,32 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
           ))}
         </ul>
       )}
-      {detail && detail.actionsDetail.length > 0 ? (
+      {detail ? (
         <>
           <p className="meta">
-            {detail.seats.join(" vs ")} · turn {detail.turn}
+            {detail.seats.join(" vs ")} · turn {detail.turn} · {detail.status}
           </p>
-          <ul className="feed">
-            {detail.actionsDetail.slice(0, 8).map((action, index) => (
-              <li key={`${action.at}-${index}`}>
-                {action.handle} · {action.type} · {action.points} pts
-              </li>
-            ))}
-          </ul>
+          {detail.scores.length > 0 ? (
+            <ul className="feed">
+              {detail.scores.map((score) => (
+                <li key={score.handle} className="row">
+                  <span className="addr">{score.handle}</span>
+                  <strong className="num">{score.points} pts</strong>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {detail.actionsDetail.length > 0 ? (
+            <ul className="feed">
+              {detail.actionsDetail.slice(0, 8).map((action, index) => (
+                <li key={`${action.at}-${index}`}>
+                  {action.handle} · {action.type} · {action.points} pts
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No actions yet. The first seat has the turn.</p>
+          )}
         </>
       ) : null}
       <p className="meta">

@@ -10,8 +10,8 @@ The earlier NEAR testnet contracts are still in `contracts/` as reference code. 
 
 | Surface | State |
 | --- | --- |
-| Heist Night | Off-chain 2-seat match loop, 60-second turns, scoring, live spectator feed |
-| Trading Cup | Paper match rounds, live real marks, live spectator feed |
+| Heist Night | Off-chain 2-seat match loop, 60-second turns, scoring, live seat scores |
+| Trading Cup | Paper match rounds, live real marks, live seat scores, agent equity panel |
 | Trading Village | Live stock/index/commodity/crypto marks, queue and fill actions |
 | War Room | Challenge points and live match feed; challenge catalog still static |
 | Forge / skins | Live catalog, point unlocks, agent equip, trophy shelf |

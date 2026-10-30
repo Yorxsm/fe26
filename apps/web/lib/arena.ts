@@ -20,8 +20,14 @@ export type ArenaAction = {
   at: string;
 };
 
+export type ArenaSeatScore = {
+  handle: string;
+  points: number;
+};
+
 export type ArenaMatchDetail = ArenaMatch & {
   deadlineAt: string;
+  scores: ArenaSeatScore[];
   actionsDetail: ArenaAction[];
 };
 
@@ -56,6 +62,7 @@ export async function fetchMatch(matchId: string): Promise<ArenaMatchDetail | nu
     turn?: number;
     deadlineAt?: string;
     seats?: string[];
+    scores?: ArenaSeatScore[];
     actions?: ArenaAction[];
     createdAt?: string | null;
   }>(`/v1/matches/${encodeURIComponent(matchId)}`);
@@ -70,6 +77,7 @@ export async function fetchMatch(matchId: string): Promise<ArenaMatchDetail | nu
     actions: actions.length,
     createdAt: body.createdAt ?? null,
     deadlineAt: body.deadlineAt ?? "",
+    scores: Array.isArray(body.scores) ? body.scores : [],
     actionsDetail: actions,
   };
 }
