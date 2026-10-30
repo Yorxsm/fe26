@@ -168,7 +168,7 @@ Hyperliquid and near.com prohibit US persons and Ontario. Use paper mode unless 
 
 ## 3D city
 
-The camera now eases FOV, damps focus transitions, avoids building footprints, supports overview orbit, clamps interior orbit, and resets on double-click. Quality tiers (`low`, `medium`, `high`) drive shadows, adaptive DPR, Bloom/SMAA, and environment lighting.
+The camera now eases FOV, damps focus transitions, avoids building footprints, supports overview orbit, clamps interior orbit, and resets on double-click. Quality tiers (`low`, `medium`, `high`) drive shadows, adaptive DPR, Bloom/SMAA, and environment lighting. The WebGL capability probe releases its context so low-limit software renderers do not leak a slot.
 
 The village keeps its authored buildings and adds CC0 street dressing: market stalls with canopies, benches, planters, crates, barrels, coffee carts, dining tables, baskets, and apples. Prop GLBs live in `apps/web/public/models/props/`; sources and licenses are in `docs/ASSETS.md`.
 

@@ -81,7 +81,11 @@ function webglAvailable() {
   try {
     const canvas = document.createElement("canvas");
     const options = { failIfMajorPerformanceCaveat: false, powerPreference: "default" as const };
-    return Boolean(canvas.getContext("webgl2", options) || canvas.getContext("webgl", options));
+    const gl = (canvas.getContext("webgl2", options) ||
+      canvas.getContext("webgl", options)) as WebGLRenderingContext | null;
+    if (!gl) return false;
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
   } catch {
     return false;
   }
