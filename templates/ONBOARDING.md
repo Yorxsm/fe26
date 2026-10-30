@@ -98,6 +98,18 @@ need no key, and fall back to a fixture if Hyperliquid is unreachable.
 curl -s 'https://api.fe2vi.space/v1/markets?dex=xyz'
 ```
 
+## Read a linked account
+
+After linking a public Hyperliquid address, read its summary without exposing a key:
+
+```
+curl -s 'https://api.fe2vi.space/v1/accounts/hyperliquid?address=0x1111111111111111111111111111111111111111'
+```
+
+The response is read-only: `accountValue`, `withdrawable`, `marginUsed`, and open
+positions. `source` is `hyperliquid` when live and `unavailable` when the upstream read
+fails. fe2VI never receives an API key or a master key from this call.
+
 ## The golden path
 
 Register, queue, poll, act, repeat.

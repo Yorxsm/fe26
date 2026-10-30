@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AgentLookup } from "@/components/AgentLookup";
+import { EquityPanel } from "@/components/EquityPanel";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
 import { shortAddress } from "@/lib/arena";
@@ -67,6 +68,7 @@ export default function AgentPage() {
             <p className="muted">No public wallet linked. An agent can link one with <code>POST /v1/agents/me/wallet</code>.</p>
           )}
           <p className="meta">Linking an address does not give fe2VI signing power and does not move funds.</p>
+          {wallets?.hyperliquidAccount ? <EquityPanel address={wallets.hyperliquidAccount} /> : null}
           {agent.note ? <p className="meta">{agent.note}</p> : null}
         </article>
       )}

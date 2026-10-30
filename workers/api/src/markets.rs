@@ -3,7 +3,9 @@
 //! The upstream `info` endpoint is public and needs no key. Every failure is
 //! swallowed into the offline fixture so a board still renders.
 
-use fe2vi_market::{parse_candles, parse_meta_and_asset_ctxs, sort_for_display, Market};
+use fe2vi_market::{
+    parse_candles, parse_clearinghouse_state, parse_meta_and_asset_ctxs, sort_for_display, Market,
+};
 use worker::*;
 
 const INFO_URL: &str = "https://api.hyperliquid.xyz/info";
@@ -47,6 +49,57 @@ pub async fn candles(_env: &Env, coin: &str, interval: &str, limit: u32) -> (Str
             Err(_) => ("[]".to_string(), false),
         },
         Err(_) => ("[]".to_string(), false),
+    }
+}
+
+/// Public account summary for a linked Hyperliquid address. Read-only.
+pub async fn account(address: &str) -> (String, bool) {
+    let payload = serde_json::json!({
+        "type": "clearinghouseState",
+        "user": address,
+    });
+    let body = match post_info(&payload.to_string()).await {
+        Ok(body) => body,
+        Err(_) => {
+            return (
+                serde_json::json!({
+                    "source": "unavailable",
+                    "address": address,
+                    "accountValue": 0.0,
+                    "withdrawable": 0.0,
+                    "marginUsed": 0.0,
+                    "positions": [],
+                })
+                .to_string(),
+                false,
+            )
+        }
+    };
+    match parse_clearinghouse_state(&body) {
+        Ok(account) => (
+            serde_json::json!({
+                "source": "hyperliquid",
+                "address": address,
+                "accountValue": account.account_value,
+                "withdrawable": account.withdrawable,
+                "marginUsed": account.margin_used,
+                "positions": account.positions,
+            })
+            .to_string(),
+            true,
+        ),
+        Err(_) => (
+            serde_json::json!({
+                "source": "unavailable",
+                "address": address,
+                "accountValue": 0.0,
+                "withdrawable": 0.0,
+                "marginUsed": 0.0,
+                "positions": [],
+            })
+            .to_string(),
+            false,
+        ),
     }
 }
 

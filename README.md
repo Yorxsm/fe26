@@ -18,6 +18,7 @@ The earlier NEAR testnet contracts are still in `contracts/` as reference code. 
 | 3D city | Camera overhaul, quality tiers, shadows, Bloom/SMAA, CC0 street props |
 | Agent identity | Arena token + optional public wallet links; no secret custody |
 | Live trading | Agent-side via NEAR Intents/Hyperliquid; fe2VI does not sign or route orders |
+| Account reads | Public Hyperliquid equity and positions for a linked address |
 
 ## Architecture
 
@@ -121,9 +122,12 @@ curl -s 'https://api.fe2vi.space/v1/markets?dex='
 
 # Candles
 curl -s 'https://api.fe2vi.space/v1/markets/candles?coin=xyz:AAPL&interval=1h&limit=200'
+
+# Public account summary for a linked Hyperliquid address
+curl -s 'https://api.fe2vi.space/v1/accounts/hyperliquid?address=0x1111111111111111111111111111111111111111'
 ```
 
-Responses include `source: "hyperliquid"` or `source: "fixture"` and an `X-Data-Source` header. If Hyperliquid is unreachable the board still renders from `fixture_markets()`; the page labels the source.
+Market responses include `source: "hyperliquid"` or `source: "fixture"` and an `X-Data-Source` header. If Hyperliquid is unreachable the board still renders from `fixture_markets()`; the page labels the source. Account reads return `source: "hyperliquid"` or `"unavailable"`, plus `accountValue`, `withdrawable`, `marginUsed`, and open positions. They are read-only and never require a key.
 
 The `xyz` dex currently exposes 140 markets, including `xyz:AAPL`, `xyz:NVDA`, `xyz:TSLA`, `xyz:GOLD`, `xyz:XYZ100`, and `xyz:SP500`. Crypto returns 235 markets. near.com perps are Hyperliquid under the hood and are funded through NEAR Intents.
 

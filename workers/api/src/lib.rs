@@ -88,6 +88,30 @@ mod edge {
                             crate::markets::candles(&self.env, &coin, &interval, limit).await;
                         return data_response(body, live);
                     }
+                    if market_path == "/v1/accounts/hyperliquid"
+                        || market_path.ends_with("/v1/accounts/hyperliquid")
+                    {
+                        let mut address = String::new();
+                        for (key, value) in url.query_pairs() {
+                            if key == "address" {
+                                address = value.trim().to_ascii_lowercase();
+                            }
+                        }
+                        let valid = address.len() == 42
+                            && address.starts_with("0x")
+                            && address[2..].bytes().all(|byte| byte.is_ascii_hexdigit());
+                        if !valid {
+                            return with_cors(
+                                Response::ok(
+                                    r#"{"error":"validation_error","message":"Send address as 0x plus 40 hex characters."}"#,
+                                )?
+                                .with_status(400),
+                                "application/json",
+                            );
+                        }
+                        let (body, live) = crate::markets::account(&address).await;
+                        return account_response(body, live);
+                    }
                 }
             }
             // `Request::path` strips `?window=` and `?now=`. Put them back.
@@ -505,6 +529,18 @@ mod edge {
         response
             .headers_mut()
             .set("Cache-Control", "public, max-age=10")?;
+        with_cors(response, "application/json")
+    }
+
+    fn account_response(body: String, live: bool) -> Result<Response> {
+        let mut response = Response::ok(body)?;
+        response.headers_mut().set(
+            "X-Data-Source",
+            if live { "hyperliquid" } else { "unavailable" },
+        )?;
+        response
+            .headers_mut()
+            .set("Cache-Control", "public, max-age=5")?;
         with_cors(response, "application/json")
     }
 

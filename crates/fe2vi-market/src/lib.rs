@@ -47,6 +47,27 @@ pub struct Candle {
     pub volume: f64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Position {
+    pub coin: String,
+    pub size: f64,
+    pub entry_px: f64,
+    pub position_value: f64,
+    pub unrealized_pnl: f64,
+    pub leverage: f64,
+    pub leverage_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountState {
+    pub account_value: f64,
+    pub withdrawable: f64,
+    pub margin_used: f64,
+    pub positions: Vec<Position>,
+}
+
 #[derive(Debug, Error)]
 pub enum MarketError {
     #[error("invalid JSON: {0}")]
@@ -149,6 +170,57 @@ pub fn parse_candles(body: &str, _coin: &str) -> Result<Vec<Candle>, MarketError
     }
     candles.sort_by_key(|candle| candle.t);
     Ok(candles)
+}
+
+/// Parse a Hyperliquid `clearinghouseState` response into the public account
+/// summary. Only numbers and market names are kept; no key material is read.
+pub fn parse_clearinghouse_state(body: &str) -> Result<AccountState, MarketError> {
+    let payload: Value = serde_json::from_str(body)?;
+    let margin = payload
+        .get("marginSummary")
+        .ok_or(MarketError::Shape("missing marginSummary"))?;
+    let mut positions = Vec::new();
+    if let Some(rows) = payload.get("assetPositions").and_then(Value::as_array) {
+        for row in rows {
+            let Some(position) = row.get("position") else {
+                continue;
+            };
+            let Some(coin) = position.get("coin").and_then(Value::as_str) else {
+                continue;
+            };
+            let size = field_f64(position, "szi");
+            if coin.trim().is_empty() || size == 0.0 {
+                continue;
+            }
+            let leverage = position.get("leverage");
+            positions.push(Position {
+                coin: coin.to_string(),
+                size,
+                entry_px: field_f64(position, "entryPx"),
+                position_value: field_f64(position, "positionValue"),
+                unrealized_pnl: field_f64(position, "unrealizedPnl"),
+                leverage: leverage.map(|value| field_f64(value, "value")).unwrap_or(0.0),
+                leverage_type: leverage
+                    .and_then(|value| value.get("type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("cross")
+                    .to_string(),
+            });
+        }
+    }
+    positions.sort_by(|left, right| {
+        right
+            .position_value
+            .partial_cmp(&left.position_value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.coin.cmp(&right.coin))
+    });
+    Ok(AccountState {
+        account_value: field_f64(margin, "accountValue"),
+        withdrawable: field_f64(&payload, "withdrawable"),
+        margin_used: field_f64(margin, "totalMarginUsed"),
+        positions,
+    })
 }
 
 /// Classify a ticker into the quote board's display bucket.
@@ -578,6 +650,62 @@ mod tests {
         assert_eq!(candles[0].open, 100.0);
         assert_eq!(candles[0].close, 101.5);
         assert_eq!(candles[1].volume, 8.0);
+    }
+
+    #[test]
+    fn parses_clearinghouse_state_and_skips_flat_positions() {
+        let body = r#"{
+            "marginSummary": {
+                "accountValue": "12500.5",
+                "totalNtlPos": "8000",
+                "totalRawUsd": "4500.5",
+                "totalMarginUsed": "1200"
+            },
+            "crossMarginSummary": {
+                "accountValue": "12500.5",
+                "totalNtlPos": "8000",
+                "totalRawUsd": "4500.5",
+                "totalMarginUsed": "1200"
+            },
+            "withdrawable": "11000.25",
+            "assetPositions": [
+                {"type": "oneWay", "position": {
+                    "coin": "xyz:NVDA", "szi": "-12.5", "entryPx": "190.2",
+                    "positionValue": "2359.375", "unrealizedPnl": "18.125",
+                    "leverage": {"type": "cross", "value": 5}
+                }},
+                {"type": "oneWay", "position": {
+                    "coin": "BTC", "szi": "0", "entryPx": "0",
+                    "positionValue": "0", "unrealizedPnl": "0",
+                    "leverage": {"type": "isolated", "value": 10}
+                }},
+                {"type": "oneWay", "position": {
+                    "coin": "ETH", "szi": "2", "entryPx": "3800",
+                    "positionValue": "7800", "unrealizedPnl": "-40",
+                    "leverage": {"type": "isolated", "value": 3}
+                }}
+            ]
+        }"#;
+        let account = parse_clearinghouse_state(body).expect("parse account");
+        assert!((account.account_value - 12500.5).abs() < 1e-9);
+        assert!((account.withdrawable - 11000.25).abs() < 1e-9);
+        assert!((account.margin_used - 1200.0).abs() < 1e-9);
+        assert_eq!(account.positions.len(), 2);
+        assert_eq!(account.positions[0].coin, "ETH");
+        assert!((account.positions[0].size - 2.0).abs() < 1e-9);
+        assert_eq!(account.positions[0].leverage_type, "isolated");
+        assert_eq!(account.positions[1].coin, "xyz:NVDA");
+        assert!((account.positions[1].unrealized_pnl - 18.125).abs() < 1e-9);
+        assert!((account.positions[1].leverage - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn account_json_uses_camel_case() {
+        let body = r#"{"marginSummary":{"accountValue":"10","totalMarginUsed":"1"},"withdrawable":"9","assetPositions":[]}"#;
+        let value = serde_json::to_value(parse_clearinghouse_state(body).expect("parse")).expect("json");
+        assert!(value.get("accountValue").is_some());
+        assert!(value.get("marginUsed").is_some());
+        assert!(value.get("positions").is_some());
     }
 
     #[test]

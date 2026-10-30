@@ -1035,6 +1035,7 @@ fn openapi() -> String {
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
             "/v1/markets": { "get": { "operationId": "markets" } },
             "/v1/markets/candles": { "get": { "operationId": "candles" } },
+            "/v1/accounts/hyperliquid": { "get": { "operationId": "hyperliquidAccount" } },
             "/v1/agents/{handle}": { "get": { "operationId": "agent" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
