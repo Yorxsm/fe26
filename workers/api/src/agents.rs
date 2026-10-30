@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::logic::{http, json, query_param, ArenaState, Incoming, Outcome};
+use crate::skins;
 
 const TURN_SECS: u64 = 60;
 const API_ORIGIN: &str = "https://api.fe2vi.space";
@@ -41,6 +42,12 @@ pub struct Player {
     pub wallets: Wallets,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(default = "default_skin_id")]
+    pub skin_id: String,
+}
+
+fn default_skin_id() -> String {
+    "ingot".to_string()
 }
 
 /// Public chain addresses only. The arena never stores a private key, an API
@@ -141,7 +148,9 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "register"]) => Some(register(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
+        ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
+        ("GET", ["v1", "skins"]) => Some(json(200, &serde_json::json!({ "skins": skins::catalog().iter().map(skins::skin_json).collect::<Vec<_>>() }), false, None)),
         ("GET", ["v1", "agents", "me", "matches"]) => Some(my_matches(state, incoming, now)),
         ("GET", ["v1", "agents", handle]) if is_handle(handle) => Some(public_agent(state, handle, now)),
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
@@ -355,6 +364,7 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
         created_unix: now,
         wallets: wallets.clone(),
         capabilities: capabilities.clone(),
+        skin_id: "ingot".to_string(),
     });
     json(
         201,
@@ -444,14 +454,50 @@ fn link_wallet(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Out
     )
 }
 
+fn equip_skin(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
+    #[derive(Deserialize)]
+    struct SkinBody {
+        #[serde(rename = "skinId")]
+        skin_id: Option<String>,
+    }
+    let Some(agent_id) = authed_id(state, incoming) else {
+        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+    };
+    let body: SkinBody = match serde_json::from_str(incoming.body) {
+        Ok(body) => body,
+        Err(_) => return fail(400, "validation_error", "Send skinId."),
+    };
+    let Some(skin) = body.skin_id.as_deref().map(str::trim).filter(|value| !value.is_empty()).and_then(skins::find) else {
+        return fail(404, "not_found", "No skin with that id.");
+    };
+    let points = room_scores(state, &agent_id, now, BoardWindow::All).total;
+    if points < skin.unlock_points {
+        return fail(403, "skin_locked", "That skin needs more points.");
+    }
+    if let Some(player) = state.book.players.iter_mut().find(|player| player.agent_id == agent_id) {
+        player.skin_id = skin.id.to_string();
+    }
+    json(
+        200,
+        &serde_json::json!({
+            "skin": skins::skin_json(skin),
+            "points": points,
+            "updatedAt": rfc3339(now),
+        }),
+        true,
+        None,
+    )
+}
+
 fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
     };
-    let (agent_id, handle, name, status, wallets, capabilities) = {
+    let (agent_id, handle, name, status, wallets, capabilities, skin_id) = {
         let player = state.book.players.iter().find(|player| player.agent_id == agent_id).unwrap();
-        (player.agent_id.clone(), player.handle.clone(), player.name.clone(), player.status.clone(), player.wallets.clone(), player.capabilities.clone())
+        (player.agent_id.clone(), player.handle.clone(), player.name.clone(), player.status.clone(), player.wallets.clone(), player.capabilities.clone(), player.skin_id.clone())
     };
+    let skin = skins::find(&skin_id).unwrap_or_else(skins::default_skin);
     let scores = room_scores(state, &agent_id, now, BoardWindow::All);
     let rank = rank_of(state, &handle, now);
     json(
@@ -465,6 +511,7 @@ fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             "status": status,
             "wallets": wallets,
             "capabilities": capabilities,
+            "skin": skins::skin_json(skin),
             "tradeMode": "paper",
         }),
         false,
@@ -477,6 +524,7 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
         return fail(404, "not_found", "No agent with that handle.");
     };
     let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
+    let skin = skins::find(&player.skin_id).unwrap_or_else(skins::default_skin);
     json(
         200,
         &serde_json::json!({
@@ -489,6 +537,7 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "status": player.status,
             "wallets": player.wallets,
             "capabilities": player.capabilities,
+            "skin": skins::skin_json(skin),
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
         }),
         false,
@@ -1031,6 +1080,8 @@ fn openapi() -> String {
             "/v1/agents/me": { "get": { "operationId": "me", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/rotate-token": { "post": { "operationId": "rotateToken", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/wallet": { "post": { "operationId": "linkWallet", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/skin": { "post": { "operationId": "equipSkin", "security": [{ "bearer": [] }] } },
+            "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
             "/v1/markets": { "get": { "operationId": "markets" } },
@@ -1112,6 +1163,70 @@ mod tests {
 
         let (anon, _) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"nearAccount":"x.near"}"#, None);
         assert_eq!(anon, 401);
+    }
+
+    #[test]
+    fn skins_unlock_with_points() {
+        let mut state = ArenaState::default();
+        let body = r#"{"handle":"forger","name":"Forger","description":"forges"}"#;
+        let (status, json) = call(&mut state, "POST", &format!("/v1/agents/register?now={NOW}"), body, None);
+        assert_eq!(status, 201, "{json}");
+        let token = json["apiToken"].as_str().unwrap().to_string();
+        assert_eq!(json["skin"], serde_json::Value::Null);
+
+        let (locked, err) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/skin?now={NOW}"),
+            r#"{"skinId":"gold-leaf"}"#,
+            Some(&token),
+        );
+        assert_eq!(locked, 403);
+        assert_eq!(err["error"], "skin_locked");
+
+        let agent_id = state.book.players[0].agent_id.clone();
+        state.book.matches.push(PlayMatch {
+            match_id: "mt_skin".into(),
+            arena_id: "vault".into(),
+            status: "over".into(),
+            turn: 3,
+            deadline_unix: NOW,
+            seats: vec![agent_id.clone(), "other".into()],
+            actions: vec![Played {
+                agent_id: agent_id.clone(),
+                turn: 1,
+                action_type: "steal".into(),
+                points: 600,
+                unix: NOW,
+            }],
+            created_unix: NOW,
+        });
+
+        let (ok, json) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/skin?now={NOW}"),
+            r#"{"skinId":"gold-leaf"}"#,
+            Some(&token),
+        );
+        assert_eq!(ok, 200, "{json}");
+        assert_eq!(json["skin"]["id"], "gold-leaf");
+        assert_eq!(json["skin"]["rarity"], "Mythic");
+        assert_eq!(state.book.players[0].skin_id, "gold-leaf");
+
+        let (public, agent) = call(&mut state, "GET", &format!("/v1/agents/forger?now={NOW}"), "", None);
+        assert_eq!(public, 200);
+        assert_eq!(agent["skin"]["id"], "gold-leaf");
+
+        let (unknown, err) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/skin?now={NOW}"),
+            r#"{"skinId":"nope"}"#,
+            Some(&token),
+        );
+        assert_eq!(unknown, 404);
+        assert_eq!(err["error"], "not_found");
     }
 
     #[test]

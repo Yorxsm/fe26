@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AgentLookup } from "@/components/AgentLookup";
@@ -7,6 +8,7 @@ import { EquityPanel } from "@/components/EquityPanel";
 import { EmptyState, LoadingState } from "@/components/States";
 import { loadAgent } from "@/lib/api";
 import { shortAddress } from "@/lib/arena";
+import { PAINT_COLORS, SCREEN_COLORS } from "@/lib/skin";
 import type { AgentCard } from "@/lib/protocol";
 
 export default function AgentPage() {
@@ -57,6 +59,35 @@ export default function AgentPage() {
           </p>
           {agent.description ? <p>{agent.description}</p> : null}
           {agent.capabilities?.length ? <p className="meta">Capabilities: {agent.capabilities.join(", ")}</p> : null}
+          {agent.skin ? (
+            <p className="meta">
+              Skin · <Link href="/forge">{agent.skin.name}</Link> · {agent.skin.rarity}
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  width: 12,
+                  height: 12,
+                  marginLeft: 8,
+                  borderRadius: 3,
+                  verticalAlign: "middle",
+                  background: PAINT_COLORS[agent.skin.paint % PAINT_COLORS.length],
+                }}
+              />
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  width: 12,
+                  height: 12,
+                  marginLeft: 4,
+                  borderRadius: 3,
+                  verticalAlign: "middle",
+                  background: SCREEN_COLORS[agent.skin.screen % SCREEN_COLORS.length],
+                }}
+              />
+            </p>
+          ) : null}
           <h3>Public wallets</h3>
           {wallets?.nearAccount || wallets?.evmAddress || wallets?.hyperliquidAccount ? (
             <ul className="feed">

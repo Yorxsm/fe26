@@ -3,6 +3,7 @@ mod indexer;
 mod logic;
 #[cfg(target_arch = "wasm32")]
 mod markets;
+mod skins;
 mod surface;
 
 pub use indexer::{apply_chain_events, refuse_mainnet};
@@ -319,7 +320,7 @@ mod edge {
 
     fn ensure_player_sql(sql: &worker::SqlStorage) -> Result<()> {
         for statement in [
-            "CREATE TABLE IF NOT EXISTS players (agent_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, owner_contact TEXT, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, wallets_json TEXT NOT NULL DEFAULT '{}', capabilities_json TEXT NOT NULL DEFAULT '[]')",
+            "CREATE TABLE IF NOT EXISTS players (agent_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, owner_contact TEXT, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, wallets_json TEXT NOT NULL DEFAULT '{}', capabilities_json TEXT NOT NULL DEFAULT '[]', skin_id TEXT NOT NULL DEFAULT 'ingot')",
             "CREATE TABLE IF NOT EXISTS player_queue (arena_id TEXT NOT NULL, agent_id TEXT NOT NULL, queued_unix INTEGER NOT NULL, PRIMARY KEY (arena_id, agent_id))",
             "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_unix INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (agent_id, client_request_id))",
@@ -329,6 +330,7 @@ mod edge {
         for statement in [
             "ALTER TABLE players ADD COLUMN wallets_json TEXT NOT NULL DEFAULT '{}'",
             "ALTER TABLE players ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE players ADD COLUMN skin_id TEXT NOT NULL DEFAULT 'ingot'",
             "ALTER TABLE player_matches ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
@@ -356,6 +358,7 @@ mod edge {
             created_unix: i64,
             wallets_json: String,
             capabilities_json: String,
+            skin_id: String,
         }
         #[derive(serde::Deserialize)]
         struct QueueRow { arena_id: String, agent_id: String, queued_unix: i64 }
@@ -372,7 +375,7 @@ mod edge {
         }
         #[derive(serde::Deserialize)]
         struct SeenRow { agent_id: String, client_request_id: String, status: i64, body: String }
-        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
+        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let queue = sql.exec("SELECT arena_id, agent_id, queued_unix FROM player_queue", None::<Vec<worker::SqlStorageValue>>)?.to_array::<QueueRow>()?;
         let matches = sql.exec("SELECT match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix FROM player_matches", None::<Vec<worker::SqlStorageValue>>)?.to_array::<MatchRow>()?;
         let seen = sql.exec("SELECT agent_id, client_request_id, status, body FROM player_seen", None::<Vec<worker::SqlStorageValue>>)?.to_array::<SeenRow>()?;
@@ -389,6 +392,7 @@ mod edge {
                 created_unix: row.created_unix as u64,
                 wallets: serde_json::from_str(&row.wallets_json).unwrap_or_default(),
                 capabilities: serde_json::from_str(&row.capabilities_json).unwrap_or_default(),
+                skin_id: row.skin_id,
             }).collect(),
             queue: queue.into_iter().map(|row| crate::agents::Queued {
                 arena_id: row.arena_id,
@@ -420,7 +424,7 @@ mod edge {
         }
         for player in &book.players {
             sql.exec(
-                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 Some(vec![
                     player.agent_id.clone().into(),
                     player.handle.clone().into(),
@@ -433,6 +437,7 @@ mod edge {
                     (player.created_unix as i64).into(),
                     serde_json::to_string(&player.wallets).unwrap_or_else(|_| "{}".into()).into(),
                     serde_json::to_string(&player.capabilities).unwrap_or_else(|_| "[]".into()).into(),
+                    player.skin_id.clone().into(),
                 ]),
             )?;
         }

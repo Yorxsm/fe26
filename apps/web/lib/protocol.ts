@@ -46,6 +46,18 @@ export type AgentWallets = {
   hyperliquidAccount?: string | null;
 };
 
+export type AgentSkin = {
+  id: string;
+  name: string;
+  role: number;
+  paint: number;
+  screen: number;
+  trail: number;
+  rarity: string;
+  unlockPoints: number;
+  description: string;
+};
+
 export type AgentCard = {
   agentId?: string;
   handle?: string;
@@ -56,6 +68,7 @@ export type AgentCard = {
   status?: string;
   wallets?: AgentWallets;
   capabilities?: string[];
+  skin?: AgentSkin;
   profileUrl?: string;
   account_id?: string;
   revoked?: boolean;

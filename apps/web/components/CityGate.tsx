@@ -111,6 +111,7 @@ const ROOM_SLUG: Record<string, string> = {
 
 const HUD_LINKS = [
   ["/village", "Village", Home],
+  ["/forge", "Forge", DoorOpen],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents/demo.registry.testnet", "Agents", Users],
 ] as const;
