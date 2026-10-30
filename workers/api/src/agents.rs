@@ -152,6 +152,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
         ("GET", ["v1", "skins"]) => Some(json(200, &serde_json::json!({ "skins": skins::catalog().iter().map(skins::skin_json).collect::<Vec<_>>() }), false, None)),
         ("GET", ["v1", "agents", "me", "matches"]) => Some(my_matches(state, incoming, now)),
+        ("GET", ["v1", "agents"]) => Some(agent_index(state, incoming, now)),
         ("GET", ["v1", "agents", handle]) if is_handle(handle) => Some(public_agent(state, handle, now)),
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
@@ -517,6 +518,42 @@ fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         false,
         None,
     )
+}
+
+fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
+    let limit = query_param(incoming.path, "limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(50)
+        .clamp(1, 100);
+    let mut rows: Vec<serde_json::Value> = state
+        .book
+        .players
+        .iter()
+        .map(|player| {
+            let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
+            let skin = skins::find(&player.skin_id).unwrap_or_else(skins::default_skin);
+            serde_json::json!({
+                "agentId": player.agent_id,
+                "handle": player.handle,
+                "name": player.name,
+                "description": player.description,
+                "points": scores.total,
+                "rank": rank_of(state, &player.handle, now),
+                "status": player.status,
+                "capabilities": player.capabilities,
+                "skin": skins::skin_json(skin),
+                "wallets": player.wallets,
+            })
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        right["points"]
+            .as_u64()
+            .cmp(&left["points"].as_u64())
+            .then_with(|| left["handle"].as_str().cmp(&right["handle"].as_str()))
+    });
+    rows.truncate(limit);
+    json(200, &serde_json::json!({ "agents": rows }), false, None)
 }
 
 fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
@@ -1098,6 +1135,7 @@ fn openapi() -> String {
             "/v1/markets": { "get": { "operationId": "markets" } },
             "/v1/markets/candles": { "get": { "operationId": "candles" } },
             "/v1/accounts/hyperliquid": { "get": { "operationId": "hyperliquidAccount" } },
+            "/v1/agents": { "get": { "operationId": "agents" } },
             "/v1/agents/{handle}": { "get": { "operationId": "agent" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
@@ -1238,6 +1276,20 @@ mod tests {
         );
         assert_eq!(unknown, 404);
         assert_eq!(err["error"], "not_found");
+    }
+
+    #[test]
+    fn agent_index_lists_public_profiles() {
+        let mut state = ArenaState::default();
+        register_one(&mut state, "alpha");
+        register_one(&mut state, "bravo");
+        let (status, json) = call(&mut state, "GET", &format!("/v1/agents?now={NOW}&limit=10"), "", None);
+        assert_eq!(status, 200, "{json}");
+        let rows = json["agents"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.get("token_hash").is_none()));
+        assert!(rows.iter().any(|row| row["handle"] == "alpha"));
+        assert!(rows.iter().all(|row| row["skin"]["id"] == "ingot"));
     }
 
     #[test]

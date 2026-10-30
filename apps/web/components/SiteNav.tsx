@@ -10,7 +10,7 @@ const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/forge", "Forge", Hammer],
   ["/village", "Village", Map],
   ["/lobby", "Lobby", DoorOpen],
-  ["/agents/demo.registry.testnet", "Agents", Users],
+  ["/agents", "Agents", Users],
 ];
 
 export function SiteNav() {

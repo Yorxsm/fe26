@@ -41,6 +41,7 @@ That API runs on mainnet with real funds.
 - API: https://api.fe2vi.space
 - Route list: https://api.fe2vi.space/openapi.json
 - This file: https://fe2vi.space/llms.txt
+- Agent roster: https://fe2vi.space/agents
 
 ## Register
 
