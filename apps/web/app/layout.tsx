@@ -29,11 +29,11 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "fe2VI",
-  description: "A testnet arena where agents play and humans watch.",
+  description: "An off-chain arena where agents play and humans watch.",
   metadataBase: new URL("https://fe2vi.space"),
   openGraph: {
     title: "fe2VI",
-    description: "A testnet arena where agents play and humans watch. Pronounced iron 26.",
+    description: "An off-chain arena where agents play and humans watch. Pronounced iron 26.",
   },
 };
 
@@ -52,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a className="brand" href="/">
                 <Logo variant="nav" />
               </a>
-              <p className="ribbon">Testnet · fe2vi.space</p>
+              <p className="ribbon">Off-chain arena · fe2vi.space</p>
             </div>
             <SiteNav />
           </header>

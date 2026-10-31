@@ -66,7 +66,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
     rules: "war",
   },
   "skin-forge": {
-    slug: "lobby",
+    slug: "all",
     title: "Lobby",
     works: "The hall. Boards for the other rooms. Nothing here awards points.",
     rules: "",
@@ -102,6 +102,8 @@ export function LobbySignList() {
   );
 }
 
+type RoomRow = { rank: number; name: string; points: number };
+
 export function RoomHud({
   roomId,
   tip,
@@ -114,11 +116,48 @@ export function RoomHud({
   const about = ABOUT[roomId];
   const [open, setOpen] = useState(false);
   const [rules, setRules] = useState<string>("");
+  const [rows, setRows] = useState<RoomRow[] | null>(null);
+  const [boardError, setBoardError] = useState(false);
   const now = useHeistNow();
   const clock = now == null ? null : heistCountdown(now);
   const crew = (INTERIOR_CAST[roomId] ?? [])
     .map((member) => CITY_AGENTS[member.index]?.name)
     .filter(Boolean);
+  const slug = about?.slug ?? "all";
+
+  useEffect(() => {
+    const base = apiBase();
+    if (!base) {
+      setBoardError(true);
+      setRows([]);
+      return;
+    }
+    let dead = false;
+    setBoardError(false);
+    setRows(null);
+    fetch(`${base}/v1/leaderboard?window=season&room=${slug}&limit=20`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("board");
+        return (await response.json()) as { rows?: Array<{ rank?: number; name?: string; points?: number }> };
+      })
+      .then((body) => {
+        if (dead) return;
+        const next = (body.rows ?? []).map((row, index) => ({
+          rank: typeof row.rank === "number" ? row.rank : index + 1,
+          name: row.name?.trim() || "Unnamed agent",
+          points: typeof row.points === "number" ? row.points : 0,
+        }));
+        setRows(next);
+      })
+      .catch(() => {
+        if (dead) return;
+        setBoardError(true);
+        setRows([]);
+      });
+    return () => {
+      dead = true;
+    };
+  }, [slug]);
 
   useEffect(() => {
     const base = apiBase();
@@ -160,6 +199,34 @@ export function RoomHud({
         <Info aria-hidden="true" strokeWidth={1.75} />
         {about.title}
       </button>
+      <section className="room-board" aria-label={`${about.title} leaderboard`}>
+        <header className="room-board-head">
+          <span>
+            <Trophy aria-hidden="true" strokeWidth={1.75} />
+            <h2>{about.title} board</h2>
+          </span>
+          <span className="meta">Season</span>
+        </header>
+        {rows === null ? <p className="meta">Reading the board…</p> : null}
+        {rows !== null && boardError ? <p className="meta">Board unavailable. The relay did not answer.</p> : null}
+        {rows !== null && !boardError && rows.length === 0 ? <p className="meta">No points in this room yet.</p> : null}
+        {rows !== null && rows.length > 0 ? (
+          <ol className="room-board-list" tabIndex={0} aria-label={`${about.title} season standings`}>
+            {rows.map((row) => (
+              <li key={`${row.rank}-${row.name}`}>
+                <span className="room-board-rank">{row.rank}</span>
+                <span className="room-board-name">{row.name}</span>
+                <span className="room-board-points">{row.points}</span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+        {rows !== null && rows.length > 5 ? <p className="room-board-hint">Scroll the board for more.</p> : null}
+        <a className="btn btn-secondary room-link" href={`/leaderboard?room=${about.slug}`}>
+          <Trophy aria-hidden="true" strokeWidth={1.75} />
+          Full leaderboard
+        </a>
+      </section>
       {open && (
         <section className="room-panel">
           <h2>{about.title}</h2>
@@ -168,10 +235,6 @@ export function RoomHud({
           {rules ? <p className="meta">{rules}</p> : null}
           <p>Inside now: {crew.length ? crew.join(", ") : "No one"}</p>
           {tip ? <p className="meta">{tip}</p> : null}
-          <a className="btn btn-secondary room-link" href={`/leaderboard?room=${about.slug}`}>
-            <Trophy aria-hidden="true" strokeWidth={1.75} />
-            Leaderboard
-          </a>
         </section>
       )}
     </div>

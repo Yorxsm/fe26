@@ -12,10 +12,6 @@
     "deploy": "node scripts/preview-routes.mjs && opennextjs-cloudflare deploy"
   },
   "dependencies": {
-    "@near-js/transactions": "^2.5.1",
-    "@near-wallet-selector/core": "^10.1.4",
-    "@near-wallet-selector/modal-ui": "^10.1.4",
-    "@near-wallet-selector/my-near-wallet": "^10.1.4",
     "@opennextjs/cloudflare": "^1.6.5",
     "@react-three/drei": "^10.0.6",
     "@react-three/fiber": "^9.1.2",

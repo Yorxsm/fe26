@@ -77,7 +77,7 @@ pub fn demo_tape_at(now: u64) -> Vec<Fill> {
     vec![
         fill_at(
             now,
-            "mason.village.fe2vi.testnet",
+            "mason.village.fe2vi.near",
             "Mason",
             Side::Long,
             4,
@@ -85,7 +85,7 @@ pub fn demo_tape_at(now: u64) -> Vec<Fill> {
         ),
         fill_at(
             now,
-            "scout.vault.fe2vi.testnet",
+            "scout.vault.fe2vi.near",
             "Scout",
             Side::Short,
             2,
@@ -93,7 +93,7 @@ pub fn demo_tape_at(now: u64) -> Vec<Fill> {
         ),
         fill_at(
             now,
-            "tape.cup.fe2vi.testnet",
+            "tape.cup.fe2vi.near",
             "Tape",
             Side::Long,
             3,
@@ -101,7 +101,7 @@ pub fn demo_tape_at(now: u64) -> Vec<Fill> {
         ),
         fill_at(
             now,
-            "pike.war.fe2vi.testnet",
+            "pike.war.fe2vi.near",
             "Pike",
             Side::Short,
             1,
@@ -222,7 +222,7 @@ pub fn districts() -> &'static [District] {
         District {
             id: "war-room",
             name: "War Room",
-            summary: "A testnet challenge contract. The first valid claim takes the bounty.",
+            summary: "An arena challenge. The first valid claim takes the bounty.",
             status: "live",
             href: "/war-room",
             model: "building-c.glb",
@@ -263,28 +263,28 @@ mod tests {
         assert_eq!(
             follow(
                 &mut book,
-                "mason.village.fe2vi.testnet",
-                "mason.village.fe2vi.testnet"
+                "mason.village.fe2vi.near",
+                "mason.village.fe2vi.near"
             ),
             Err("an agent cannot follow itself")
         );
         follow(
             &mut book,
-            "mason.village.fe2vi.testnet",
-            "scout.vault.fe2vi.testnet",
+            "mason.village.fe2vi.near",
+            "scout.vault.fe2vi.near",
         )
         .unwrap();
         follow(
             &mut book,
-            "mason.village.fe2vi.testnet",
-            "scout.vault.fe2vi.testnet",
+            "mason.village.fe2vi.near",
+            "scout.vault.fe2vi.near",
         )
         .unwrap();
         assert_eq!(book.len(), 1);
         unfollow(
             &mut book,
-            "mason.village.fe2vi.testnet",
-            "scout.vault.fe2vi.testnet",
+            "mason.village.fe2vi.near",
+            "scout.vault.fe2vi.near",
         );
         assert!(book.is_empty());
     }
@@ -293,7 +293,9 @@ mod tests {
     fn five_districts_and_no_brand_names() {
         let names: Vec<&str> = districts().iter().map(|d| d.name).collect();
         assert_eq!(names.len(), 5);
-        assert!(names.iter().all(|name| !name.to_ascii_lowercase().contains("coming")));
+        assert!(names
+            .iter()
+            .all(|name| !name.to_ascii_lowercase().contains("coming")));
         let banned = ["fomo", "pump", "polymarket", "ethglobal"];
         for district in districts() {
             let blob = format!("{} {}", district.name, district.summary).to_ascii_lowercase();

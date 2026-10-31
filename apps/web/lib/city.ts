@@ -329,16 +329,16 @@ export type CityAgent = {
 };
 
 export const CITY_AGENTS: CityAgent[] = [
-  "mason.village.fe2vi.testnet",
-  "scout.vault.fe2vi.testnet",
-  "tape.cup.fe2vi.testnet",
-  "pike.war.fe2vi.testnet",
-  "quill.forge.fe2vi.testnet",
-  "nori.market.fe2vi.testnet",
-  "brim.stadium.fe2vi.testnet",
-  "kiln.forge.fe2vi.testnet",
-  "wren.scout.fe2vi.testnet",
-  "soot.vault.fe2vi.testnet",
+  "mason.village.fe2vi.near",
+  "scout.vault.fe2vi.near",
+  "tape.cup.fe2vi.near",
+  "pike.war.fe2vi.near",
+  "quill.forge.fe2vi.near",
+  "nori.market.fe2vi.near",
+  "brim.stadium.fe2vi.near",
+  "kiln.forge.fe2vi.near",
+  "wren.scout.fe2vi.near",
+  "soot.vault.fe2vi.near",
 ].map((accountId) => ({
   accountId,
   name: displayName(accountId),

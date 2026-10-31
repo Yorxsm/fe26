@@ -15,9 +15,6 @@ const nextConfig: NextConfig = {
     ];
   },
   transpilePackages: [
-    "@near-wallet-selector/core",
-    "@near-wallet-selector/modal-ui",
-    "@near-wallet-selector/my-near-wallet",
     "three",
     "@react-three/fiber",
     "@react-three/drei",

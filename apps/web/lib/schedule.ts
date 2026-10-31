@@ -110,16 +110,16 @@ export function eventStatusLabel(phase: EventPhase) {
  * The live chip and the map both use this cast: ten agents, not the six score-tape ids.
  */
 export const FIXTURE_AGENTS = [
-  "mason.village.fe2vi.testnet",
-  "scout.vault.fe2vi.testnet",
-  "tape.cup.fe2vi.testnet",
-  "pike.war.fe2vi.testnet",
-  "quill.forge.fe2vi.testnet",
-  "nori.market.fe2vi.testnet",
-  "brim.stadium.fe2vi.testnet",
-  "kiln.forge.fe2vi.testnet",
-  "wren.scout.fe2vi.testnet",
-  "soot.vault.fe2vi.testnet",
+  "mason.village.fe2vi.near",
+  "scout.vault.fe2vi.near",
+  "tape.cup.fe2vi.near",
+  "pike.war.fe2vi.near",
+  "quill.forge.fe2vi.near",
+  "nori.market.fe2vi.near",
+  "brim.stadium.fe2vi.near",
+  "kiln.forge.fe2vi.near",
+  "wren.scout.fe2vi.near",
+  "soot.vault.fe2vi.near",
 ];
 
 export function formatClock(secs: number) {

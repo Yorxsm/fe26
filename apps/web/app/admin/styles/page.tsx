@@ -130,7 +130,7 @@ export default function StyleguidePage() {
         <Panel title="Panel">
           <p>Flat plate, one-pixel neutral border, 8px radius. Selected state is a fill change.</p>
           <div className="row">
-            <Tag>testnet</Tag>
+            <Tag>off-chain</Tag>
             <Tag tone="live">live</Tag>
             <Tag tone="hot">breach</Tag>
           </div>

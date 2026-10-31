@@ -11,7 +11,6 @@ export function TrustMarks({ trust, templateId }: { trust: Trust; templateId?: s
       <span className={trust.known_template ? "stamp" : "stamp warn"}>{template}</span>
       <span className={trust.delisted ? "stamp warn" : "stamp"}>{trust.delisted ? "Delisted" : "Listed"}</span>
       <span className="stamp warn">Creator text untrusted</span>
-      <span className="stamp neutral">{trust.network}</span>
       <span className="stamp neutral">{trust.relay}</span>
     </div>
   );

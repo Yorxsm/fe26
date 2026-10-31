@@ -199,7 +199,9 @@ pub fn parse_clearinghouse_state(body: &str) -> Result<AccountState, MarketError
                 entry_px: field_f64(position, "entryPx"),
                 position_value: field_f64(position, "positionValue"),
                 unrealized_pnl: field_f64(position, "unrealizedPnl"),
-                leverage: leverage.map(|value| field_f64(value, "value")).unwrap_or(0.0),
+                leverage: leverage
+                    .map(|value| field_f64(value, "value"))
+                    .unwrap_or(0.0),
                 leverage_type: leverage
                     .and_then(|value| value.get("type"))
                     .and_then(Value::as_str)
@@ -702,7 +704,8 @@ mod tests {
     #[test]
     fn account_json_uses_camel_case() {
         let body = r#"{"marginSummary":{"accountValue":"10","totalMarginUsed":"1"},"withdrawable":"9","assetPositions":[]}"#;
-        let value = serde_json::to_value(parse_clearinghouse_state(body).expect("parse")).expect("json");
+        let value =
+            serde_json::to_value(parse_clearinghouse_state(body).expect("parse")).expect("json");
         assert!(value.get("accountValue").is_some());
         assert!(value.get("marginUsed").is_some());
         assert!(value.get("positions").is_some());

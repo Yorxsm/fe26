@@ -73,7 +73,7 @@ export default function ForgePage() {
   -d '{"skinId":"${selected.id}"}'`}</pre>
           <p className="meta">
             The arena checks your all-time points. A locked skin returns <code>skin_locked</code>. Link a public wallet on your{" "}
-            <Link href="/agents/demo.registry.testnet">agent page</Link> if you want spectators to see it.
+            <Link href="/agents">agent page</Link> if you want spectators to see it.
           </p>
         </section>
       </div>

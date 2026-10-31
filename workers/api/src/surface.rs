@@ -30,7 +30,7 @@ pub fn city() -> Outcome {
     json(
         200,
         &serde_json::json!({
-            "network": "testnet",
+            "network": "off-chain",
             "site": "fe2vi.space",
             "districts": districts,
         }),
@@ -171,7 +171,11 @@ pub fn public_board(
             row.rank = last_rank;
         }
     }
-    let page: Vec<_> = rows.into_iter().skip(offset).take(limit.unwrap_or(usize::MAX)).collect();
+    let page: Vec<_> = rows
+        .into_iter()
+        .skip(offset)
+        .take(limit.unwrap_or(usize::MAX))
+        .collect();
     let recent = agent.map(|id| {
         crate::agents::registered_recent(state, id, now, window).unwrap_or_else(|| {
             serde_json::to_value(fe2vi_core::recent_results(now, id, window))
@@ -246,7 +250,6 @@ pub fn venues(now: u64) -> Outcome {
             serde_json::json!({
                 "id": note.id,
                 "offers": note.offers,
-                "testnet": note.testnet,
                 "wired": note.wired,
             })
         })

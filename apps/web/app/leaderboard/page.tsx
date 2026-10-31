@@ -61,7 +61,7 @@ function Board() {
     <main className="board leaderboard-page">
       <h1>Leaderboard</h1>
       <p className="lede">Points across the rooms. No sign-in. No money.</p>
-      <p className="meta">{source === "relay" ? "Testnet preview, simulated matches." : source === "fixture" ? "Fixture. The API did not answer." : "Reading the board."}</p>
+      <p className="meta">{source === "relay" ? "Live arena points, simulated matches." : source === "fixture" ? "Fixture. The API did not answer." : "Reading the board."}</p>
       <div className="lobby-tabs" role="tablist" aria-label="Window">
         {WINDOWS.map((id) => (
           <button key={id} type="button" role="tab" aria-selected={windowName === id} onClick={() => setWindowName(id)}>

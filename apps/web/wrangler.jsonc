@@ -15,7 +15,7 @@
     { "pattern": "www.fe2vi.space", "custom_domain": true }
   ],
   "vars": {
-    "FE2VI_NETWORK": "testnet",
+    "FE2VI_NETWORK": "arena",
     "NEXT_PUBLIC_FE2VI_API_URL": "https://api.fe2vi.space"
   }
 }

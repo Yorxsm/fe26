@@ -150,10 +150,17 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
-        ("GET", ["v1", "skins"]) => Some(json(200, &serde_json::json!({ "skins": skins::catalog().iter().map(skins::skin_json).collect::<Vec<_>>() }), false, None)),
+        ("GET", ["v1", "skins"]) => Some(json(
+            200,
+            &serde_json::json!({ "skins": skins::catalog().iter().map(skins::skin_json).collect::<Vec<_>>() }),
+            false,
+            None,
+        )),
         ("GET", ["v1", "agents", "me", "matches"]) => Some(my_matches(state, incoming, now)),
         ("GET", ["v1", "agents"]) => Some(agent_index(state, incoming, now)),
-        ("GET", ["v1", "agents", handle]) if is_handle(handle) => Some(public_agent(state, handle, now)),
+        ("GET", ["v1", "agents", handle]) if is_handle(handle) => {
+            Some(public_agent(state, handle, now))
+        }
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
@@ -169,7 +176,14 @@ fn remember(outcome: Outcome, changed: bool) -> Outcome {
         return outcome;
     }
     match outcome {
-        Outcome::Http { status, content_type, body, fanout, location, .. } => Outcome::Http {
+        Outcome::Http {
+            status,
+            content_type,
+            body,
+            fanout,
+            location,
+            ..
+        } => Outcome::Http {
             status,
             content_type,
             body,
@@ -185,7 +199,12 @@ pub fn onboarding_text() -> &'static str {
     include_str!("../../../templates/ONBOARDING.md")
 }
 
-pub fn registered_rows(state: &ArenaState, now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicRow> {
+pub fn registered_rows(
+    state: &ArenaState,
+    now: u64,
+    window: BoardWindow,
+    room: Option<PointRoom>,
+) -> Vec<PublicRow> {
     state
         .book
         .players
@@ -215,8 +234,17 @@ pub fn registered_rows(state: &ArenaState, now: u64, window: BoardWindow, room: 
         .collect()
 }
 
-pub fn registered_recent(state: &ArenaState, handle: &str, now: u64, window: BoardWindow) -> Option<Vec<serde_json::Value>> {
-    let player = state.book.players.iter().find(|player| player.handle == handle)?;
+pub fn registered_recent(
+    state: &ArenaState,
+    handle: &str,
+    now: u64,
+    window: BoardWindow,
+) -> Option<Vec<serde_json::Value>> {
+    let player = state
+        .book
+        .players
+        .iter()
+        .find(|player| player.handle == handle)?;
     let mut rows = Vec::new();
     for play in &state.book.matches {
         for action in &play.actions {
@@ -246,7 +274,14 @@ struct Scores {
 }
 
 fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow) -> Scores {
-    let mut scores = Scores { total: 0, games: 0, vault: 0, cup: 0, village: 0, war: 0 };
+    let mut scores = Scores {
+        total: 0,
+        games: 0,
+        vault: 0,
+        cup: 0,
+        village: 0,
+        war: 0,
+    };
     for play in &state.book.matches {
         for action in &play.actions {
             if action.agent_id != agent_id || !award_in_window(now, window, action.unix) {
@@ -268,7 +303,10 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
 
 fn clean_evm(value: &str) -> Result<String, &'static str> {
     let value = value.trim();
-    if value.len() == 42 && value.starts_with("0x") && value[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+    if value.len() == 42
+        && value.starts_with("0x")
+        && value[2..].chars().all(|c| c.is_ascii_hexdigit())
+    {
         Ok(value.to_ascii_lowercase())
     } else {
         Err("EVM and Hyperliquid addresses are 0x plus 40 hex characters.")
@@ -278,24 +316,53 @@ fn clean_evm(value: &str) -> Result<String, &'static str> {
 fn clean_near(value: &str) -> Result<String, &'static str> {
     let value = value.trim().to_ascii_lowercase();
     let ok = (2..=64).contains(&value.len())
-        && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        && value.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && value.chars().last().is_some_and(|c| c.is_ascii_alphanumeric());
-    if ok { Ok(value) } else { Err("NEAR accounts are 2 to 64 lowercase characters.") }
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && value
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+        && value
+            .chars()
+            .last()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+    if ok {
+        Ok(value)
+    } else {
+        Err("NEAR accounts are 2 to 64 lowercase characters.")
+    }
 }
 
 fn clean_wallets(body: Option<WalletBody>) -> Result<Wallets, &'static str> {
     let mut wallets = Wallets::default();
-    let Some(body) = body else { return Ok(wallets); };
-    wallets.evm_address = match body.evm_address.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    let Some(body) = body else {
+        return Ok(wallets);
+    };
+    wallets.evm_address = match body
+        .evm_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => Some(clean_evm(value)?),
         None => None,
     };
-    wallets.near_account = match body.near_account.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    wallets.near_account = match body
+        .near_account
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => Some(clean_near(value)?),
         None => None,
     };
-    wallets.hyperliquid_account = match body.hyperliquid_account.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    wallets.hyperliquid_account = match body
+        .hyperliquid_account
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => Some(clean_evm(value)?),
         None => None,
     };
@@ -303,7 +370,13 @@ fn clean_wallets(body: Option<WalletBody>) -> Result<Wallets, &'static str> {
 }
 
 fn clean_capabilities(input: Option<Vec<String>>) -> Vec<String> {
-    const ALLOWED: &[&str] = &["games", "paper-trading", "live-trading", "market-making", "research"];
+    const ALLOWED: &[&str] = &[
+        "games",
+        "paper-trading",
+        "live-trading",
+        "market-making",
+        "research",
+    ];
     let mut out = Vec::new();
     for value in input.unwrap_or_default() {
         let value = value.trim().to_ascii_lowercase();
@@ -323,23 +396,53 @@ fn clean_capabilities(input: Option<Vec<String>>) -> Vec<String> {
 fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let body: RegisterBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
-        Err(_) => return fail(400, "validation_error", "Send handle, name, and description."),
+        Err(_) => {
+            return fail(
+                400,
+                "validation_error",
+                "Send handle, name, and description.",
+            )
+        }
     };
-    let Some(handle) = body.handle.as_deref().map(str::trim).filter(|value| is_handle(value)) else {
-        return fail(400, "validation_error", "Handle is 3 to 30 characters, lowercase, starting with a letter.");
+    let Some(handle) = body
+        .handle
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| is_handle(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "Handle is 3 to 30 characters, lowercase, starting with a letter.",
+        );
     };
     let Some(name) = clean_text(body.name.as_deref(), 1, 40) else {
-        return fail(400, "validation_error", "Name is required, up to 40 characters.");
+        return fail(
+            400,
+            "validation_error",
+            "Name is required, up to 40 characters.",
+        );
     };
-    let Some(description) = clean_text(Some(body.description.as_deref().unwrap_or("")), 0, 280) else {
-        return fail(400, "validation_error", "Description is up to 280 characters.");
+    let Some(description) = clean_text(Some(body.description.as_deref().unwrap_or("")), 0, 280)
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "Description is up to 280 characters.",
+        );
     };
     let owner = match body.owner_contact.as_deref() {
         None => None,
         Some(value) if value.trim().is_empty() => None,
         Some(value) => match clean_text(Some(value), 1, 120) {
             Some(text) => Some(text),
-            None => return fail(400, "validation_error", "Owner contact is up to 120 characters."),
+            None => {
+                return fail(
+                    400,
+                    "validation_error",
+                    "Owner contact is up to 120 characters.",
+                )
+            }
         },
     };
     let wallets = match clean_wallets(body.wallets) {
@@ -347,7 +450,12 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
         Err(message) => return fail(400, "validation_error", message),
     };
     let capabilities = clean_capabilities(body.capabilities);
-    if state.book.players.iter().any(|player| player.handle == handle) {
+    if state
+        .book
+        .players
+        .iter()
+        .any(|player| player.handle == handle)
+    {
         return fail(409, "handle_taken", "That handle is already registered.");
     }
     let token = fresh_token();
@@ -388,7 +496,11 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
 
 fn rotate(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
     let Some(player) = authed_mut(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     let token = fresh_token();
     let prefix = token.chars().take(8).collect::<String>();
@@ -405,10 +517,20 @@ fn rotate(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
 fn link_wallet(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let body: WalletBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
-        Err(_) => return fail(400, "validation_error", "Send evmAddress, nearAccount, or hyperliquidAccount."),
+        Err(_) => {
+            return fail(
+                400,
+                "validation_error",
+                "Send evmAddress, nearAccount, or hyperliquidAccount.",
+            )
+        }
     };
     let Some(player) = authed_mut(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     if let Some(value) = body.evm_address.as_deref() {
         player.wallets.evm_address = if value.trim().is_empty() {
@@ -462,20 +584,35 @@ fn equip_skin(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         skin_id: Option<String>,
     }
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     let body: SkinBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
         Err(_) => return fail(400, "validation_error", "Send skinId."),
     };
-    let Some(skin) = body.skin_id.as_deref().map(str::trim).filter(|value| !value.is_empty()).and_then(skins::find) else {
+    let Some(skin) = body
+        .skin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(skins::find)
+    else {
         return fail(404, "not_found", "No skin with that id.");
     };
     let points = room_scores(state, &agent_id, now, BoardWindow::All).total;
     if points < skin.unlock_points {
         return fail(403, "skin_locked", "That skin needs more points.");
     }
-    if let Some(player) = state.book.players.iter_mut().find(|player| player.agent_id == agent_id) {
+    if let Some(player) = state
+        .book
+        .players
+        .iter_mut()
+        .find(|player| player.agent_id == agent_id)
+    {
         player.skin_id = skin.id.to_string();
     }
     json(
@@ -492,11 +629,28 @@ fn equip_skin(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
 
 fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     let (agent_id, handle, name, status, wallets, capabilities, skin_id) = {
-        let player = state.book.players.iter().find(|player| player.agent_id == agent_id).unwrap();
-        (player.agent_id.clone(), player.handle.clone(), player.name.clone(), player.status.clone(), player.wallets.clone(), player.capabilities.clone(), player.skin_id.clone())
+        let player = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.agent_id == agent_id)
+            .unwrap();
+        (
+            player.agent_id.clone(),
+            player.handle.clone(),
+            player.name.clone(),
+            player.status.clone(),
+            player.wallets.clone(),
+            player.capabilities.clone(),
+            player.skin_id.clone(),
+        )
     };
     let skin = skins::find(&skin_id).unwrap_or_else(skins::default_skin);
     let scores = room_scores(state, &agent_id, now, BoardWindow::All);
@@ -557,7 +711,13 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
 }
 
 fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
-    let Some(player) = state.book.players.iter().find(|player| player.handle == handle).cloned() else {
+    let Some(player) = state
+        .book
+        .players
+        .iter()
+        .find(|player| player.handle == handle)
+        .cloned()
+    else {
         return fail(404, "not_found", "No agent with that handle.");
     };
     let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
@@ -582,21 +742,52 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
     )
 }
 
-fn join_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str, now: u64) -> Outcome {
+fn join_queue(
+    state: &mut ArenaState,
+    incoming: &Incoming<'_>,
+    arena_id: &str,
+    now: u64,
+) -> Outcome {
     if arena(arena_id).is_none() {
         return fail(404, "not_found", "Unknown arena.");
     }
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
-    if state.book.matches.iter().any(|play| play.status == "live" && play.arena_id == arena_id && play.seats.iter().any(|seat| seat == &agent_id)) {
-        return fail(409, "invalid_state_transition", "You are already in a live match in this arena.");
+    if state.book.matches.iter().any(|play| {
+        play.status == "live"
+            && play.arena_id == arena_id
+            && play.seats.iter().any(|seat| seat == &agent_id)
+    }) {
+        return fail(
+            409,
+            "invalid_state_transition",
+            "You are already in a live match in this arena.",
+        );
     }
-    if !state.book.queue.iter().any(|seat| seat.arena_id == arena_id && seat.agent_id == agent_id) {
-        state.book.queue.push(Queued { arena_id: arena_id.to_string(), agent_id: agent_id.clone(), queued_unix: now });
+    if !state
+        .book
+        .queue
+        .iter()
+        .any(|seat| seat.arena_id == arena_id && seat.agent_id == agent_id)
+    {
+        state.book.queue.push(Queued {
+            arena_id: arena_id.to_string(),
+            agent_id: agent_id.clone(),
+            queued_unix: now,
+        });
     }
     pair_queue(state, arena_id, now);
-    json(200, &serde_json::json!({ "queued": true, "arenaId": arena_id }), true, None)
+    json(
+        200,
+        &serde_json::json!({ "queued": true, "arenaId": arena_id }),
+        true,
+        None,
+    )
 }
 
 fn leave_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str) -> Outcome {
@@ -604,10 +795,22 @@ fn leave_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str) 
         return fail(404, "not_found", "Unknown arena.");
     }
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
-    state.book.queue.retain(|seat| !(seat.arena_id == arena_id && seat.agent_id == agent_id));
-    json(200, &serde_json::json!({ "queued": false, "arenaId": arena_id }), true, None)
+    state
+        .book
+        .queue
+        .retain(|seat| !(seat.arena_id == arena_id && seat.agent_id == agent_id));
+    json(
+        200,
+        &serde_json::json!({ "queued": false, "arenaId": arena_id }),
+        true,
+        None,
+    )
 }
 
 fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
@@ -643,7 +846,11 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
 
 fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     let mut rows: Vec<serde_json::Value> = state
         .book
@@ -657,7 +864,12 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
 }
 
 fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
-    let Some(play) = state.book.matches.iter().find(|play| play.match_id == match_id) else {
+    let Some(play) = state
+        .book
+        .matches
+        .iter()
+        .find(|play| play.match_id == match_id)
+    else {
         return fail(404, "not_found", "No match with that id.");
     };
     let mut actions: Vec<serde_json::Value> = play
@@ -706,36 +918,88 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
 
 fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
-        return fail(401, "unauthorized", "Send Authorization: Bearer fe2_ and your token.");
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
     };
     let body: ActionBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
-        Err(_) => return fail(400, "validation_error", "Send turn, action.type, and clientRequestId."),
+        Err(_) => {
+            return fail(
+                400,
+                "validation_error",
+                "Send turn, action.type, and clientRequestId.",
+            )
+        }
     };
-    let Some(request_id) = body.client_request_id.as_deref().map(str::trim).filter(|value| is_request_id(value)) else {
-        return fail(400, "validation_error", "clientRequestId is 1 to 80 letters, numbers, or dashes.");
+    let Some(request_id) = body
+        .client_request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| is_request_id(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "clientRequestId is 1 to 80 letters, numbers, or dashes.",
+        );
     };
-    if let Some(prior) = state.book.seen.iter().find(|seen| seen.agent_id == agent_id && seen.client_request_id == request_id) {
-        return http(prior.status, "application/json", prior.body.clone(), false, None);
+    if let Some(prior) = state
+        .book
+        .seen
+        .iter()
+        .find(|seen| seen.agent_id == agent_id && seen.client_request_id == request_id)
+    {
+        return http(
+            prior.status,
+            "application/json",
+            prior.body.clone(),
+            false,
+            None,
+        );
     }
     let Some(turn) = body.turn else {
-        return fail(400, "validation_error", "Send the turn number you are answering.");
+        return fail(
+            400,
+            "validation_error",
+            "Send the turn number you are answering.",
+        );
     };
-    let Some(kind) = body.action.as_ref().and_then(|action| action.kind.as_deref()).map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(kind) = body
+        .action
+        .as_ref()
+        .and_then(|action| action.kind.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return fail(400, "validation_error", "Send action.type.");
     };
-    let Some(index) = state.book.matches.iter().position(|play| play.match_id == match_id) else {
+    let Some(index) = state
+        .book
+        .matches
+        .iter()
+        .position(|play| play.match_id == match_id)
+    else {
         return fail(404, "not_found", "No match with that id.");
     };
     if state.book.matches[index].status != "live" {
         return fail(409, "match_over", "This match is over.");
     }
-    let seat = state.book.matches[index].seats.iter().position(|seat| seat == &agent_id);
+    let seat = state.book.matches[index]
+        .seats
+        .iter()
+        .position(|seat| seat == &agent_id);
     let Some(seat) = seat else {
         return fail(403, "forbidden", "You are not seated in this match.");
     };
     if state.book.matches[index].turn != turn {
-        return fail(409, "stale_turn", "The turn moved. Poll matches and send the current turn.");
+        return fail(
+            409,
+            "stale_turn",
+            "The turn moved. Poll matches and send the current turn.",
+        );
     }
     let current = current_seat(&state.book.matches[index]);
     if current != seat {
@@ -743,7 +1007,11 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     }
     let arena_id = state.book.matches[index].arena_id.clone();
     if !legal_actions(&arena_id).iter().any(|legal| *legal == kind) {
-        return fail(400, "illegal_action", "That action is not legal in this arena.");
+        return fail(
+            400,
+            "illegal_action",
+            "That action is not legal in this arena.",
+        );
     }
     let opponent = state.book.matches[index]
         .actions
@@ -845,7 +1113,12 @@ fn current_seat(play: &PlayMatch) -> usize {
     play.turn.saturating_sub(1) as usize % play.seats.len()
 }
 
-fn match_for_seat(state: &ArenaState, play: &PlayMatch, agent_id: Option<&str>, _now: u64) -> serde_json::Value {
+fn match_for_seat(
+    state: &ArenaState,
+    play: &PlayMatch,
+    agent_id: Option<&str>,
+    _now: u64,
+) -> serde_json::Value {
     let your_seat = agent_id.and_then(|id| play.seats.iter().position(|seat| seat == id));
     let info = arena(&play.arena_id);
     serde_json::json!({
@@ -874,11 +1147,21 @@ fn match_for_seat(state: &ArenaState, play: &PlayMatch, agent_id: Option<&str>, 
 fn rank_of(state: &ArenaState, handle: &str, now: u64) -> u32 {
     let mut rows = fe2vi_core::public_leaderboard(now, BoardWindow::All, None);
     rows.extend(registered_rows(state, now, BoardWindow::All, None));
-    rows.sort_by(|left, right| right.points.cmp(&left.points).then_with(|| left.name.cmp(&right.name)).then_with(|| left.agent.cmp(&right.agent)));
+    rows.sort_by(|left, right| {
+        right
+            .points
+            .cmp(&left.points)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.agent.cmp(&right.agent))
+    });
     let mut last_points = None;
     let mut last_rank = 0u32;
     for (index, row) in rows.iter().enumerate() {
-        let rank = if last_points == Some(row.points) { last_rank } else { index as u32 + 1 };
+        let rank = if last_points == Some(row.points) {
+            last_rank
+        } else {
+            index as u32 + 1
+        };
         last_points = Some(row.points);
         last_rank = rank;
         if row.agent == handle {
@@ -897,10 +1180,30 @@ struct ArenaInfo {
 
 fn arenas() -> &'static [ArenaInfo] {
     &[
-        ArenaInfo { id: "vault", name: "Vault", rules_url: "https://fe2vi.space/games/heist-night/GAME.md", summary: "Scout, hide, steal, or sabotage. One action on your turn." },
-        ArenaInfo { id: "cup", name: "Cup", rules_url: "https://fe2vi.space/games/trading-cup/GAME.md", summary: "Play a round." },
-        ArenaInfo { id: "village", name: "Trading Village", rules_url: "https://fe2vi.space/village", summary: "Fill once on your turn." },
-        ArenaInfo { id: "war", name: "War Room", rules_url: "https://fe2vi.space/war-room", summary: "Claim a sandbox flag this arena hosts." },
+        ArenaInfo {
+            id: "vault",
+            name: "Vault",
+            rules_url: "https://fe2vi.space/games/heist-night/GAME.md",
+            summary: "Scout, hide, steal, or sabotage. One action on your turn.",
+        },
+        ArenaInfo {
+            id: "cup",
+            name: "Cup",
+            rules_url: "https://fe2vi.space/games/trading-cup/GAME.md",
+            summary: "Play a round.",
+        },
+        ArenaInfo {
+            id: "village",
+            name: "Trading Village",
+            rules_url: "https://fe2vi.space/village",
+            summary: "Fill once on your turn.",
+        },
+        ArenaInfo {
+            id: "war",
+            name: "War Room",
+            rules_url: "https://fe2vi.space/war-room",
+            summary: "Claim a sandbox flag this arena hosts.",
+        },
     ]
 }
 
@@ -944,7 +1247,11 @@ fn score_kind(arena_id: &str, kind: &str, opponent_last: Option<&str>) -> u32 {
         "vault" => vault_points(kind, opponent_last).unwrap_or(0),
         "cup" if kind == "round" => POINT_SCOUT,
         "village" if kind == "fill" => POINT_SCOUT,
-        "war" => challenges().iter().find(|challenge| challenge.id == kind).map(|challenge| challenge.points).unwrap_or(0),
+        "war" => challenges()
+            .iter()
+            .find(|challenge| challenge.id == kind)
+            .map(|challenge| challenge.points)
+            .unwrap_or(0),
         _ => 0,
     }
 }
@@ -959,11 +1266,27 @@ fn vault_points(kind: &str, opponent_last: Option<&str>) -> Option<u32> {
     };
     let mut actions = Vec::new();
     if action_kind == ActionKind::Sabotage && opponent_last == Some("steal") {
-        actions.push(SubmittedAction { player: "other".into(), kind: ActionKind::Steal, target: None });
-        actions.push(SubmittedAction { player: "self".into(), kind: ActionKind::Sabotage, target: Some("other".into()) });
+        actions.push(SubmittedAction {
+            player: "other".into(),
+            kind: ActionKind::Steal,
+            target: None,
+        });
+        actions.push(SubmittedAction {
+            player: "self".into(),
+            kind: ActionKind::Sabotage,
+            target: Some("other".into()),
+        });
     } else {
-        let target = if action_kind == ActionKind::Sabotage { Some("other".to_string()) } else { None };
-        actions.push(SubmittedAction { player: "self".into(), kind: action_kind, target });
+        let target = if action_kind == ActionKind::Sabotage {
+            Some("other".to_string())
+        } else {
+            None
+        };
+        actions.push(SubmittedAction {
+            player: "self".into(),
+            kind: action_kind,
+            target,
+        });
     }
     let scores = score_actions(&actions);
     Some(u32::try_from(*scores.get("self").unwrap_or(&0)).unwrap_or(0))
@@ -977,19 +1300,34 @@ fn arena_room(arena_id: &str) -> String {
 }
 
 fn handle_of(state: &ArenaState, agent_id: &str) -> String {
-    state.book.players.iter().find(|player| player.agent_id == agent_id).map(|player| player.handle.clone()).unwrap_or_else(|| agent_id.to_string())
+    state
+        .book
+        .players
+        .iter()
+        .find(|player| player.agent_id == agent_id)
+        .map(|player| player.handle.clone())
+        .unwrap_or_else(|| agent_id.to_string())
 }
 
 fn authed_id(state: &ArenaState, incoming: &Incoming<'_>) -> Option<String> {
     let token = bearer(incoming.authorization)?;
     let hash = token_hash(token);
-    state.book.players.iter().find(|player| player.token_hash == hash).map(|player| player.agent_id.clone())
+    state
+        .book
+        .players
+        .iter()
+        .find(|player| player.token_hash == hash)
+        .map(|player| player.agent_id.clone())
 }
 
 fn authed_mut<'a>(state: &'a mut ArenaState, incoming: &Incoming<'_>) -> Option<&'a mut Player> {
     let token = bearer(incoming.authorization)?;
     let hash = token_hash(token);
-    state.book.players.iter_mut().find(|player| player.token_hash == hash)
+    state
+        .book
+        .players
+        .iter_mut()
+        .find(|player| player.token_hash == hash)
 }
 
 fn bearer(header: Option<&str>) -> Option<&str> {
@@ -998,8 +1336,13 @@ fn bearer(header: Option<&str>) -> Option<&str> {
 }
 
 fn token_shape(token: &str) -> bool {
-    let Some(hex) = token.strip_prefix("fe2_") else { return false };
-    hex.len() == 32 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    let Some(hex) = token.strip_prefix("fe2_") else {
+        return false;
+    };
+    hex.len() == 32
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn token_hash(token: &str) -> String {
@@ -1010,12 +1353,17 @@ fn is_handle(handle: &str) -> bool {
     let bytes = handle.as_bytes();
     (3..=30).contains(&bytes.len())
         && bytes[0].is_ascii_lowercase()
-        && bytes.iter().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
 }
 
 fn is_request_id(value: &str) -> bool {
     let bytes = value.as_bytes();
-    (1..=80).contains(&bytes.len()) && bytes.iter().all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+    (1..=80).contains(&bytes.len())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
 }
 
 fn clean_text(value: Option<&str>, min: usize, max: usize) -> Option<String> {
@@ -1028,7 +1376,12 @@ fn clean_text(value: Option<&str>, min: usize, max: usize) -> Option<String> {
 }
 
 fn fail(status: u16, code: &str, message: &str) -> Outcome {
-    json(status, &serde_json::json!({ "error": code, "message": message }), false, None)
+    json(
+        status,
+        &serde_json::json!({ "error": code, "message": message }),
+        false,
+        None,
+    )
 }
 
 fn document(content_type: &'static str, body: &str) -> Outcome {
@@ -1064,9 +1417,17 @@ fn fill_random(buf: &mut [u8]) {
     {
         use worker::wasm_bindgen::JsCast;
         let global = worker::js_sys::global();
-        let crypto = worker::js_sys::Reflect::get(&global, &worker::wasm_bindgen::JsValue::from_str("crypto")).expect("crypto");
+        let crypto = worker::js_sys::Reflect::get(
+            &global,
+            &worker::wasm_bindgen::JsValue::from_str("crypto"),
+        )
+        .expect("crypto");
         let array = worker::js_sys::Uint8Array::new_with_length(buf.len() as u32);
-        let method = worker::js_sys::Reflect::get(&crypto, &worker::wasm_bindgen::JsValue::from_str("getRandomValues")).expect("getRandomValues");
+        let method = worker::js_sys::Reflect::get(
+            &crypto,
+            &worker::wasm_bindgen::JsValue::from_str("getRandomValues"),
+        )
+        .expect("getRandomValues");
         let func = method.unchecked_into::<worker::js_sys::Function>();
         let _ = func.call1(&crypto, &array);
         array.copy_to(buf);
@@ -1074,7 +1435,10 @@ fn fill_random(buf: &mut [u8]) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::io::Read;
-        std::fs::File::open("/dev/urandom").expect("urandom").read_exact(buf).expect("urandom");
+        std::fs::File::open("/dev/urandom")
+            .expect("urandom")
+            .read_exact(buf)
+            .expect("urandom");
     }
 }
 
@@ -1160,7 +1524,13 @@ mod tests {
 
     const NOW: u64 = 1_790_900_000;
 
-    fn call<'a>(state: &mut ArenaState, method: &'a str, path: &'a str, body: &'a str, token: Option<&'a str>) -> (u16, serde_json::Value) {
+    fn call<'a>(
+        state: &mut ArenaState,
+        method: &'a str,
+        path: &'a str,
+        body: &'a str,
+        token: Option<&'a str>,
+    ) -> (u16, serde_json::Value) {
         let auth = token.map(|token| format!("Bearer {token}"));
         let outcome = dispatch(
             state,
@@ -1173,7 +1543,10 @@ mod tests {
             },
         );
         match outcome {
-            Outcome::Http { status, body, .. } => (status, serde_json::from_str(&body).unwrap_or(serde_json::Value::Null)),
+            Outcome::Http { status, body, .. } => (
+                status,
+                serde_json::from_str(&body).unwrap_or(serde_json::Value::Null),
+            ),
             Outcome::Websocket { .. } => panic!("expected http"),
         }
     }
@@ -1185,7 +1558,9 @@ mod tests {
         assert_eq!(status, 201, "{json}");
         assert_eq!(json["points"], 0);
         assert!(json["apiToken"].as_str().unwrap().starts_with("fe2_"));
-        assert!(!json.to_string().contains(&json["apiToken"].as_str().unwrap().replace("fe2_", "stored")));
+        assert!(!json
+            .to_string()
+            .contains(&json["apiToken"].as_str().unwrap().replace("fe2_", "stored")));
         json["apiToken"].as_str().unwrap().to_string()
     }
 
@@ -1193,24 +1568,57 @@ mod tests {
     fn wallet_links_are_public_and_validated() {
         let mut state = ArenaState::default();
         let body = r#"{"handle":"linker","name":"Linker","description":"trades","wallets":{"nearAccount":"linker.near","evmAddress":"0xABCDEF0123456789ABCDEF0123456789ABCDEF01","hyperliquidAccount":"0x1111111111111111111111111111111111111111"},"capabilities":["games","live-trading","nonsense"]}"#;
-        let (status, json) = call(&mut state, "POST", &format!("/v1/agents/register?now={NOW}"), body, None);
+        let (status, json) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/register?now={NOW}"),
+            body,
+            None,
+        );
         assert_eq!(status, 201, "{json}");
         assert_eq!(json["wallets"]["nearAccount"], "linker.near");
-        assert_eq!(json["wallets"]["evmAddress"], "0xabcdef0123456789abcdef0123456789abcdef01");
-        assert_eq!(json["capabilities"], serde_json::json!(["games", "live-trading"]));
+        assert_eq!(
+            json["wallets"]["evmAddress"],
+            "0xabcdef0123456789abcdef0123456789abcdef01"
+        );
+        assert_eq!(
+            json["capabilities"],
+            serde_json::json!(["games", "live-trading"])
+        );
         let token = json["apiToken"].as_str().unwrap().to_string();
 
-        let (bad, err) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"evmAddress":"0x1234"}"#, Some(&token));
+        let (bad, err) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/wallet?now={NOW}"),
+            r#"{"evmAddress":"0x1234"}"#,
+            Some(&token),
+        );
         assert_eq!(bad, 400);
         assert_eq!(err["error"], "validation_error");
 
-        let (ok, json) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"nearAccount":"new.near"}"#, Some(&token));
+        let (ok, json) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/wallet?now={NOW}"),
+            r#"{"nearAccount":"new.near"}"#,
+            Some(&token),
+        );
         assert_eq!(ok, 200, "{json}");
         assert_eq!(json["wallets"]["nearAccount"], "new.near");
-        assert_eq!(json["wallets"]["evmAddress"], "0xabcdef0123456789abcdef0123456789abcdef01");
+        assert_eq!(
+            json["wallets"]["evmAddress"],
+            "0xabcdef0123456789abcdef0123456789abcdef01"
+        );
         assert_eq!(json["tradeMode"], "paper");
 
-        let (anon, _) = call(&mut state, "POST", &format!("/v1/agents/me/wallet?now={NOW}"), r#"{"nearAccount":"x.near"}"#, None);
+        let (anon, _) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/wallet?now={NOW}"),
+            r#"{"nearAccount":"x.near"}"#,
+            None,
+        );
         assert_eq!(anon, 401);
     }
 
@@ -1218,7 +1626,13 @@ mod tests {
     fn skins_unlock_with_points() {
         let mut state = ArenaState::default();
         let body = r#"{"handle":"forger","name":"Forger","description":"forges"}"#;
-        let (status, json) = call(&mut state, "POST", &format!("/v1/agents/register?now={NOW}"), body, None);
+        let (status, json) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/register?now={NOW}"),
+            body,
+            None,
+        );
         assert_eq!(status, 201, "{json}");
         let token = json["apiToken"].as_str().unwrap().to_string();
         assert_eq!(json["skin"], serde_json::Value::Null);
@@ -1263,7 +1677,13 @@ mod tests {
         assert_eq!(json["skin"]["rarity"], "Mythic");
         assert_eq!(state.book.players[0].skin_id, "gold-leaf");
 
-        let (public, agent) = call(&mut state, "GET", &format!("/v1/agents/forger?now={NOW}"), "", None);
+        let (public, agent) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/forger?now={NOW}"),
+            "",
+            None,
+        );
         assert_eq!(public, 200);
         assert_eq!(agent["skin"]["id"], "gold-leaf");
 
@@ -1283,7 +1703,13 @@ mod tests {
         let mut state = ArenaState::default();
         register_one(&mut state, "alpha");
         register_one(&mut state, "bravo");
-        let (status, json) = call(&mut state, "GET", &format!("/v1/agents?now={NOW}&limit=10"), "", None);
+        let (status, json) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents?now={NOW}&limit=10"),
+            "",
+            None,
+        );
         assert_eq!(status, 200, "{json}");
         let rows = json["agents"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
@@ -1295,20 +1721,44 @@ mod tests {
     #[test]
     fn register_queue_poll_act_and_score() {
         let mut state = ArenaState::default();
-        let (bad, err) = call(&mut state, "POST", "/v1/agents/register", r#"{"handle":"No","name":"A","description":""}"#, None);
+        let (bad, err) = call(
+            &mut state,
+            "POST",
+            "/v1/agents/register",
+            r#"{"handle":"No","name":"A","description":""}"#,
+            None,
+        );
         assert_eq!(bad, 400);
         assert_eq!(err["error"], "validation_error");
         let alpha = register_one(&mut state, "alpha");
-        let again = call(&mut state, "POST", "/v1/agents/register", r#"{"handle":"alpha","name":"Other","description":""}"#, None);
+        let again = call(
+            &mut state,
+            "POST",
+            "/v1/agents/register",
+            r#"{"handle":"alpha","name":"Other","description":""}"#,
+            None,
+        );
         assert_eq!(again.0, 409);
         assert_eq!(again.1["error"], "handle_taken");
         assert!(state.book.players[0].token_hash != alpha);
         assert_eq!(state.book.players[0].token_hash.len(), 64);
 
-        let (denied, _) = call(&mut state, "GET", "/v1/agents/me", "", Some("fe2_0123456789abcdef0123456789abcdef"));
+        let (denied, _) = call(
+            &mut state,
+            "GET",
+            "/v1/agents/me",
+            "",
+            Some("fe2_0123456789abcdef0123456789abcdef"),
+        );
         assert_eq!(denied, 401);
 
-        let me = call(&mut state, "GET", &format!("/v1/agents/me?now={NOW}"), "", Some(&alpha));
+        let me = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
         assert_eq!(me.0, 200);
         assert_eq!(me.1["handle"], "alpha");
         assert_eq!(me.1["points"], 0);
@@ -1320,13 +1770,23 @@ mod tests {
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
         assert_eq!(state.book.matches.len(), 1);
 
-        let listed = call(&mut state, "GET", &format!("/v1/agents/me/matches?now={NOW}"), "", Some(&alpha));
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
         assert_eq!(listed.0, 200);
         let play = &listed.1["matches"][0];
         assert_eq!(play["match"]["yourSeat"], 0);
         assert_eq!(play["match"]["turn"], 1);
         assert_eq!(play["arena"]["name"], "Vault");
-        assert!(play["legalActions"].as_array().unwrap().iter().any(|item| item == "scout"));
+        assert!(play["legalActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "scout"));
         let match_id = play["match"]["matchId"].as_str().unwrap().to_string();
 
         let act_path = format!("/v1/matches/{match_id}/actions?now={NOW}");
@@ -1368,7 +1828,13 @@ mod tests {
         assert_eq!(scored.0, 200);
         assert_eq!(scored.1["points"], fe2vi_core::POINT_STEAL);
 
-        let board = call(&mut state, "GET", &format!("/v1/leaderboard?window=all&now={NOW}"), "", None);
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&now={NOW}"),
+            "",
+            None,
+        );
         assert_eq!(board.0, 200);
         let rows = board.1["rows"].as_array().unwrap();
         let alpha_row = rows.iter().find(|row| row["agent"] == "alpha").unwrap();
@@ -1378,7 +1844,13 @@ mod tests {
         assert_eq!(alpha_row["vault"], fe2vi_core::POINT_SCOUT);
         assert!(rows.iter().any(|row| row["name"] == "Mason"));
 
-        let profile = call(&mut state, "GET", &format!("/v1/agents/alpha?now={NOW}"), "", None);
+        let profile = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/alpha?now={NOW}"),
+            "",
+            None,
+        );
         assert_eq!(profile.0, 200);
         assert_eq!(profile.1["points"], fe2vi_core::POINT_SCOUT);
         assert!(profile.1.get("apiToken").is_none());
@@ -1387,12 +1859,23 @@ mod tests {
         assert_eq!(spec.0, 200);
         let text = spec.1.to_string();
         assert!(!text.contains("429"));
-        for path in ["/v1/agents/register", "/v1/agents/me/matches", "/v1/matches/{matchId}/actions", "/llms.txt"] {
+        for path in [
+            "/v1/agents/register",
+            "/v1/agents/me/matches",
+            "/v1/matches/{matchId}/actions",
+            "/llms.txt",
+        ] {
             assert!(text.contains(path), "{path}");
         }
         let skill = dispatch(
             &mut state,
-            &Incoming { method: "GET", path: "/llms.txt", body: "", authorization: None, ingest_token: None },
+            &Incoming {
+                method: "GET",
+                path: "/llms.txt",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
         );
         match skill {
             Outcome::Http { status, body, .. } => {
@@ -1415,15 +1898,33 @@ mod tests {
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
         let later = NOW + TURN_SECS + 5;
-        let listed = call(&mut state, "GET", &format!("/v1/agents/me/matches?now={later}"), "", Some(&bravo));
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={later}"),
+            "",
+            Some(&bravo),
+        );
         assert_eq!(listed.1["matches"][0]["match"]["turn"], 2);
         assert_eq!(state.book.matches[0].actions[0].action_type, "pass");
-        let rotated = call(&mut state, "POST", "/v1/agents/me/rotate-token", "{}", Some(&alpha));
+        let rotated = call(
+            &mut state,
+            "POST",
+            "/v1/agents/me/rotate-token",
+            "{}",
+            Some(&alpha),
+        );
         assert_eq!(rotated.0, 200);
         let next = rotated.1["apiToken"].as_str().unwrap().to_string();
         assert_ne!(next, alpha);
-        assert_eq!(call(&mut state, "GET", "/v1/agents/me", "", Some(&alpha)).0, 401);
-        assert_eq!(call(&mut state, "GET", "/v1/agents/me", "", Some(&next)).0, 200);
+        assert_eq!(
+            call(&mut state, "GET", "/v1/agents/me", "", Some(&alpha)).0,
+            401
+        );
+        assert_eq!(
+            call(&mut state, "GET", "/v1/agents/me", "", Some(&next)).0,
+            200
+        );
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
     }
 }

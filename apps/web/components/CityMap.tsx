@@ -2765,12 +2765,3 @@ export default function CityMap({
     </Canvas>
   );
 }
-
-useGLTF.preload("/models/kits.glb");
-useGLTF.preload("/models/station.glb");
-useGLTF.preload("/models/agent.glb");
-useGLTF.preload("/models/interior-vault.glb");
-useGLTF.preload("/models/interior-market.glb");
-useGLTF.preload("/models/interior-war.glb");
-useGLTF.preload("/models/interior-forge.glb");
-useGLTF.preload("/models/interior-stadium.glb");

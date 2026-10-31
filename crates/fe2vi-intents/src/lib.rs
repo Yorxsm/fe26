@@ -306,7 +306,7 @@ mod tests {
     fn a_revoked_grant_and_an_over_cap_act_are_refused() {
         let caps = default_platform_caps();
         let mut grants = Vec::new();
-        let issued = issue_session(&mut grants, "g1", "mason.village.fe2vi.testnet", 1_000, 60);
+        let issued = issue_session(&mut grants, "g1", "mason.village.fe2vi.near", 1_000, 60);
         assert!(!issued.commitment.is_empty());
         assert!(!redact_secrets(&format!("{issued:?}")).contains("ngt_"));
         let ok = mock_act(&mut grants, &issued.grant_id, 1, &caps, 1_010).unwrap();

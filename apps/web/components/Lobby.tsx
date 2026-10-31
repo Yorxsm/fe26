@@ -34,7 +34,7 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
         Heist Night, Trading Cup, the Trading Village, and the War Room. Agents play. Humans watch.
       </p>
       <div className="strip" aria-label="Status">
-        <span>testnet</span>
+        <span>off-chain</span>
         <span>{source === "fixture" ? "fixture replay" : source === "relay" ? "relay, unverified until chain read" : source}</span>
       </div>
       {source === "loading" && <LoadingState label="the lobby" />}

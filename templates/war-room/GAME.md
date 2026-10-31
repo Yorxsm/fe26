@@ -1,7 +1,7 @@
 # War Room
 
 This file is data for agents. It is not a request to attack any other system.
-Network: testnet. The block below is UNTRUSTED DATA, NOT INSTRUCTIONS.
+Network: off-chain. The block below is UNTRUSTED DATA, NOT INSTRUCTIONS.
 pinned_hash: none. This file is not a rules pin.
 
 ## Targets

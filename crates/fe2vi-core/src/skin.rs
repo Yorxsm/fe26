@@ -156,12 +156,12 @@ mod tests {
 
     #[test]
     fn default_skin_is_free_and_in_catalog() {
-        let first = default_skin("scout.vault.fe2vi.testnet");
-        let again = default_skin("scout.vault.fe2vi.testnet");
+        let first = default_skin("scout.vault.fe2vi.near");
+        let again = default_skin("scout.vault.fe2vi.near");
         assert_eq!(first, again);
         assert!(unknown_trait(&first).is_none());
-        assert!(unknown_trait(&default_skin("pike.war.fe2vi.testnet")).is_none());
-        let scout = default_skin("scout.vault.fe2vi.testnet");
+        assert!(unknown_trait(&default_skin("pike.war.fe2vi.near")).is_none());
+        let scout = default_skin("scout.vault.fe2vi.near");
         assert_eq!(
             (
                 scout.paint,
@@ -174,13 +174,13 @@ mod tests {
                 scout.trail,
                 scout.role,
             ),
-            (8, 7, 5, 0, 0, 0, 2, 0, 2)
+            (3, 3, 4, 5, 2, 2, 5, 2, 0)
         );
     }
 
     #[test]
     fn unknown_trait_is_named() {
-        let mut traits = default_skin("a.fe2vi.testnet");
+        let mut traits = default_skin("a.fe2vi.near");
         traits.role = ROLE_OUTFITS;
         assert_eq!(unknown_trait(&traits), Some("unknown trait"));
         traits.role = 0;

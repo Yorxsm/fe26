@@ -68,7 +68,6 @@ pub fn default_venue() -> MockVenue {
 pub struct VenueNote {
     pub id: &'static str,
     pub offers: &'static str,
-    pub testnet: Option<&'static str>,
     pub wired: bool,
 }
 
@@ -76,14 +75,13 @@ pub fn venue_notes() -> &'static [VenueNote] {
     &[
         VenueNote {
             id: "near.com",
-            offers: "Perps on a Hyperliquid integration. The product page describes mainnet and no testnet.",
-            testnet: None,
+            offers: "Perps on a Hyperliquid integration. The arena does not place orders.",
             wired: false,
         },
         VenueNote {
             id: "trade.xyz",
-            offers: "HIP-3 perps on the xyz deployment, including stock perps. HyperCore settles them.",
-            testnet: Some(HYPERLIQUID_TESTNET_INFO),
+            offers:
+                "HIP-3 perps on the xyz deployment, including stock perps. HyperCore settles them.",
             wired: false,
         },
     ]

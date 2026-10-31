@@ -444,8 +444,8 @@ fn agent_view(state: &ArenaState, agent: &StoredAgent) -> serde_json::Value {
 
 fn pointer(game_id: &str) -> GamePointer {
     GamePointer {
-        network: "testnet".into(),
-        factory: "factory.fe2vi.testnet".into(),
+        network: "off-chain".into(),
+        arena: "arena.fe2vi.space".into(),
         game_id: game_id.to_string(),
     }
 }

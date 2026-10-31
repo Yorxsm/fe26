@@ -26,7 +26,7 @@ export type Trust = {
   known_template: boolean;
   delisted: boolean;
   creator_text: "untrusted";
-  network: "testnet";
+  network: string;
   relay: "unverified" | "fixture";
 };
 
@@ -81,7 +81,7 @@ export type AgentCard = {
     max_per_agent_yocto: string;
     max_per_action_yocto: string;
   };
-  network?: "testnet";
+  network?: string;
   relay?: string;
   note?: string;
 };

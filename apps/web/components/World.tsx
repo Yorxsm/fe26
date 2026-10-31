@@ -64,7 +64,7 @@ function EnvironmentLight() {
     let alive = true;
     let env: THREE.Texture | null = null;
     let sky: THREE.Texture | null = null;
-    loader.load("/textures/kiara_1_dawn_1k.hdr", (texture) => {
+    loader.load("/textures/kiara_1_dawn_512.hdr", (texture) => {
       if (!alive) {
         texture.dispose();
         return;

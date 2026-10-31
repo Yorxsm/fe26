@@ -25,6 +25,7 @@ import {
   Pause,
   Play,
   MapPin,
+  RotateCw,
   ScrollText,
   Send,
   SkipForward,
@@ -52,7 +53,7 @@ import {
 
 const CityMap = dynamic(() => import("@/components/CityMap"), {
   ssr: false,
-  loading: () => <LoadingState label="the map" hero />,
+  loading: () => <LoadingState label="the city" hero />,
 });
 
 type Phase = "boot" | "title" | "cutscene" | "vantage" | "dispatch" | "city";
@@ -145,6 +146,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
   const [mapProgress, setMapProgress] = useState<number | null>(null);
+  const [shownProgress, setShownProgress] = useState(3);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -260,15 +262,37 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, []);
 
   useEffect(() => {
+    let readyTimer = 0;
     const onLoad = (event: Event) => {
       const detail = (event as CustomEvent<{ progress: number; active: boolean }>).detail;
       if (!detail) return;
+      window.clearTimeout(readyTimer);
       setMapProgress(detail.progress);
-      if (!detail.active && detail.progress >= 100) setMapReady(true);
+      if (!detail.active && detail.progress >= 100) {
+        readyTimer = window.setTimeout(() => setMapReady(true), 1200);
+      }
     };
     window.addEventListener("fe2vi-load", onLoad);
-    return () => window.removeEventListener("fe2vi-load", onLoad);
+    return () => {
+      window.clearTimeout(readyTimer);
+      window.removeEventListener("fe2vi-load", onLoad);
+    };
   }, []);
+
+  useEffect(() => {
+    if (mapReady) {
+      setShownProgress(100);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setShownProgress((value) => {
+        const target = Math.min(92, Math.max(0, mapProgress ?? 0));
+        const creep = value + Math.max(0.35, (92 - value) * 0.018);
+        return Math.min(92, Math.max(creep, target));
+      });
+    }, 180);
+    return () => window.clearInterval(id);
+  }, [mapReady, mapProgress]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 800px)");
@@ -405,10 +429,30 @@ export function CityGate({ onboarding }: { onboarding: string }) {
 
   if (phase !== "boot" && !webgl) {
     return (
-      <section className="city-wrap" aria-label="City map">
-        <p className="meta" role="status">
-          WebGL is unavailable in this browser.
-        </p>
+      <section className="game-root city-fallback" aria-label="City map unavailable">
+        <div className="city-fallback-card">
+          <Logo variant="hero" />
+          <p className="label">City link offline</p>
+          <h1>This browser could not open the city.</h1>
+          <p>
+            WebGL was refused or the graphics context was lost. A current browser with hardware acceleration usually
+            fixes it. The boards still work without 3D.
+          </p>
+          <div className="city-fallback-actions">
+            <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+              <RotateCw aria-hidden="true" strokeWidth={1.75} />
+              Reload the city
+            </button>
+            <a className="btn btn-secondary" href="/leaderboard">
+              <Trophy aria-hidden="true" strokeWidth={1.75} />
+              Leaderboard
+            </a>
+            <a className="btn btn-secondary" href="/agents">
+              <Users aria-hidden="true" strokeWidth={1.75} />
+              Agents
+            </a>
+          </div>
+        </div>
       </section>
     );
   }
@@ -558,7 +602,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                       <p className="addr">{followed.accountId}</p>
                       <p>You are watching. This card has no key.</p>
                       <div className="stamps" aria-label="Trust stamps">
-                        <span className="stamp">testnet</span>
+                        <span className="stamp">off-chain</span>
                         <span className="stamp warn">Creator text untrusted</span>
                       </div>
                     </aside>
@@ -628,9 +672,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
-            {phase !== "boot" && !mapReady ? <LoadingState label="the map" hero progress={mapProgress} /> : null}
+            {phase !== "boot" && !mapReady ? <LoadingState label="the city" hero progress={shownProgress} /> : null}
             {phase === "boot" ? (
-              <LoadingState label="the map" hero progress={mapProgress} />
+              <LoadingState label="the city" hero progress={shownProgress} />
             ) : (
               <CityMap
                 paused={paused}
