@@ -4,7 +4,9 @@
 //! swallowed into the offline fixture so a board still renders.
 
 use fe2vi_market::{
-    parse_candles, parse_clearinghouse_state, parse_meta_and_asset_ctxs, sort_for_display, Market,
+    parse_candles, parse_clearinghouse_state, parse_ledger_updates, parse_meta_and_asset_ctxs,
+    parse_portfolio, parse_user_fills, sort_for_display, AccountState, Fill, LedgerUpdate, Market,
+    PortfolioWindow,
 };
 use worker::*;
 
@@ -101,6 +103,54 @@ pub async fn account(address: &str) -> (String, bool) {
             false,
         ),
     }
+}
+
+/// Read every public endpoint the live scorer needs. Any failure returns Err so
+/// the caller can mark the cached link stale rather than inventing a balance.
+pub async fn snapshot(
+    address: &str,
+    start_ms: u64,
+) -> std::result::Result<
+    (
+        AccountState,
+        Vec<PortfolioWindow>,
+        Vec<Fill>,
+        Vec<LedgerUpdate>,
+    ),
+    String,
+> {
+    let account_payload = serde_json::json!({
+        "type": "clearinghouseState",
+        "user": address,
+    });
+    let account_body = post_info(&account_payload.to_string()).await?;
+    let account = parse_clearinghouse_state(&account_body).map_err(|err| err.to_string())?;
+
+    let portfolio_payload = serde_json::json!({
+        "type": "portfolio",
+        "user": address,
+    });
+    let portfolio_body = post_info(&portfolio_payload.to_string()).await?;
+    let portfolio = parse_portfolio(&portfolio_body).map_err(|err| err.to_string())?;
+
+    let fills_payload = serde_json::json!({
+        "type": "userFillsByTime",
+        "user": address,
+        "startTime": start_ms,
+        "aggregateByTime": false,
+    });
+    let fills_body = post_info(&fills_payload.to_string()).await?;
+    let fills = parse_user_fills(&fills_body).map_err(|err| err.to_string())?;
+
+    let ledger_payload = serde_json::json!({
+        "type": "userNonFundingLedgerUpdates",
+        "user": address,
+        "startTime": start_ms,
+    });
+    let ledger_body = post_info(&ledger_payload.to_string()).await?;
+    let ledger = parse_ledger_updates(&ledger_body).map_err(|err| err.to_string())?;
+
+    Ok((account, portfolio, fills, ledger))
 }
 
 async fn live_markets(dex: &str) -> std::result::Result<Vec<Market>, String> {

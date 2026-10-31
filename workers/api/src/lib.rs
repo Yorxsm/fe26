@@ -1,5 +1,8 @@
 mod agents;
 mod indexer;
+mod live;
+#[cfg(target_arch = "wasm32")]
+mod live_edge;
 mod logic;
 #[cfg(target_arch = "wasm32")]
 mod markets;
@@ -311,6 +314,7 @@ mod edge {
                 scanned = height;
             }
             let added = indexer::apply_chain_events(&mut arena, &found, scanned);
+            let synced = crate::live_edge::refresh(&mut arena).await;
             storage.put("arena", &arena).await?;
             let cron_now = worker::Date::now().as_millis() / 1000;
             let _ = storage.put("metric_cron_last", &cron_now).await;
@@ -318,6 +322,7 @@ mod edge {
                 "ok": true,
                 "added": added,
                 "indexed_height": arena.indexed_height,
+                "live_synced": synced,
                 "network": "testnet",
             })
             .to_string();

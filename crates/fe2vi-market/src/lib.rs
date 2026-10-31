@@ -68,6 +68,50 @@ pub struct AccountState {
     pub positions: Vec<Position>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EquityPoint {
+    pub t: u64,
+    pub value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioWindow {
+    pub window: String,
+    pub account_value_start: f64,
+    pub account_value_end: f64,
+    pub pnl: f64,
+    pub volume: f64,
+    pub history: Vec<EquityPoint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Fill {
+    pub coin: String,
+    pub side: String,
+    pub dir: String,
+    pub price: f64,
+    pub size: f64,
+    pub time: u64,
+    pub closed_pnl: f64,
+    pub fee: f64,
+    pub tid: u64,
+    pub oid: u64,
+    pub hash: String,
+    pub crossed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerUpdate {
+    pub time: u64,
+    pub kind: String,
+    pub amount: f64,
+    pub hash: String,
+}
+
 #[derive(Debug, Error)]
 pub enum MarketError {
     #[error("invalid JSON: {0}")]
@@ -223,6 +267,151 @@ pub fn parse_clearinghouse_state(body: &str) -> Result<AccountState, MarketError
         margin_used: field_f64(margin, "totalMarginUsed"),
         positions,
     })
+}
+
+/// Parse Hyperliquid's public `portfolio` response. Each row is
+/// `["day" | "week" | "month" | "allTime", {accountValueHistory, pnlHistory, vlm}]`.
+pub fn parse_portfolio(body: &str) -> Result<Vec<PortfolioWindow>, MarketError> {
+    let payload: Value = serde_json::from_str(body)?;
+    let rows = payload
+        .as_array()
+        .ok_or(MarketError::Shape("expected a portfolio array"))?;
+    let mut windows = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(pair) = row.as_array() else {
+            continue;
+        };
+        let Some(window) = pair.first().and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(data) = pair.get(1) else {
+            continue;
+        };
+        let history = parse_equity_history(data.get("accountValueHistory"));
+        let account_value_start = history.first().map(|point| point.value).unwrap_or(0.0);
+        let account_value_end = history.last().map(|point| point.value).unwrap_or(0.0);
+        let pnl = data
+            .get("pnlHistory")
+            .and_then(Value::as_array)
+            .and_then(|points| points.last())
+            .and_then(|point| point.as_array())
+            .and_then(|point| point.get(1))
+            .and_then(as_f64)
+            .unwrap_or(account_value_end - account_value_start);
+        windows.push(PortfolioWindow {
+            window: window.to_string(),
+            account_value_start,
+            account_value_end,
+            pnl,
+            volume: field_f64(data, "vlm").abs(),
+            history,
+        });
+    }
+    Ok(windows)
+}
+
+fn parse_equity_history(value: Option<&Value>) -> Vec<EquityPoint> {
+    let Some(rows) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut points = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(pair) = row.as_array() else {
+            continue;
+        };
+        let Some(t) = pair.first().and_then(as_u64) else {
+            continue;
+        };
+        let Some(value) = pair.get(1).and_then(as_f64) else {
+            continue;
+        };
+        points.push(EquityPoint { t, value });
+    }
+    points.sort_by_key(|point| point.t);
+    points
+}
+
+/// Parse a Hyperliquid `userFills` / `userFillsByTime` response.
+pub fn parse_user_fills(body: &str) -> Result<Vec<Fill>, MarketError> {
+    let payload: Value = serde_json::from_str(body)?;
+    let rows = match &payload {
+        Value::Array(rows) => rows.as_slice(),
+        Value::Object(object) => object
+            .get("fills")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+        _ => return Err(MarketError::Shape("expected fills")),
+    };
+    let mut fills = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(coin) = row.get("coin").and_then(Value::as_str) else {
+            continue;
+        };
+        fills.push(Fill {
+            coin: coin.to_string(),
+            side: row
+                .get("side")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            dir: row
+                .get("dir")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            price: field_f64(row, "px"),
+            size: field_f64(row, "sz"),
+            time: field_f64(row, "time") as u64,
+            closed_pnl: field_f64(row, "closedPnl"),
+            fee: field_f64(row, "fee"),
+            tid: field_f64(row, "tid") as u64,
+            oid: field_f64(row, "oid") as u64,
+            hash: row
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            crossed: row.get("crossed").and_then(Value::as_bool).unwrap_or(false),
+        });
+    }
+    fills.sort_by_key(|fill| fill.time);
+    Ok(fills)
+}
+
+/// Parse non-funding ledger updates. Deposits, withdrawals, and transfers use
+/// these rows; funding and liquidation are part of normal trading P&L.
+pub fn parse_ledger_updates(body: &str) -> Result<Vec<LedgerUpdate>, MarketError> {
+    let payload: Value = serde_json::from_str(body)?;
+    let rows = payload
+        .as_array()
+        .ok_or(MarketError::Shape("expected ledger updates"))?;
+    let mut updates = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(delta) = row.get("delta") else {
+            continue;
+        };
+        let kind = delta
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if kind.is_empty() {
+            continue;
+        }
+        updates.push(LedgerUpdate {
+            time: field_f64(row, "time") as u64,
+            kind,
+            amount: field_f64(delta, "usdc").abs(),
+            hash: row
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        });
+    }
+    updates.sort_by_key(|update| update.time);
+    Ok(updates)
 }
 
 /// Classify a ticker into the quote board's display bucket.

@@ -16,9 +16,12 @@ fe2vi-market = { path = "../../crates/fe2vi-market" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = { version = "=0.8.6", default-features = false }
+getrandom = { version = "0.2", features = ["js"] }
 # Pin the 0.8.6 macro and sys crates. Cargo would otherwise float them to 0.8.7,
 # whose Durable Object trait does not match worker 0.8.6.
 worker-macros = "=0.8.6"

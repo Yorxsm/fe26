@@ -33,6 +33,8 @@ pub struct ArenaState {
     pub grants: Vec<StoredGrant>,
     #[serde(default)]
     pub book: crate::agents::PlayerBook,
+    #[serde(default)]
+    pub live: crate::live::LiveBook,
 }
 
 impl Default for ArenaState {
@@ -48,6 +50,7 @@ impl Default for ArenaState {
             follows: Vec::new(),
             grants: Vec::new(),
             book: crate::agents::PlayerBook::default(),
+            live: crate::live::LiveBook::default(),
         }
     }
 }
@@ -137,6 +140,9 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             Some(location),
         );
     }
+    if let Some(outcome) = crate::live::dispatch_live(state, incoming) {
+        return outcome;
+    }
     if let Some(outcome) = crate::agents::dispatch_player(state, incoming) {
         return outcome;
     }
@@ -219,11 +225,6 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ("POST", ["v1", "agents"]) => ingest_agent(state, incoming),
         ("POST", ["v1", "events"]) => ingest_event(state, incoming),
         ("GET", ["v1", "city"]) => crate::surface::city(),
-        ("GET", ["v1", "village", "leaderboard"]) => crate::surface::leaderboard(
-            query_param(incoming.path, "window"),
-            query_now(incoming.path),
-        ),
-        ("GET", ["v1", "village", "tape"]) => crate::surface::tape(query_now(incoming.path)),
         ("GET", ["v1", "schedule"]) => crate::surface::schedule(query_now(incoming.path)),
         ("GET", ["v1", "leaderboard"]) => crate::surface::public_board(
             state,

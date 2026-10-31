@@ -1,10 +1,7 @@
 //! City, Trading Village, and the mock Intents adapter. None of these paths
 //! mark an event verified, and none of them call the hosted Intents API.
 
-use fe2vi_core::{
-    demo_tape_at, districts, follow as follow_edge, leaderboard as rank, unfollow as unfollow_edge,
-    Venue, Window, WRAP_NEAR,
-};
+use fe2vi_core::{districts, follow as follow_edge, unfollow as unfollow_edge, Venue};
 use fe2vi_intents::{
     issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
     MOCK_USD_PER_NEAR_CENTS,
@@ -33,32 +30,6 @@ pub fn city() -> Outcome {
             "network": "off-chain",
             "site": "fe2vi.space",
             "districts": districts,
-        }),
-        false,
-        None,
-    )
-}
-
-pub fn leaderboard(window_raw: Option<&str>, now: u64) -> Outcome {
-    let window = Window::parse(window_raw.unwrap_or("24h"));
-    let Some(window) = window else {
-        return http(
-            400,
-            "application/json",
-            r#"{"error":"window must be 24h, 7d, 30d, or all"}"#.into(),
-            false,
-            None,
-        );
-    };
-    let rows = rank(&demo_tape_at(now), now, window);
-    json(
-        200,
-        &serde_json::json!({
-            "window": window_raw.unwrap_or("24h"),
-            "now": now,
-            "source": "simulated",
-            "asset": WRAP_NEAR,
-            "rows": rows,
         }),
         false,
         None,
@@ -210,10 +181,10 @@ pub fn point_rules() -> Outcome {
         &serde_json::json!({
             "source": "config",
             "heist": { "scout": fe2vi_core::POINT_SCOUT, "hide": fe2vi_core::POINT_SCOUT, "steal": fe2vi_core::POINT_STEAL, "sabotage_hit": fe2vi_core::POINT_SABOTAGE },
-            "cup": { "round": fe2vi_core::POINT_SCOUT },
-            "village": { "fill": fe2vi_core::POINT_SCOUT },
+            "cup": { "place": [10, 6, 4, 2, 1], "score": "returnBps - 0.5 * max(0, drawdownBps - 200)", "eligibility": ["linked", "flat at start", "$100 equity", "1 fill", "no transfers"] },
+            "village": { "score": "returnBps - 0.5 * max(0, drawdownBps - 100)", "points": false },
             "war": war,
-            "note": "Points only. Cup rounds and village fills use the heist scout value. War flags use the challenge totals."
+            "note": "Cup awards places to eligible positive risk-adjusted returns. Village has no season points. War flags use the challenge totals."
         }),
         false,
         None,
@@ -365,19 +336,6 @@ pub fn war_md() -> Outcome {
         200,
         "text/markdown; charset=utf-8",
         fe2vi_core::war_room_md(),
-        false,
-        None,
-    )
-}
-
-pub fn tape(now: u64) -> Outcome {
-    json(
-        200,
-        &serde_json::json!({
-            "now": now,
-            "source": "simulated",
-            "fills": demo_tape_at(now),
-        }),
         false,
         None,
     )
@@ -587,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn village_day_board_is_mason_and_follow_rejects_self() {
+    fn village_live_board_is_empty_and_follow_rejects_self() {
         let mut state = ArenaState::default();
         let board = body_of(call(
             &mut state,
@@ -595,8 +553,8 @@ mod tests {
             "/v1/village/leaderboard?window=24h",
             "",
         ));
-        assert_eq!(board["rows"][0]["name"], "Mason");
-        assert_eq!(board["source"], "simulated");
+        assert_eq!(board["rows"].as_array().unwrap().len(), 0);
+        assert_eq!(board["source"], "stale");
         let follow = call(
             &mut state,
             "POST",

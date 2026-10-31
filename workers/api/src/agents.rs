@@ -3,7 +3,7 @@
 
 use fe2vi_core::{
     award_in_window, challenges, score_actions, ActionKind, BoardWindow, PointRoom, PublicRow,
-    SubmittedAction, POINT_SCOUT,
+    SubmittedAction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -259,6 +259,17 @@ pub fn registered_recent(
             }));
         }
     }
+    for award in &state.live.awards {
+        if award.agent_id != player.agent_id || !award_in_window(now, window, award.unix) {
+            continue;
+        }
+        rows.push(serde_json::json!({
+            "room": award.room,
+            "points": award.points,
+            "unix": award.unix,
+            "label": award.label,
+        }));
+    }
     rows.sort_by(|left, right| right["unix"].as_u64().cmp(&left["unix"].as_u64()));
     rows.truncate(8);
     Some(rows)
@@ -298,10 +309,24 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
             }
         }
     }
+    for award in &state.live.awards {
+        if award.agent_id != agent_id || !award_in_window(now, window, award.unix) {
+            continue;
+        }
+        scores.games = scores.games.saturating_add(1);
+        scores.total = scores.total.saturating_add(award.points);
+        match award.room.as_str() {
+            "vault" => scores.vault = scores.vault.saturating_add(award.points),
+            "cup" => scores.cup = scores.cup.saturating_add(award.points),
+            "village" => scores.village = scores.village.saturating_add(award.points),
+            "war" => scores.war = scores.war.saturating_add(award.points),
+            _ => {}
+        }
+    }
     scores
 }
 
-fn clean_evm(value: &str) -> Result<String, &'static str> {
+pub(crate) fn clean_evm(value: &str) -> Result<String, &'static str> {
     let value = value.trim();
     if value.len() == 42
         && value.starts_with("0x")
@@ -313,7 +338,7 @@ fn clean_evm(value: &str) -> Result<String, &'static str> {
     }
 }
 
-fn clean_near(value: &str) -> Result<String, &'static str> {
+pub(crate) fn clean_near(value: &str) -> Result<String, &'static str> {
     let value = value.trim().to_ascii_lowercase();
     let ok = (2..=64).contains(&value.len())
         && value
@@ -370,13 +395,7 @@ fn clean_wallets(body: Option<WalletBody>) -> Result<Wallets, &'static str> {
 }
 
 fn clean_capabilities(input: Option<Vec<String>>) -> Vec<String> {
-    const ALLOWED: &[&str] = &[
-        "games",
-        "paper-trading",
-        "live-trading",
-        "market-making",
-        "research",
-    ];
+    const ALLOWED: &[&str] = &["games", "live-trading", "market-making", "research"];
     let mut out = Vec::new();
     for value in input.unwrap_or_default() {
         let value = value.trim().to_ascii_lowercase();
@@ -569,7 +588,7 @@ fn link_wallet(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Out
         &serde_json::json!({
             "handle": handle,
             "wallets": wallets,
-            "tradeMode": "paper",
+            "tradeMode": "live",
             "updatedAt": rfc3339(now),
         }),
         true,
@@ -667,7 +686,8 @@ fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             "wallets": wallets,
             "capabilities": capabilities,
             "skin": skins::skin_json(skin),
-            "tradeMode": "paper",
+            "tradeMode": "live",
+            "tradingAccount": state.live.public_link(&handle),
         }),
         false,
         None,
@@ -735,6 +755,8 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "wallets": player.wallets,
             "capabilities": player.capabilities,
             "skin": skins::skin_json(skin),
+            "tradeMode": "live",
+            "tradingAccount": state.live.public_link(handle),
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
         }),
         false,
@@ -750,6 +772,17 @@ fn join_queue(
 ) -> Outcome {
     if arena(arena_id).is_none() {
         return fail(404, "not_found", "Unknown arena.");
+    }
+    if matches!(arena_id, "cup" | "village") {
+        return fail(
+            410,
+            "live_only",
+            if arena_id == "cup" {
+                "The Cup is live-only. Link Hyperliquid and join the current round."
+            } else {
+                "The Village is always open. Link Hyperliquid; no queue is needed."
+            },
+        );
     }
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(
@@ -793,6 +826,17 @@ fn join_queue(
 fn leave_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str) -> Outcome {
     if arena(arena_id).is_none() {
         return fail(404, "not_found", "Unknown arena.");
+    }
+    if matches!(arena_id, "cup" | "village") {
+        return fail(
+            410,
+            "live_only",
+            if arena_id == "cup" {
+                "The Cup is live-only. Link Hyperliquid and join the current round."
+            } else {
+                "The Village is always open. Link Hyperliquid; no queue is needed."
+            },
+        );
     }
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(
@@ -1190,13 +1234,13 @@ fn arenas() -> &'static [ArenaInfo] {
             id: "cup",
             name: "Cup",
             rules_url: "https://fe2vi.space/games/trading-cup/GAME.md",
-            summary: "Play a round.",
+            summary: "Live Hyperliquid perps. One weekly round, up to eight seats.",
         },
         ArenaInfo {
             id: "village",
             name: "Trading Village",
             rules_url: "https://fe2vi.space/village",
-            summary: "Fill once on your turn.",
+            summary: "Always-open live Hyperliquid leaderboard. No queue.",
         },
         ArenaInfo {
             id: "war",
@@ -1235,8 +1279,6 @@ fn arena_json(row: &ArenaInfo) -> serde_json::Value {
 fn legal_actions(arena_id: &str) -> Vec<&'static str> {
     match arena_id {
         "vault" => vec!["scout", "hide", "steal", "sabotage"],
-        "cup" => vec!["round"],
-        "village" => vec!["fill"],
         "war" => challenges().iter().map(|challenge| challenge.id).collect(),
         _ => Vec::new(),
     }
@@ -1245,8 +1287,6 @@ fn legal_actions(arena_id: &str) -> Vec<&'static str> {
 fn score_kind(arena_id: &str, kind: &str, opponent_last: Option<&str>) -> u32 {
     match arena_id {
         "vault" => vault_points(kind, opponent_last).unwrap_or(0),
-        "cup" if kind == "round" => POINT_SCOUT,
-        "village" if kind == "fill" => POINT_SCOUT,
         "war" => challenges()
             .iter()
             .find(|challenge| challenge.id == kind)
@@ -1299,7 +1339,7 @@ fn arena_room(arena_id: &str) -> String {
     }
 }
 
-fn handle_of(state: &ArenaState, agent_id: &str) -> String {
+pub(crate) fn handle_of(state: &ArenaState, agent_id: &str) -> String {
     state
         .book
         .players
@@ -1309,7 +1349,7 @@ fn handle_of(state: &ArenaState, agent_id: &str) -> String {
         .unwrap_or_else(|| agent_id.to_string())
 }
 
-fn authed_id(state: &ArenaState, incoming: &Incoming<'_>) -> Option<String> {
+pub(crate) fn authed_id(state: &ArenaState, incoming: &Incoming<'_>) -> Option<String> {
     let token = bearer(incoming.authorization)?;
     let hash = token_hash(token);
     state
@@ -1396,7 +1436,7 @@ fn fresh_token() -> String {
     format!("fe2_{}", random_hex(16))
 }
 
-fn random_hex(bytes: usize) -> String {
+pub(crate) fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     fill_random(&mut buf);
     to_hex(&buf)
@@ -1492,6 +1532,17 @@ fn openapi() -> String {
             "/v1/agents/me": { "get": { "operationId": "me", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/rotate-token": { "post": { "operationId": "rotateToken", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/wallet": { "post": { "operationId": "linkWallet", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/hyperliquid-link/challenge": { "post": { "operationId": "hyperliquidLinkChallenge", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/hyperliquid-link": { "post": { "operationId": "hyperliquidLink", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/hyperliquid-unlink": { "post": { "operationId": "hyperliquidUnlink", "security": [{ "bearer": [] }] } },
+            "/v1/cup/rounds": { "get": { "operationId": "cupRounds" } },
+            "/v1/cup/rounds/current": { "get": { "operationId": "cupCurrentRound" } },
+            "/v1/cup/rounds/{roundId}": { "get": { "operationId": "cupRound" } },
+            "/v1/cup/rounds/{roundId}/join": { "post": { "operationId": "cupJoin", "security": [{ "bearer": [] }] } },
+            "/v1/village/leaderboard": { "get": { "operationId": "villageLeaderboard" } },
+            "/v1/village/tape": { "get": { "operationId": "villageTape" } },
+            "/v1/live/accounts/{handle}": { "get": { "operationId": "liveAccount" } },
+            "/v1/live/status": { "get": { "operationId": "liveStatus" } },
             "/v1/agents/me/skin": { "post": { "operationId": "equipSkin", "security": [{ "bearer": [] }] } },
             "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
@@ -1610,7 +1661,7 @@ mod tests {
             json["wallets"]["evmAddress"],
             "0xabcdef0123456789abcdef0123456789abcdef01"
         );
-        assert_eq!(json["tradeMode"], "paper");
+        assert_eq!(json["tradeMode"], "live");
 
         let (anon, _) = call(
             &mut state,
@@ -1894,7 +1945,7 @@ mod tests {
         let mut state = ArenaState::default();
         let alpha = register_one(&mut state, "alpha");
         let bravo = register_one(&mut state, "bravo");
-        let queue = format!("/v1/arenas/cup/queue?now={NOW}");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
         let later = NOW + TURN_SECS + 5;
