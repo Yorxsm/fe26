@@ -87,6 +87,15 @@ export type ArenaSeatScore = {
 
 export type LobbyPostKind = "intel" | "technique" | "banter" | "showoff";
 
+export const REACTION_KEYS = ["fire", "brain", "skull", "clap", "eyes"] as const;
+export type ReactionKey = (typeof REACTION_KEYS)[number];
+export type ReactionCounts = Record<ReactionKey, number>;
+
+export type ReactionSummary = {
+  counts: ReactionCounts;
+  viewerReaction: ReactionKey | null;
+};
+
 export type LobbyPost = {
   id: string;
   handle: string;
@@ -97,6 +106,8 @@ export type LobbyPost = {
   matchId?: string | null;
   unix: number;
   at: string;
+  reactions?: ReactionCounts;
+  viewerReaction?: ReactionKey | null;
 };
 
 export type ArenaMatchDetail = ArenaMatch & {
@@ -105,6 +116,8 @@ export type ArenaMatchDetail = ArenaMatch & {
   actionsDetail: ArenaAction[];
   learning: ArenaLearning | null;
   vault: VaultPublic | null;
+  reactions?: ReactionCounts;
+  viewerReaction?: ReactionKey | null;
 };
 
 async function readJson<T>(path: string): Promise<T | null> {
@@ -124,8 +137,9 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-export async function fetchLobbyPosts(limit = 30): Promise<LobbyPost[] | null> {
-  const body = await readJson<{ posts?: LobbyPost[] }>(`/v1/lobby/posts?limit=${limit}`);
+export async function fetchLobbyPosts(limit = 30, viewer?: string): Promise<LobbyPost[] | null> {
+  const suffix = viewer ? `&viewer=${encodeURIComponent(viewer)}` : "";
+  const body = await readJson<{ posts?: LobbyPost[] }>(`/v1/lobby/posts?limit=${limit}${suffix}`);
   if (!body) return null;
   return Array.isArray(body.posts) ? body.posts : [];
 }
@@ -140,7 +154,7 @@ export async function fetchRecentMatches(limit = 20): Promise<ArenaMatch[] | nul
   return Array.isArray(body.matches) ? body.matches : [];
 }
 
-export async function fetchMatch(matchId: string): Promise<ArenaMatchDetail | null> {
+export async function fetchMatch(matchId: string, viewer?: string): Promise<ArenaMatchDetail | null> {
   const body = await readJson<{
     matchId?: string;
     arenaId?: ArenaId;
@@ -153,7 +167,9 @@ export async function fetchMatch(matchId: string): Promise<ArenaMatchDetail | nu
     createdAt?: string | null;
     learning?: ArenaLearning | null;
     vault?: VaultPublic | null;
-  }>(`/v1/matches/${encodeURIComponent(matchId)}`);
+    reactions?: ReactionCounts;
+    viewerReaction?: ReactionKey | null;
+  }>(`/v1/matches/${encodeURIComponent(matchId)}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`);
   if (!body?.matchId || !body.arenaId) return null;
   const actions = Array.isArray(body.actions) ? body.actions : [];
   return {
@@ -169,7 +185,59 @@ export async function fetchMatch(matchId: string): Promise<ArenaMatchDetail | nu
     actionsDetail: actions,
     learning: body.learning ?? null,
     vault: body.vault ?? null,
+    reactions: body.reactions,
+    viewerReaction: body.viewerReaction ?? null,
   };
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch(`${apiBase()}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function reactToTarget(
+  targetType: "lobby_post" | "match",
+  targetId: string,
+  reaction: ReactionKey | "none",
+  viewerId: string,
+): Promise<ReactionSummary | null> {
+  const body = await postJson<{
+    reactions?: ReactionCounts;
+    viewerReaction?: ReactionKey | null;
+  }>(`/v1/${targetType === "match" ? "matches" : "lobby/posts"}/${encodeURIComponent(targetId)}/react`, {
+    reaction,
+    viewerId,
+  });
+  if (!body?.reactions) return null;
+  return { counts: body.reactions, viewerReaction: body.viewerReaction ?? null };
+}
+
+export async function reportLobbyPost(
+  postId: string,
+  viewerId: string,
+  reason = "spectator report",
+): Promise<{ reports: number; hidden: boolean } | null> {
+  const body = await postJson<{ reports?: number; hidden?: boolean }>(
+    `/v1/lobby/posts/${encodeURIComponent(postId)}/report`,
+    { viewerId, reason },
+  );
+  if (!body) return null;
+  return { reports: body.reports ?? 0, hidden: body.hidden ?? false };
 }
 
 export function shortAddress(value: string): string {

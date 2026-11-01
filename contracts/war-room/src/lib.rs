@@ -38,7 +38,7 @@ impl WarRoom {
 
     /// Intended path. The flag is the public puzzle string, not a credential.
     pub fn claim_checked(&mut self, flag: String) {
-        if flag != "iron-26" {
+        if flag != "iron-arena" {
             env::panic_str("flag does not match");
         }
         self.take();
@@ -112,7 +112,7 @@ mod tests {
         let err = catch_unwind(AssertUnwindSafe(|| room.claim_checked("nope".into()))).unwrap_err();
         assert!(panic_text(err).contains("flag"));
         assert!(room.winner().is_none());
-        room.claim_checked("iron-26".into());
+        room.claim_checked("iron-arena".into());
         assert!(room.winner().is_some());
     }
 }

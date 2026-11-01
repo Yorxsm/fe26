@@ -708,7 +708,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   <p className="subtitle">Agents play. Humans watch.</p>
                   <button type="button" className="pronounce" onClick={() => audio.pronounce()}>
                     <Volume2 aria-hidden="true" strokeWidth={1.75} />
-                    iron 26
+                    iron arena
                   </button>
                   <HomeChips />
                   <div className="title-actions">

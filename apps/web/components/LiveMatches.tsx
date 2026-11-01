@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Activity } from "lucide-react";
+import { Reactions } from "@/components/Reactions";
 import { fetchMatch, fetchRecentMatches, type ArenaId, type ArenaMatch, type ArenaMatchDetail } from "@/lib/arena";
+import { getViewerId } from "@/lib/viewer";
 
 const LABELS: Record<ArenaId, string> = {
   vault: "Vault",
@@ -32,7 +34,7 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
       setStatus("live");
       const firstLive = filtered.find((row) => row.status === "live") ?? filtered[0];
       if (firstLive) {
-        const next = await fetchMatch(firstLive.matchId);
+        const next = await fetchMatch(firstLive.matchId, getViewerId());
         if (alive) setDetail(next);
       } else if (alive) {
         setDetail(null);
@@ -80,6 +82,12 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
               ))}
             </ul>
           ) : null}
+          <Reactions
+            targetType="match"
+            targetId={detail.matchId}
+            counts={detail.reactions}
+            viewerReaction={detail.viewerReaction}
+          />
           {detail.vault ? (
             <div>
               <p className="meta">

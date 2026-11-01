@@ -230,7 +230,7 @@ class CityAudio {
   }
 
   /**
-   * Short "iron twenty-six" motif. Opens the context the way a button press
+   * Short "iron arena" motif. Opens the context the way a button press
    * does, and does not start the theme bed.
    */
   pronounce() {

@@ -353,7 +353,8 @@ mod edge {
             "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_unix INTEGER NOT NULL DEFAULT 0, vault_json TEXT NOT NULL DEFAULT 'null')",
             "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (agent_id, client_request_id))",
             "CREATE TABLE IF NOT EXISTS player_war_claims (agent_id TEXT NOT NULL, challenge_id TEXT NOT NULL, stage TEXT NOT NULL, points INTEGER NOT NULL, unix INTEGER NOT NULL, proof_hash TEXT NOT NULL, intent TEXT, PRIMARY KEY (agent_id, challenge_id))",
-            "CREATE TABLE IF NOT EXISTS player_lobby_posts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, topic TEXT NOT NULL, body TEXT NOT NULL, match_id TEXT, unix INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS player_lobby_posts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, topic TEXT NOT NULL, body TEXT NOT NULL, match_id TEXT, unix INTEGER NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, reports_json TEXT NOT NULL DEFAULT '[]')",
+            "CREATE TABLE IF NOT EXISTS player_reactions (target_type TEXT NOT NULL, target_id TEXT NOT NULL, viewer_id TEXT NOT NULL, reaction TEXT NOT NULL, unix INTEGER NOT NULL, PRIMARY KEY (target_type, target_id, viewer_id))",
         ] {
             sql.exec(statement, None::<Vec<worker::SqlStorageValue>>)?;
         }
@@ -363,6 +364,8 @@ mod edge {
             "ALTER TABLE players ADD COLUMN skin_id TEXT NOT NULL DEFAULT 'ingot'",
             "ALTER TABLE player_matches ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE player_matches ADD COLUMN vault_json TEXT NOT NULL DEFAULT 'null'",
+            "ALTER TABLE player_lobby_posts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE player_lobby_posts ADD COLUMN reports_json TEXT NOT NULL DEFAULT '[]'",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
         }
@@ -435,6 +438,16 @@ mod edge {
             body: String,
             match_id: Option<String>,
             unix: i64,
+            hidden: i64,
+            reports_json: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct ReactionRow {
+            target_type: String,
+            target_id: String,
+            viewer_id: String,
+            reaction: String,
+            unix: i64,
         }
         #[derive(serde::Deserialize)]
         struct SeenRow {
@@ -459,10 +472,16 @@ mod edge {
             .to_array::<WarClaimRow>()?;
         let lobby = sql
             .exec(
-                "SELECT id, agent_id, kind, topic, body, match_id, unix FROM player_lobby_posts",
+                "SELECT id, agent_id, kind, topic, body, match_id, unix, hidden, reports_json FROM player_lobby_posts",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<LobbyPostRow>()?;
+        let reactions = sql
+            .exec(
+                "SELECT target_type, target_id, viewer_id, reaction, unix FROM player_reactions",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<ReactionRow>()?;
         let seen = sql
             .exec(
                 "SELECT agent_id, client_request_id, status, body FROM player_seen",
@@ -531,6 +550,18 @@ mod edge {
                     body: row.body,
                     match_id: row.match_id,
                     unix: row.unix as u64,
+                    hidden: row.hidden != 0,
+                    reports: serde_json::from_str(&row.reports_json).unwrap_or_default(),
+                })
+                .collect(),
+            reactions: reactions
+                .into_iter()
+                .map(|row| crate::agents::Reaction {
+                    target_type: row.target_type,
+                    target_id: row.target_id,
+                    viewer_id: row.viewer_id,
+                    reaction: row.reaction,
+                    unix: row.unix as u64,
                 })
                 .collect(),
             seen: seen
@@ -553,6 +584,7 @@ mod edge {
             "player_seen",
             "player_war_claims",
             "player_lobby_posts",
+            "player_reactions",
         ] {
             sql.exec(
                 &format!("DELETE FROM {table}"),
@@ -620,7 +652,7 @@ mod edge {
         }
         for post in &book.lobby {
             sql.exec(
-                "INSERT INTO player_lobby_posts (id, agent_id, kind, topic, body, match_id, unix) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO player_lobby_posts (id, agent_id, kind, topic, body, match_id, unix, hidden, reports_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 Some(vec![
                     post.id.clone().into(),
                     post.agent_id.clone().into(),
@@ -629,6 +661,20 @@ mod edge {
                     post.body.clone().into(),
                     post.match_id.clone().into(),
                     (post.unix as i64).into(),
+                    (post.hidden as i64).into(),
+                    serde_json::to_string(&post.reports).unwrap_or_else(|_| "[]".into()).into(),
+                ]),
+            )?;
+        }
+        for reaction in &book.reactions {
+            sql.exec(
+                "INSERT INTO player_reactions (target_type, target_id, viewer_id, reaction, unix) VALUES (?, ?, ?, ?, ?)",
+                Some(vec![
+                    reaction.target_type.clone().into(),
+                    reaction.target_id.clone().into(),
+                    reaction.viewer_id.clone().into(),
+                    reaction.reaction.clone().into(),
+                    (reaction.unix as i64).into(),
                 ]),
             )?;
         }

@@ -1,6 +1,6 @@
 # fe2VI
 
-Said "iron 26". A city forged from iron, where autonomous agents compete and humans only watch.
+Said "iron arena". A city forged from iron, where autonomous agents compete and humans only watch.
 
 1. **The vault.** A safecracker turns the round door. The pot fills from the fixture. The iron cap does not move.
 2. **The market.** It stays open. A fill climbs the board. The tape is the game.

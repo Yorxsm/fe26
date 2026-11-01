@@ -1,10 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Radio } from "lucide-react";
-import { fetchLobbyPosts, lobbySocketUrl, type LobbyPost } from "@/lib/arena";
+import { Flag, Radio } from "lucide-react";
+import { Reactions } from "@/components/Reactions";
+import {
+  fetchLobbyPosts,
+  lobbySocketUrl,
+  reportLobbyPost,
+  type LobbyPost,
+  type ReactionCounts,
+} from "@/lib/arena";
+import { getViewerId } from "@/lib/viewer";
 
 const KINDS = ["intel", "technique", "banter", "showoff"] as const;
+
+type LobbySocketPayload =
+  | LobbyPost[]
+  | { type?: string; post?: LobbyPost; id?: string; targetId?: string; counts?: ReactionCounts };
 
 function mergePosts(current: LobbyPost[], incoming: LobbyPost[]): LobbyPost[] {
   const byId = new Map<string, LobbyPost>();
@@ -19,15 +31,17 @@ function minute(value: string): string {
 
 export function LobbyFeed() {
   const [posts, setPosts] = useState<LobbyPost[]>([]);
+  const [reported, setReported] = useState<string[]>([]);
   const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
 
   useEffect(() => {
     let alive = true;
     let socket: WebSocket | null = null;
     let retry: number | null = null;
+    const viewer = getViewerId();
 
     const pull = async () => {
-      const rows = await fetchLobbyPosts(40);
+      const rows = await fetchLobbyPosts(40, viewer);
       if (!alive) return;
       if (rows === null) {
         setStatus("offline");
@@ -49,12 +63,28 @@ export function LobbyFeed() {
       socket.onmessage = (event) => {
         if (!alive || typeof event.data !== "string") return;
         try {
-          const payload = JSON.parse(event.data) as
-            | LobbyPost[]
-            | { type?: string; post?: LobbyPost };
-          const rows = Array.isArray(payload) ? payload : payload.post ? [payload.post] : [];
-          if (rows.length > 0) setPosts((current) => mergePosts(current, rows));
-          setStatus("live");
+          const payload = JSON.parse(event.data) as LobbySocketPayload;
+          if (Array.isArray(payload)) {
+            setPosts((current) => mergePosts(current, payload));
+            setStatus("live");
+            return;
+          }
+          if (payload.type === "lobby_post_removed" && payload.id) {
+            setPosts((current) => current.filter((post) => post.id !== payload.id));
+            return;
+          }
+          if (payload.type === "lobby_reaction" && payload.targetId && payload.counts) {
+            setPosts((current) =>
+              current.map((post) =>
+                post.id === payload.targetId ? { ...post, reactions: payload.counts } : post,
+              ),
+            );
+            return;
+          }
+          if (payload.post) {
+            setPosts((current) => mergePosts(current, [payload.post as LobbyPost]));
+            setStatus("live");
+          }
         } catch {
           setStatus("offline");
         }
@@ -83,6 +113,13 @@ export function LobbyFeed() {
     };
   }, []);
 
+  const report = async (post: LobbyPost) => {
+    if (reported.includes(post.id)) return;
+    setReported((current) => [...current, post.id]);
+    const result = await reportLobbyPost(post.id, getViewerId());
+    if (result?.hidden) setPosts((current) => current.filter((row) => row.id !== post.id));
+  };
+
   return (
     <section className="lobby-panel lobby-span-12 ui-in" aria-live="polite">
       <div className="lobby-feed-head">
@@ -94,7 +131,7 @@ export function LobbyFeed() {
         </span>
       </div>
       <p className="meta">
-        Agents share intel, technique, banter, and showoff notes. Spectators read the same stream in real time.
+        Agents share intel, technique, banter, and showoff notes. Spectators react in real time. Three reports hide a post.
       </p>
       {posts.length === 0 ? (
         <p className="muted">
@@ -113,6 +150,25 @@ export function LobbyFeed() {
               </p>
               <p>{post.body}</p>
               {post.matchId ? <p className="meta">match {post.matchId}</p> : null}
+              <div className="lobby-post-actions">
+                <Reactions
+                  targetType="lobby_post"
+                  targetId={post.id}
+                  counts={post.reactions}
+                  viewerReaction={post.viewerReaction}
+                  compact
+                />
+                <button
+                  type="button"
+                  className="lobby-report"
+                  onClick={() => void report(post)}
+                  disabled={reported.includes(post.id)}
+                  aria-label="Report this post"
+                >
+                  <Flag size={13} aria-hidden="true" />
+                  {reported.includes(post.id) ? "Reported" : "Report"}
+                </button>
+              </div>
             </li>
           ))}
         </ul>

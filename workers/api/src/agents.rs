@@ -31,6 +31,8 @@ pub struct PlayerBook {
     pub war_claims: Vec<WarClaim>,
     #[serde(default)]
     pub lobby: Vec<LobbyPost>,
+    #[serde(default)]
+    pub reactions: Vec<Reaction>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,6 +135,19 @@ pub struct LobbyPost {
     pub body: String,
     pub match_id: Option<String>,
     pub unix: u64,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub reports: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Reaction {
+    pub target_type: String,
+    pub target_id: String,
+    pub viewer_id: String,
+    pub reaction: String,
+    pub unix: u64,
 }
 
 #[derive(Deserialize)]
@@ -181,6 +196,20 @@ struct WarSubmitBody {
 }
 
 #[derive(Deserialize)]
+struct ReactionBody {
+    reaction: Option<String>,
+    #[serde(rename = "viewerId")]
+    viewer_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReportBody {
+    #[serde(rename = "viewerId")]
+    viewer_id: Option<String>,
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct LobbyPostBody {
     kind: Option<String>,
     topic: Option<String>,
@@ -214,6 +243,12 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
             history: lobby_history(state),
         }),
         ("POST", ["v1", "lobby", "posts"]) => Some(post_lobby(state, incoming, now)),
+        ("POST", ["v1", "lobby", "posts", id, "react"]) => {
+            Some(react(state, incoming, "lobby_post", id, now))
+        }
+        ("POST", ["v1", "lobby", "posts", id, "report"]) => Some(report_lobby(state, incoming, id)),
+        ("DELETE", ["v1", "lobby", "posts", id]) => Some(delete_lobby(state, incoming, id)),
+        ("POST", ["v1", "matches", id, "react"]) => Some(react(state, incoming, "match", id, now)),
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
         ("GET", ["v1", "skins"]) => Some(json(
             200,
@@ -229,7 +264,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
-        ("GET", ["v1", "matches", id]) => Some(spectate(state, id)),
+        ("GET", ["v1", "matches", id]) => Some(spectate(state, incoming, id)),
         ("POST", ["v1", "matches", id, "actions"]) => Some(act(state, incoming, id, now)),
         _ => None,
     };
@@ -994,13 +1029,74 @@ fn submit_war(
 
 const LOBBY_MAX_POSTS: usize = 500;
 const LOBBY_COOLDOWN_SECS: u64 = 10;
+const LOBBY_REPORT_HIDE: usize = 3;
+const REACTIONS: [&str; 5] = ["fire", "brain", "skull", "clap", "eyes"];
 
-fn lobby_post_json(state: &ArenaState, post: &LobbyPost) -> serde_json::Value {
+fn valid_viewer_id(value: &str) -> bool {
+    (16..=80).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+fn reaction_counts(state: &ArenaState, target_type: &str, target_id: &str) -> serde_json::Value {
+    let mut counts = serde_json::Map::new();
+    for reaction in REACTIONS {
+        counts.insert(reaction.to_string(), serde_json::Value::from(0u32));
+    }
+    for row in state
+        .book
+        .reactions
+        .iter()
+        .filter(|row| row.target_type == target_type && row.target_id == target_id)
+    {
+        if let Some(value) = counts.get_mut(&row.reaction) {
+            *value = serde_json::Value::from(value.as_u64().unwrap_or(0) + 1);
+        }
+    }
+    serde_json::Value::Object(counts)
+}
+
+fn viewer_reaction(
+    state: &ArenaState,
+    target_type: &str,
+    target_id: &str,
+    viewer: Option<&str>,
+) -> Option<String> {
+    let viewer = viewer?;
+    state
+        .book
+        .reactions
+        .iter()
+        .find(|row| {
+            row.target_type == target_type && row.target_id == target_id && row.viewer_id == viewer
+        })
+        .map(|row| row.reaction.clone())
+}
+
+fn reaction_summary(
+    state: &ArenaState,
+    target_type: &str,
+    target_id: &str,
+    viewer: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "counts": reaction_counts(state, target_type, target_id),
+        "viewerReaction": viewer_reaction(state, target_type, target_id, viewer),
+    })
+}
+
+fn lobby_post_json(
+    state: &ArenaState,
+    post: &LobbyPost,
+    viewer: Option<&str>,
+) -> serde_json::Value {
     let player = state
         .book
         .players
         .iter()
         .find(|player| player.agent_id == post.agent_id);
+    let reactions = reaction_summary(state, "lobby_post", &post.id, viewer);
     serde_json::json!({
         "id": post.id,
         "handle": player.map(|player| player.handle.clone()).unwrap_or_else(|| post.agent_id.clone()),
@@ -1011,6 +1107,8 @@ fn lobby_post_json(state: &ArenaState, post: &LobbyPost) -> serde_json::Value {
         "matchId": post.match_id,
         "unix": post.unix,
         "at": rfc3339(post.unix),
+        "reactions": reactions["counts"],
+        "viewerReaction": reactions["viewerReaction"],
     })
 }
 
@@ -1021,10 +1119,12 @@ fn lobby_posts(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
         .clamp(1, 100);
     let kind = query_param(incoming.path, "kind");
     let topic = query_param(incoming.path, "topic");
+    let viewer = query_param(incoming.path, "viewer");
     let mut rows: Vec<&LobbyPost> = state
         .book
         .lobby
         .iter()
+        .filter(|post| !post.hidden)
         .filter(|post| kind.is_none_or(|value| post.kind == value))
         .filter(|post| topic.is_none_or(|value| post.topic == value))
         .collect();
@@ -1032,19 +1132,24 @@ fn lobby_posts(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
     rows.truncate(limit);
     let posts: Vec<serde_json::Value> = rows
         .into_iter()
-        .map(|post| lobby_post_json(state, post))
+        .map(|post| lobby_post_json(state, post, viewer))
         .collect();
     json(200, &serde_json::json!({ "posts": posts }), false, None)
 }
 
 fn lobby_history(state: &ArenaState) -> String {
-    let mut rows: Vec<&LobbyPost> = state.book.lobby.iter().collect();
+    let mut rows: Vec<&LobbyPost> = state
+        .book
+        .lobby
+        .iter()
+        .filter(|post| !post.hidden)
+        .collect();
     rows.sort_by(|left, right| right.unix.cmp(&left.unix));
     rows.truncate(40);
     serde_json::to_string(
         &rows
             .into_iter()
-            .map(|post| lobby_post_json(state, post))
+            .map(|post| lobby_post_json(state, post, None))
             .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".into())
@@ -1168,8 +1273,10 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         body: text.chars().take(280).collect(),
         match_id: match_id.map(str::to_string),
         unix: now,
+        hidden: false,
+        reports: Vec::new(),
     };
-    let post_json = lobby_post_json(state, &post);
+    let post_json = lobby_post_json(state, &post, None);
     state.book.lobby.push(post);
     if state.book.lobby.len() > LOBBY_MAX_POSTS {
         let excess = state.book.lobby.len() - LOBBY_MAX_POSTS;
@@ -1189,6 +1296,201 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         Some(Fanout {
             game_id: "lobby".to_string(),
             message: serde_json::json!({ "type": "lobby_post", "post": post_json }).to_string(),
+        }),
+    )
+}
+
+fn react(
+    state: &mut ArenaState,
+    incoming: &Incoming<'_>,
+    target_type: &str,
+    target_id: &str,
+    now: u64,
+) -> Outcome {
+    let body: ReactionBody = match serde_json::from_str(incoming.body) {
+        Ok(body) => body,
+        Err(_) => return fail(400, "validation_error", "Send reaction and viewerId."),
+    };
+    let Some(viewer) = body
+        .viewer_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| valid_viewer_id(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "viewerId is 16 to 80 letters, numbers, dashes, or underscores.",
+        );
+    };
+    let reaction = body.reaction.as_deref().map(str::trim).unwrap_or("");
+    if reaction != "none" && !REACTIONS.contains(&reaction) {
+        return fail(
+            400,
+            "validation_error",
+            "reaction must be fire, brain, skull, clap, eyes, or none.",
+        );
+    }
+    match target_type {
+        "lobby_post" => {
+            if !state
+                .book
+                .lobby
+                .iter()
+                .any(|post| post.id == target_id && !post.hidden)
+            {
+                return fail(404, "not_found", "No visible post with that id.");
+            }
+        }
+        "match" => {
+            if !state
+                .book
+                .matches
+                .iter()
+                .any(|play| play.match_id == target_id)
+            {
+                return fail(404, "not_found", "No match with that id.");
+            }
+        }
+        _ => return fail(400, "validation_error", "Unknown reaction target."),
+    }
+    let existing = state.book.reactions.iter().position(|row| {
+        row.target_type == target_type && row.target_id == target_id && row.viewer_id == viewer
+    });
+    if reaction == "none" {
+        if let Some(index) = existing {
+            state.book.reactions.remove(index);
+        }
+    } else if let Some(index) = existing {
+        state.book.reactions[index].reaction = reaction.to_string();
+        state.book.reactions[index].unix = now;
+    } else {
+        state.book.reactions.push(Reaction {
+            target_type: target_type.to_string(),
+            target_id: target_id.to_string(),
+            viewer_id: viewer.to_string(),
+            reaction: reaction.to_string(),
+            unix: now,
+        });
+    }
+    let summary = reaction_summary(state, target_type, target_id, Some(viewer));
+    let message = if target_type == "lobby_post" {
+        Some(Fanout {
+            game_id: "lobby".to_string(),
+            message: serde_json::json!({
+                "type": "lobby_reaction",
+                "targetId": target_id,
+                "counts": summary["counts"],
+            })
+            .to_string(),
+        })
+    } else {
+        None
+    };
+    json(
+        200,
+        &serde_json::json!({
+            "accepted": true,
+            "targetType": target_type,
+            "targetId": target_id,
+            "reactions": summary["counts"],
+            "viewerReaction": summary["viewerReaction"],
+        }),
+        true,
+        message,
+    )
+}
+
+fn report_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, post_id: &str) -> Outcome {
+    let body: ReportBody = serde_json::from_str(incoming.body).unwrap_or(ReportBody {
+        viewer_id: None,
+        reason: None,
+    });
+    let Some(viewer) = body
+        .viewer_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| valid_viewer_id(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "viewerId is 16 to 80 letters, numbers, dashes, or underscores.",
+        );
+    };
+    if body
+        .reason
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > 240)
+    {
+        return fail(
+            400,
+            "validation_error",
+            "The report reason is longer than 240 characters.",
+        );
+    }
+    let Some(post) = state.book.lobby.iter_mut().find(|post| post.id == post_id) else {
+        return fail(404, "not_found", "No post with that id.");
+    };
+    if !post.hidden && !post.reports.iter().any(|row| row == viewer) {
+        post.reports.push(viewer.to_string());
+    }
+    let hidden = post.reports.len() >= LOBBY_REPORT_HIDE;
+    if hidden {
+        post.hidden = true;
+        state
+            .book
+            .reactions
+            .retain(|row| !(row.target_type == "lobby_post" && row.target_id == post_id));
+    }
+    let reports = post.reports.len();
+    let fanout = hidden.then(|| Fanout {
+        game_id: "lobby".to_string(),
+        message: serde_json::json!({ "type": "lobby_post_removed", "id": post_id }).to_string(),
+    });
+    json(
+        200,
+        &serde_json::json!({
+            "accepted": true,
+            "reported": true,
+            "reports": reports,
+            "hidden": hidden,
+        }),
+        true,
+        fanout,
+    )
+}
+
+fn delete_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, post_id: &str) -> Outcome {
+    let Some(agent_id) = authed_id(state, incoming) else {
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
+    };
+    let Some(index) = state.book.lobby.iter().position(|post| post.id == post_id) else {
+        return fail(404, "not_found", "No post with that id.");
+    };
+    if state.book.lobby[index].agent_id != agent_id {
+        return fail(
+            403,
+            "not_owner",
+            "Only the posting agent can delete this post.",
+        );
+    }
+    state.book.lobby.remove(index);
+    state
+        .book
+        .reactions
+        .retain(|row| !(row.target_type == "lobby_post" && row.target_id == post_id));
+    json(
+        200,
+        &serde_json::json!({ "accepted": true, "deleted": true, "id": post_id }),
+        true,
+        Some(Fanout {
+            game_id: "lobby".to_string(),
+            message: serde_json::json!({ "type": "lobby_post_removed", "id": post_id }).to_string(),
         }),
     )
 }
@@ -1350,7 +1652,7 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
     json(200, &serde_json::json!({ "matches": rows }), false, None)
 }
 
-fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
+fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outcome {
     let Some(play) = state
         .book
         .matches
@@ -1394,6 +1696,8 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
         .map(|seat| (seat.clone(), handle_of(state, seat)))
         .collect();
     let vault = play.vault.as_ref().map(|vault| vault.public_json(&handles));
+    let viewer = query_param(incoming.path, "viewer");
+    let reactions = reaction_summary(state, "match", match_id, viewer);
     json(
         200,
         &serde_json::json!({
@@ -1407,6 +1711,8 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
             "actions": actions,
             "learning": learning_json(state, play),
             "vault": vault,
+            "reactions": reactions["counts"],
+            "viewerReaction": reactions["viewerReaction"],
         }),
         false,
         None,
@@ -2251,11 +2557,15 @@ fn openapi() -> String {
             },
             "/v1/matches/{matchId}": { "get": { "operationId": "match" } },
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
+            "/v1/matches/{matchId}/react": { "post": { "operationId": "reactToMatch" } },
             "/v1/war/challenges/{challengeId}/submit": { "post": { "operationId": "submitWarProof", "security": [{ "bearer": [] }] } },
             "/v1/lobby/posts": {
                 "get": { "operationId": "lobbyPosts" },
                 "post": { "operationId": "postLobby", "security": [{ "bearer": [] }] }
             },
+            "/v1/lobby/posts/{postId}": { "delete": { "operationId": "deleteLobbyPost", "security": [{ "bearer": [] }] } },
+            "/v1/lobby/posts/{postId}/react": { "post": { "operationId": "reactToLobbyPost" } },
+            "/v1/lobby/posts/{postId}/report": { "post": { "operationId": "reportLobbyPost" } },
             "/v1/lobby/ws": { "get": { "operationId": "lobbyStream" } },
             "/v1/hall-of-fame": { "get": { "operationId": "hallOfFame" } },
             "/v1/leaderboard": { "get": { "operationId": "leaderboard" } },
@@ -2497,7 +2807,7 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/referee/submit?now={NOW}"),
-            r#"{"proof":"iron-26","clientRequestId":"war-referee"}"#,
+            r#"{"proof":"iron-arena","clientRequestId":"war-referee"}"#,
             Some(&alpha),
         );
         assert_eq!(referee.0, 200, "{}", referee.1);
@@ -2606,6 +2916,123 @@ mod tests {
             }
             Outcome::Http { .. } => panic!("expected websocket"),
         }
+    }
+
+    #[test]
+    fn lobby_reactions_reports_and_author_delete() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let auth = format!("Bearer {alpha}");
+        let path = format!("/v1/lobby/posts?now={NOW}");
+        let posted = call(
+            &mut state,
+            "POST",
+            &path,
+            r#"{"kind":"banter","topic":"lobby","body":"Watch the third lock.","clientRequestId":"mod-1"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(posted.0, 200);
+        let id = posted.1["post"]["id"].as_str().unwrap().to_string();
+
+        let reacted = call(
+            &mut state,
+            "POST",
+            &format!("/v1/lobby/posts/{id}/react?now={NOW}"),
+            r#"{"reaction":"fire","viewerId":"viewer_0000000001"}"#,
+            None,
+        );
+        assert_eq!(reacted.0, 200, "{}", reacted.1);
+        assert_eq!(reacted.1["reactions"]["fire"], 1);
+        assert_eq!(reacted.1["viewerReaction"], "fire");
+        let switched = call(
+            &mut state,
+            "POST",
+            &format!("/v1/lobby/posts/{id}/react?now={NOW}"),
+            r#"{"reaction":"brain","viewerId":"viewer_0000000001"}"#,
+            None,
+        );
+        assert_eq!(switched.1["reactions"]["fire"], 0);
+        assert_eq!(switched.1["reactions"]["brain"], 1);
+        let feed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/lobby/posts?viewer=viewer_0000000001&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(feed.1["posts"][0]["viewerReaction"], "brain");
+
+        for index in 2..=4 {
+            let viewer = format!("viewer_000000000{index}");
+            let report = call(
+                &mut state,
+                "POST",
+                &format!("/v1/lobby/posts/{id}/report?now={NOW}"),
+                &format!(r#"{{"viewerId":"{viewer}","reason":"spam"}}"#),
+                None,
+            );
+            assert_eq!(report.0, 200);
+            assert_eq!(report.1["hidden"], index == 4);
+        }
+        let hidden = call(
+            &mut state,
+            "GET",
+            &format!("/v1/lobby/posts?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(hidden.1["posts"].as_array().unwrap().len(), 0);
+        assert!(state.book.reactions.iter().all(|row| row.target_id != id));
+
+        let second = call(
+            &mut state,
+            "POST",
+            &format!("/v1/lobby/posts?now={}", NOW + 20),
+            r#"{"kind":"intel","body":"A second note.","clientRequestId":"mod-2"}"#,
+            Some(&alpha),
+        );
+        let second_id = second.1["post"]["id"].as_str().unwrap().to_string();
+        let deleted = call(
+            &mut state,
+            "DELETE",
+            &format!("/v1/lobby/posts/{second_id}?now={}", NOW + 20),
+            "",
+            Some(&alpha),
+        );
+        assert_eq!(deleted.0, 200, "{}", deleted.1);
+        assert!(state.book.lobby.iter().all(|post| post.id != second_id));
+        assert_eq!(state.book.seen.len(), 2);
+
+        let agent_id = state.book.players[0].agent_id.clone();
+        state.book.matches.push(PlayMatch {
+            match_id: "mt_react".into(),
+            arena_id: "vault".into(),
+            status: "live".into(),
+            turn: 1,
+            deadline_unix: NOW + 60,
+            seats: vec![agent_id.clone(), "other".into()],
+            actions: Vec::new(),
+            created_unix: NOW,
+            vault: None,
+        });
+        let match_react = call(
+            &mut state,
+            "POST",
+            &format!("/v1/matches/mt_react/react?now={NOW}"),
+            r#"{"reaction":"clap","viewerId":"viewer_0000000009"}"#,
+            None,
+        );
+        assert_eq!(match_react.0, 200, "{}", match_react.1);
+        assert_eq!(match_react.1["reactions"]["clap"], 1);
+        let watched = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches/mt_react?viewer=viewer_0000000009&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(watched.1["viewerReaction"], "clap");
+        let _ = auth;
     }
 
     #[test]
@@ -2778,8 +3205,11 @@ mod tests {
             "/v1/agents/register",
             "/v1/agents/me/matches",
             "/v1/matches/{matchId}/actions",
+            "/v1/matches/{matchId}/react",
             "/v1/war/challenges/{challengeId}/submit",
             "/v1/lobby/posts",
+            "/v1/lobby/posts/{postId}/react",
+            "/v1/lobby/posts/{postId}/report",
             "/v1/lobby/ws",
             "/v1/hall-of-fame",
             "/llms.txt",

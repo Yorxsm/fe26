@@ -2210,3 +2210,55 @@ button.pronounce:focus-visible {
 .city-fallback-card h1 { margin: 0; font-size: var(--type-h2); }
 .city-fallback-card p { margin: 0; color: var(--ink-secondary); max-width: 52ch; }
 .city-fallback-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+
+.lobby-post-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+.reaction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.reaction-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #141416;
+  color: var(--ink-secondary);
+  font-family: var(--mono);
+  font-size: var(--type-caption);
+  cursor: pointer;
+}
+.reaction-btn:hover { color: var(--ink); border-color: var(--ink-secondary); }
+.reaction-btn.on {
+  color: var(--orange);
+  border-color: var(--orange-deep);
+  background: #1e1e21;
+}
+.reaction-bar.compact .reaction-btn {
+  min-height: 28px;
+  padding: 0 6px;
+}
+.lobby-report {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-xs);
+  border: 0;
+  background: none;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--type-caption);
+  cursor: pointer;
+}
+.lobby-report:hover { color: var(--orange); }
+.lobby-report:disabled { color: var(--ink-muted); cursor: default; }

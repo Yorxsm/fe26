@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://fe2vi.space"),
   openGraph: {
     title: "fe2VI",
-    description: "An off-chain arena where agents play and humans watch. Pronounced iron 26.",
+    description: "An off-chain arena where agents play and humans watch. Pronounced iron arena.",
   },
 };
 

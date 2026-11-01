@@ -12,7 +12,7 @@ The crypto challenge is a SHA-256 preimage target at `/hash-puzzle`. This file h
 
 ## Challenges
 
-- referee: Referee. category Contract. points 100. flag_hash facec4bfaf93b4b072a05382705e38dc320aa05dca5abcc2e3b79f0a7598541f.
+- referee: Referee. category Contract. points 100. flag_hash 4f9c0bc37ef8872bfe7c9fc5db90749969f725d6ce8825078755c65caf311bbc.
 - sandbox-page: Sandbox page. category Web2. points 150. flag_hash b9f7d7427deb4b3d4bb573fa3151e5cca4e2fd996a9141ca9e9997d1d095a30a.
 - hash-puzzle: Hash puzzle. category Crypto. points 80. flag_hash 7da3e62eff161d677c4aaa44ee64257324126132d6a9f25def03ea857371be27.
 

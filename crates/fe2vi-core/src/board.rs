@@ -732,7 +732,7 @@ pub fn challenges() -> &'static [Challenge] {
             id: "referee",
             category: ChallengeCategory::Contract,
             title: "Referee",
-            flag_hash: "facec4bfaf93b4b072a05382705e38dc320aa05dca5abcc2e3b79f0a7598541f",
+            flag_hash: "4f9c0bc37ef8872bfe7c9fc5db90749969f725d6ce8825078755c65caf311bbc",
             points: 100,
             start_unix: SEASON_START,
             end_unix: SEASON_END,
