@@ -1,7 +1,9 @@
 //! City, Trading Village, and the mock Intents adapter. None of these paths
 //! mark an event verified, and none of them call the hosted Intents API.
 
-use fe2vi_core::{districts, follow as follow_edge, unfollow as unfollow_edge, Venue};
+use fe2vi_core::{
+    districts, follow as follow_edge, unfollow as unfollow_edge, PointRoom, PublicRow, Venue,
+};
 use fe2vi_intents::{
     issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
     MOCK_USD_PER_NEAR_CENTS,
@@ -165,6 +167,79 @@ pub fn public_board(
             "source": "mock",
             "rows": page,
             "recent": recent,
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn hall_of_fame(state: &crate::logic::ArenaState, now: u64) -> Outcome {
+    fn ranked(mut rows: Vec<PublicRow>) -> Vec<PublicRow> {
+        rows.retain(|row| row.points > 0);
+        rows.sort_by(|left, right| {
+            right
+                .points
+                .cmp(&left.points)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.agent.cmp(&right.agent))
+        });
+        let mut last_points = None;
+        let mut last_rank = 0u32;
+        for (index, row) in rows.iter_mut().enumerate() {
+            if last_points == Some(row.points) {
+                row.rank = last_rank;
+            } else {
+                last_rank = index as u32 + 1;
+                last_points = Some(row.points);
+                row.rank = last_rank;
+            }
+        }
+        rows
+    }
+
+    let all = ranked(crate::agents::registered_rows(
+        state,
+        now,
+        fe2vi_core::BoardWindow::All,
+        None,
+    ));
+    let season = ranked(crate::agents::registered_rows(
+        state,
+        now,
+        fe2vi_core::BoardWindow::Season,
+        None,
+    ));
+    let rooms: Vec<serde_json::Value> = [
+        PointRoom::Vault,
+        PointRoom::Cup,
+        PointRoom::Village,
+        PointRoom::War,
+    ]
+    .into_iter()
+    .map(|room| {
+        let leader = ranked(crate::agents::registered_rows(
+            state,
+            now,
+            fe2vi_core::BoardWindow::All,
+            Some(room),
+        ))
+        .into_iter()
+        .next();
+        serde_json::json!({
+            "room": room.as_str(),
+            "leader": leader,
+        })
+    })
+    .collect();
+    json(
+        200,
+        &serde_json::json!({
+            "window": "all",
+            "now": now,
+            "totalAgents": all.len(),
+            "champions": all.into_iter().take(10).collect::<Vec<_>>(),
+            "rooms": rooms,
+            "season": season.into_iter().take(10).collect::<Vec<_>>(),
         }),
         false,
         None,

@@ -226,6 +226,9 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ("POST", ["v1", "events"]) => ingest_event(state, incoming),
         ("GET", ["v1", "city"]) => crate::surface::city(),
         ("GET", ["v1", "schedule"]) => crate::surface::schedule(query_now(incoming.path)),
+        ("GET", ["v1", "hall-of-fame"]) => {
+            crate::surface::hall_of_fame(state, query_now(incoming.path))
+        }
         ("GET", ["v1", "leaderboard"]) => crate::surface::public_board(
             state,
             query_param(incoming.path, "window"),

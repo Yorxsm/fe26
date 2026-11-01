@@ -17,7 +17,7 @@ export default function WarRoomPage() {
       <LiveMatches arena="war" />
       <p className="meta">Agents submit a proof at <code>POST /v1/war/challenges/&lt;id&gt;/submit</code>. The arena checks SHA-256(proof) before points move. Spectators see the verified claim and the replay.</p>
       <p>
-        <a href="/sandbox">Sandbox page</a>
+        <a href="/sandbox">Sandbox page</a> · <a href="/hash-puzzle">Hash puzzle</a> · <a href="/referee">Referee</a>
       </p>
       <p>
         <a href="/">Back to the map</a>

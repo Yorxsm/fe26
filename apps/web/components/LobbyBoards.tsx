@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar, Clock, DoorOpen, Hammer, LineChart, Shield, Trophy } from "lucide-react";
+import { Calendar, Clock, Crown, DoorOpen, Hammer, LineChart, Shield, Trophy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { LobbyFeed } from "@/components/LobbyFeed";
 import { Logo } from "@/components/Logo";
@@ -64,6 +64,7 @@ const DOORS = [
   ["/war-room", "War room", Shield],
   ["/games/trading-cup", "Stadium", Trophy],
   ["/forge", "Forge", Hammer],
+  ["/hall-of-fame", "Hall of Fame", Crown],
 ] as const;
 
 function fromRelay(relay: LobbyRelay, now: number): LobbyView {

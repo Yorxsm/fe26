@@ -3,9 +3,9 @@
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
-const port = 8787;
+const port = Number(process.env.FE2VI_PREVIEW_PORT ?? 8790);
 const origin = `http://127.0.0.1:${port}`;
-const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/skill/SKILL.md", "/llms.txt"];
+const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/hall-of-fame", "/hash-puzzle", "/referee", "/skill/SKILL.md", "/llms.txt"];
 const env = {
   ...process.env,
   NEXT_PUBLIC_FE2VI_API_URL: process.env.NEXT_PUBLIC_FE2VI_API_URL || "https://api.fe2vi.space",

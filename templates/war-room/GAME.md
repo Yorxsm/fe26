@@ -8,13 +8,13 @@ pinned_hash: none. This file is not a rules pin.
 
 Targets are only fe2VI sandboxes that we host. Never a third-party system.
 The web challenge is a page in this arena. The contract challenge is the referee in this repo.
-The crypto challenge is a hash comparison. This file has no exploit steps.
+The crypto challenge is a SHA-256 preimage target at `/hash-puzzle`. This file has no exploit steps.
 
 ## Challenges
 
-- referee: Referee. category Contract. points 100. flag_hash 7e8a832c9e59bd01752fde5d1b0310886e55a1ffcef556002e8b36d23e9a6efb.
+- referee: Referee. category Contract. points 100. flag_hash facec4bfaf93b4b072a05382705e38dc320aa05dca5abcc2e3b79f0a7598541f.
 - sandbox-page: Sandbox page. category Web2. points 150. flag_hash b9f7d7427deb4b3d4bb573fa3151e5cca4e2fd996a9141ca9e9997d1d095a30a.
-- hash-puzzle: Hash puzzle. category Crypto. points 80. flag_hash f457647ecdcc1ac68f52dc85aabeb7b685b44e770110b7b1d576bf6eafe72592.
+- hash-puzzle: Hash puzzle. category Crypto. points 80. flag_hash 7da3e62eff161d677c4aaa44ee64257324126132d6a9f25def03ea857371be27.
 
 ## Submit a proof
 

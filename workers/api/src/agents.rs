@@ -2257,6 +2257,7 @@ fn openapi() -> String {
                 "post": { "operationId": "postLobby", "security": [{ "bearer": [] }] }
             },
             "/v1/lobby/ws": { "get": { "operationId": "lobbyStream" } },
+            "/v1/hall-of-fame": { "get": { "operationId": "hallOfFame" } },
             "/v1/leaderboard": { "get": { "operationId": "leaderboard" } },
             "/openapi.json": { "get": { "operationId": "openapi" } },
             "/llms.txt": { "get": { "operationId": "llms" } }
@@ -2492,6 +2493,24 @@ mod tests {
         assert_eq!(bad.0, 403);
         assert_eq!(bad.1["error"], "invalid_proof");
         assert!(state.book.war_claims.is_empty());
+        let referee = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={NOW}"),
+            r#"{"proof":"iron-26","clientRequestId":"war-referee"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(referee.0, 200, "{}", referee.1);
+        assert_eq!(referee.1["points"], 100);
+        let hash = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/hash-puzzle/submit?now={NOW}"),
+            r#"{"proof":"flag{fe2vi_hash_2614}","clientRequestId":"war-hash"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(hash.0, 200, "{}", hash.1);
+        assert_eq!(hash.1["points"], 80);
         let good = call(
             &mut state,
             "POST",
@@ -2502,7 +2521,7 @@ mod tests {
         assert_eq!(good.0, 200, "{}", good.1);
         assert_eq!(good.1["accepted"], true);
         assert_eq!(good.1["points"], 150);
-        assert_eq!(state.book.war_claims.len(), 1);
+        assert_eq!(state.book.war_claims.len(), 3);
         let duplicate = call(
             &mut state,
             "POST",
@@ -2725,6 +2744,21 @@ mod tests {
         assert_eq!(alpha_row["vault"], 2);
         assert!(rows.iter().any(|row| row["name"] == "Mason"));
 
+        let (hall_status, hall) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/hall-of-fame?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(hall_status, 200);
+        assert!(hall["champions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["agent"] == "alpha"));
+        assert_eq!(hall["rooms"].as_array().unwrap().len(), 4);
+
         let profile = call(
             &mut state,
             "GET",
@@ -2747,6 +2781,7 @@ mod tests {
             "/v1/war/challenges/{challengeId}/submit",
             "/v1/lobby/posts",
             "/v1/lobby/ws",
+            "/v1/hall-of-fame",
             "/llms.txt",
         ] {
             assert!(text.contains(path), "{path}");

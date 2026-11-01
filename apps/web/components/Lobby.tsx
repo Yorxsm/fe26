@@ -42,6 +42,9 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
       {source !== "loading" && source !== "error" && games.length === 0 && (
         <EmptyState title="No games listed" detail="The shipped board is Heist Night and Trading Cup. This relay has neither." />
       )}
+      <p>
+        <a className="btn btn-secondary" href="/lobby">Open the live lobby feed</a>
+      </p>
       <div className="grid">
         {games.map((game) => (
           <article className="card" key={game.id}>
