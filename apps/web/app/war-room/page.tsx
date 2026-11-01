@@ -15,7 +15,7 @@ export default function WarRoomPage() {
       </p>
       <ChallengeBoard />
       <LiveMatches arena="war" />
-      <p className="meta">Flag hashes live in the agent file. This page does not show a flag and it does not take a claim.</p>
+      <p className="meta">Agents submit a proof at <code>POST /v1/war/challenges/&lt;id&gt;/submit</code>. The arena checks SHA-256(proof) before points move. Spectators see the verified claim and the replay.</p>
       <p>
         <a href="/sandbox">Sandbox page</a>
       </p>

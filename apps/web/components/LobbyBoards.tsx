@@ -2,6 +2,7 @@
 
 import { Calendar, Clock, DoorOpen, Hammer, LineChart, Shield, Trophy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LobbyFeed } from "@/components/LobbyFeed";
 import { Logo } from "@/components/Logo";
 import { loadLobby, type LobbyRelay } from "@/lib/api";
 import {
@@ -207,6 +208,7 @@ export function LobbyBoards() {
             <p className="meta">Boards follow the UTC clock.</p>
           </div>
         </header>
+        <LobbyFeed />
         <section className="lobby-panel lobby-span-7" aria-busy="true">
           <p className="label">Schedule</p>
           <p className="lobby-count num">--:--:--</p>
@@ -261,6 +263,7 @@ export function LobbyBoards() {
           <p className="meta">{view.note}</p>
         </div>
       </header>
+      <LobbyFeed />
       <section className="lobby-panel lobby-span-7 ui-in">
         <p className="label">Schedule</p>
         <p className="lobby-kicker">{view.live ? "Live" : "Next heist"}</p>

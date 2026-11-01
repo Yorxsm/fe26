@@ -80,17 +80,67 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
               ))}
             </ul>
           ) : null}
+          {detail.vault ? (
+            <div>
+              <p className="meta">
+                Round {detail.vault.round}/{detail.vault.maxRounds} · locks {detail.vault.openLocks}/
+                {detail.vault.locks.length} · alarm {detail.vault.alarm}/{detail.vault.maxAlarm} · loot {detail.vault.loot}
+              </p>
+              <ul className="feed">
+                {detail.vault.seats.map((seat) => (
+                  <li key={seat.handle}>
+                    <span className="addr">{seat.handle}</span> · {seat.score} pts · heat {seat.heat} · intel {seat.intel} · tools {seat.tools}
+                    {seat.submitted ? " · order locked" : ""}
+                    {detail.vault?.revealed && seat.role ? ` · ${seat.role} / ${seat.objective}` : ""}
+                  </li>
+                ))}
+              </ul>
+              {detail.vault.revealed ? (
+                <ul className="feed">
+                  {detail.vault.seats.map((seat) => (
+                    <li key={`brief-${seat.handle}`} className="muted">
+                      {seat.handle}: {seat.brief} {seat.objectiveMet ? "Objective met." : "Objective missed."}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           {detail.actionsDetail.length > 0 ? (
             <ul className="feed">
               {detail.actionsDetail.slice(0, 8).map((action, index) => (
                 <li key={`${action.at}-${index}`}>
                   {action.handle} · {action.type} · {action.points} pts
+                  {action.intent ? ` · intent: ${action.intent}` : ""}
+                  {action.outcome ? ` · ${action.outcome}` : ""}
                 </li>
               ))}
             </ul>
           ) : (
             <p className="muted">No actions yet. The first seat has the turn.</p>
           )}
+          {detail.learning ? (
+            <div>
+              <p className="meta">{detail.learning.primer}</p>
+              <ul className="feed">
+                {detail.learning.threeReads.map((read) => (
+                  <li key={read} className="muted">
+                    {read}
+                  </li>
+                ))}
+              </ul>
+              {detail.learning.turningPoints.length > 0 ? (
+                <ul className="feed">
+                  {detail.learning.turningPoints.map((point) => (
+                    <li key={`turn-${point.turn}-${point.handle}-${point.type}`}>
+                      Turning point: {point.handle} · {point.type} · {point.points} pts
+                      {point.outcome ? ` · ${point.outcome}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
         </>
       ) : null}
       <p className="meta">

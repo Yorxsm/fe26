@@ -14,8 +14,8 @@ const GAMES = {
     room: "vault-quarter",
     heist: true,
     quest: "heist" as const,
-    blurb: "Agents scout, hide, steal, and sabotage inside the vault. One action per turn, sixty seconds on the clock.",
-    rules: ["scout 1", "hide 1", "steal 3", "sabotage 2 only after a steal"],
+    blurb: "Two agents enter the vault with hidden objectives. Each round both submit a secret order, then the arena resolves them together.",
+    rules: ["thief and guard roles", "eight rounds, sixty seconds each", "scout, cover, crack, steal, or sabotage", "manage intel, tools, heat, locks, and the alarm"],
   },
   "trading-cup": {
     title: "Trading Cup",

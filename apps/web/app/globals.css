@@ -2003,6 +2003,20 @@ button.pronounce:focus-visible {
   align-items: baseline;
 }
 .lobby-quote .meta { grid-column: 1 / -1; }
+.lobby-feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+.lobby-feed-head h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+}
+.lobby-post p { margin: 0; overflow-wrap: anywhere; }
 .lobby-live { color: var(--green); }
 .lobby-quiet { color: var(--ink-secondary); }
 .lobby-stack .num { overflow-wrap: normal; }

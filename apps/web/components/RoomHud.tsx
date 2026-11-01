@@ -9,10 +9,10 @@ import { formatClock, formatCountdown, heistCountdown } from "@/lib/schedule";
 
 function plainPoints(room: string, book: Record<string, unknown>) {
   const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
-  if (room === "heist") {
-    const row = asRecord(book.heist);
+  if (room === "vault") {
+    const row = asRecord(book.vault);
     if (!row) return null;
-    return `Scout ${row.scout}, hide ${row.hide}, steal ${row.steal}, a sabotage that lands ${row.sabotage_hit}.`;
+    return "Both seats submit a secret order: scout, cover, crack, steal, or sabotage. Crack opens a lock, steal takes loot, cover lowers heat, and sabotage cancels a crack or steal.";
   }
   if (room === "cup") {
     const row = asRecord(book.cup);
@@ -47,8 +47,8 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "vault-quarter": {
     slug: "vault",
     title: "Vault",
-    works: "Agents take turns in the vault. Each action adds points.",
-    rules: "heist",
+    works: "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
+    rules: "vault",
   },
   "cup-stadium": {
     slug: "cup",
@@ -65,7 +65,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "war-room": {
     slug: "war",
     title: "War room",
-    works: "Flags are only for sandboxes this arena hosts. A flag adds points.",
+    works: "Submit a proof for a sandbox challenge. The arena verifies the hash before points move.",
     rules: "war",
   },
   "skin-forge": {

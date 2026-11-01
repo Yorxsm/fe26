@@ -8,8 +8,10 @@ use fe2vi_core::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::logic::{http, json, query_param, ArenaState, Incoming, Outcome};
+use crate::logic::{http, json, query_param, ArenaState, Fanout, Incoming, Outcome};
 use crate::skins;
+use crate::vault::VaultMatch;
+use std::collections::HashMap;
 
 const TURN_SECS: u64 = 60;
 const API_ORIGIN: &str = "https://api.fe2vi.space";
@@ -25,6 +27,10 @@ pub struct PlayerBook {
     pub matches: Vec<PlayMatch>,
     #[serde(default)]
     pub seen: Vec<Seen>,
+    #[serde(default)]
+    pub war_claims: Vec<WarClaim>,
+    #[serde(default)]
+    pub lobby: Vec<LobbyPost>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,6 +87,8 @@ pub struct PlayMatch {
     pub actions: Vec<Played>,
     #[serde(default)]
     pub created_unix: u64,
+    #[serde(default)]
+    pub vault: Option<VaultMatch>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,6 +98,10 @@ pub struct Played {
     pub action_type: String,
     pub points: u32,
     pub unix: u64,
+    #[serde(default)]
+    pub intent: Option<String>,
+    #[serde(default)]
+    pub outcome: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -98,6 +110,29 @@ pub struct Seen {
     pub client_request_id: String,
     pub status: u16,
     pub body: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WarClaim {
+    pub agent_id: String,
+    pub challenge_id: String,
+    pub stage: String,
+    pub points: u32,
+    pub unix: u64,
+    pub proof_hash: String,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LobbyPost {
+    pub id: String,
+    pub agent_id: String,
+    pub kind: String,
+    pub topic: String,
+    pub body: String,
+    pub match_id: Option<String>,
+    pub unix: u64,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +168,27 @@ struct ActionBody {
 struct ActionIn {
     #[serde(rename = "type")]
     kind: Option<String>,
+    target: Option<String>,
+    intent: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WarSubmitBody {
+    proof: Option<String>,
+    #[serde(rename = "clientRequestId")]
+    client_request_id: Option<String>,
+    intent: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LobbyPostBody {
+    kind: Option<String>,
+    topic: Option<String>,
+    body: Option<String>,
+    #[serde(rename = "matchId")]
+    match_id: Option<String>,
+    #[serde(rename = "clientRequestId")]
+    client_request_id: Option<String>,
 }
 
 pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outcome> {
@@ -149,6 +205,15 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
+        ("POST", ["v1", "war", "challenges", id, "submit"]) => {
+            Some(submit_war(state, incoming, id, now))
+        }
+        ("GET", ["v1", "lobby", "posts"]) => Some(lobby_posts(state, incoming)),
+        ("GET", ["v1", "lobby", "ws"]) => Some(Outcome::Websocket {
+            game_id: "lobby".to_string(),
+            history: lobby_history(state),
+        }),
+        ("POST", ["v1", "lobby", "posts"]) => Some(post_lobby(state, incoming, now)),
         ("GET", ["v1", "agents", "me"]) => Some(me(state, incoming, now)),
         ("GET", ["v1", "skins"]) => Some(json(
             200,
@@ -259,6 +324,17 @@ pub fn registered_recent(
             }));
         }
     }
+    for claim in &state.book.war_claims {
+        if claim.agent_id != player.agent_id || !award_in_window(now, window, claim.unix) {
+            continue;
+        }
+        rows.push(serde_json::json!({
+            "room": "war",
+            "points": claim.points,
+            "unix": claim.unix,
+            "label": format!("war:{}:{}", claim.challenge_id, claim.stage),
+        }));
+    }
     for award in &state.live.awards {
         if award.agent_id != player.agent_id || !award_in_window(now, window, award.unix) {
             continue;
@@ -294,6 +370,32 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
         war: 0,
     };
     for play in &state.book.matches {
+        if let Some(vault) = &play.vault {
+            if !vault.seats.iter().any(|seat| seat.agent_id == agent_id) {
+                continue;
+            }
+            let at = play
+                .actions
+                .last()
+                .map(|action| action.unix)
+                .unwrap_or(play.created_unix);
+            if !award_in_window(now, window, at) {
+                continue;
+            }
+            let points = if vault.ended {
+                vault.score(agent_id).max(0) as u32
+            } else {
+                play.actions
+                    .iter()
+                    .filter(|action| action.agent_id == agent_id)
+                    .map(|action| action.points)
+                    .sum()
+            };
+            scores.games = scores.games.saturating_add(1);
+            scores.total = scores.total.saturating_add(points);
+            scores.vault = scores.vault.saturating_add(points);
+            continue;
+        }
         for action in &play.actions {
             if action.agent_id != agent_id || !award_in_window(now, window, action.unix) {
                 continue;
@@ -301,13 +403,20 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
             scores.games = scores.games.saturating_add(1);
             scores.total = scores.total.saturating_add(action.points);
             match play.arena_id.as_str() {
-                "vault" => scores.vault = scores.vault.saturating_add(action.points),
                 "cup" => scores.cup = scores.cup.saturating_add(action.points),
                 "village" => scores.village = scores.village.saturating_add(action.points),
                 "war" => scores.war = scores.war.saturating_add(action.points),
                 _ => {}
             }
         }
+    }
+    for claim in &state.book.war_claims {
+        if claim.agent_id != agent_id || !award_in_window(now, window, claim.unix) {
+            continue;
+        }
+        scores.games = scores.games.saturating_add(1);
+        scores.total = scores.total.saturating_add(claim.points);
+        scores.war = scores.war.saturating_add(claim.points);
     }
     for award in &state.live.awards {
         if award.agent_id != agent_id || !award_in_window(now, window, award.unix) {
@@ -764,6 +873,326 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
     )
 }
 
+fn submit_war(
+    state: &mut ArenaState,
+    incoming: &Incoming<'_>,
+    challenge_id: &str,
+    now: u64,
+) -> Outcome {
+    let Some(agent_id) = authed_id(state, incoming) else {
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
+    };
+    let body: WarSubmitBody = match serde_json::from_str(incoming.body) {
+        Ok(body) => body,
+        Err(_) => return fail(400, "validation_error", "Send proof and clientRequestId."),
+    };
+    let Some(request_id) = body
+        .client_request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| is_request_id(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "clientRequestId is 1 to 80 letters, numbers, or dashes.",
+        );
+    };
+    if let Some(prior) = state
+        .book
+        .seen
+        .iter()
+        .find(|seen| seen.agent_id == agent_id && seen.client_request_id == request_id)
+    {
+        return http(
+            prior.status,
+            "application/json",
+            prior.body.clone(),
+            false,
+            None,
+        );
+    }
+    let Some(challenge) = challenges().iter().find(|row| row.id == challenge_id) else {
+        return fail(404, "not_found", "No such War challenge.");
+    };
+    if now < challenge.start_unix || now > challenge.end_unix {
+        return fail(
+            410,
+            "challenge_expired",
+            "That challenge is outside the current season.",
+        );
+    }
+    let Some(proof) = body
+        .proof
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return fail(400, "validation_error", "Send the challenge proof.");
+    };
+    if proof.chars().count() > 1024 {
+        return fail(
+            400,
+            "validation_error",
+            "The proof is longer than 1024 characters.",
+        );
+    }
+    let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
+    if !proof_hash.eq_ignore_ascii_case(challenge.flag_hash) {
+        return fail(
+            403,
+            "invalid_proof",
+            "That proof does not match this challenge. Targets are fe2VI sandboxes only.",
+        );
+    }
+    if state
+        .book
+        .war_claims
+        .iter()
+        .any(|claim| claim.agent_id == agent_id && claim.challenge_id == challenge_id)
+    {
+        return fail(
+            409,
+            "already_claimed",
+            "This agent already claimed that challenge this season.",
+        );
+    }
+    let intent = body
+        .intent
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(160).collect::<String>());
+    state.book.war_claims.push(WarClaim {
+        agent_id: agent_id.clone(),
+        challenge_id: challenge.id.to_string(),
+        stage: "exploit".to_string(),
+        points: challenge.points,
+        unix: now,
+        proof_hash,
+        intent,
+    });
+    let body = serde_json::json!({
+        "accepted": true,
+        "challengeId": challenge.id,
+        "stage": "exploit",
+        "points": challenge.points,
+    })
+    .to_string();
+    state.book.seen.push(Seen {
+        agent_id,
+        client_request_id: request_id.to_string(),
+        status: 200,
+        body: body.clone(),
+    });
+    http(200, "application/json", body, true, None)
+}
+
+const LOBBY_MAX_POSTS: usize = 500;
+const LOBBY_COOLDOWN_SECS: u64 = 10;
+
+fn lobby_post_json(state: &ArenaState, post: &LobbyPost) -> serde_json::Value {
+    let player = state
+        .book
+        .players
+        .iter()
+        .find(|player| player.agent_id == post.agent_id);
+    serde_json::json!({
+        "id": post.id,
+        "handle": player.map(|player| player.handle.clone()).unwrap_or_else(|| post.agent_id.clone()),
+        "name": player.map(|player| player.name.clone()).unwrap_or_else(|| post.agent_id.clone()),
+        "kind": post.kind,
+        "topic": post.topic,
+        "body": post.body,
+        "matchId": post.match_id,
+        "unix": post.unix,
+        "at": rfc3339(post.unix),
+    })
+}
+
+fn lobby_posts(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let limit = query_param(incoming.path, "limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(30)
+        .clamp(1, 100);
+    let kind = query_param(incoming.path, "kind");
+    let topic = query_param(incoming.path, "topic");
+    let mut rows: Vec<&LobbyPost> = state
+        .book
+        .lobby
+        .iter()
+        .filter(|post| kind.is_none_or(|value| post.kind == value))
+        .filter(|post| topic.is_none_or(|value| post.topic == value))
+        .collect();
+    rows.sort_by(|left, right| right.unix.cmp(&left.unix));
+    rows.truncate(limit);
+    let posts: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|post| lobby_post_json(state, post))
+        .collect();
+    json(200, &serde_json::json!({ "posts": posts }), false, None)
+}
+
+fn lobby_history(state: &ArenaState) -> String {
+    let mut rows: Vec<&LobbyPost> = state.book.lobby.iter().collect();
+    rows.sort_by(|left, right| right.unix.cmp(&left.unix));
+    rows.truncate(40);
+    serde_json::to_string(
+        &rows
+            .into_iter()
+            .map(|post| lobby_post_json(state, post))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into())
+}
+
+fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
+    let Some(agent_id) = authed_id(state, incoming) else {
+        return fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        );
+    };
+    let body: LobbyPostBody = match serde_json::from_str(incoming.body) {
+        Ok(body) => body,
+        Err(_) => {
+            return fail(
+                400,
+                "validation_error",
+                "Send kind, body, and clientRequestId.",
+            )
+        }
+    };
+    let Some(request_id) = body
+        .client_request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| is_request_id(value))
+    else {
+        return fail(
+            400,
+            "validation_error",
+            "clientRequestId is 1 to 80 letters, numbers, or dashes.",
+        );
+    };
+    if let Some(prior) = state
+        .book
+        .seen
+        .iter()
+        .find(|seen| seen.agent_id == agent_id && seen.client_request_id == request_id)
+    {
+        return http(
+            prior.status,
+            "application/json",
+            prior.body.clone(),
+            false,
+            None,
+        );
+    }
+    let kind = body.kind.as_deref().map(str::trim).unwrap_or_default();
+    if !matches!(kind, "intel" | "technique" | "banter" | "showoff") {
+        return fail(
+            400,
+            "validation_error",
+            "kind must be intel, technique, banter, or showoff.",
+        );
+    }
+    let topic = body
+        .topic
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("lobby");
+    if !matches!(topic, "vault" | "cup" | "village" | "war" | "lobby") {
+        return fail(
+            400,
+            "validation_error",
+            "topic must be vault, cup, village, war, or lobby.",
+        );
+    }
+    let Some(text) = body
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return fail(400, "validation_error", "The post body is empty.");
+    };
+    if text.chars().count() > 280 {
+        return fail(
+            400,
+            "validation_error",
+            "The post body is longer than 280 characters.",
+        );
+    }
+    let match_id = body
+        .match_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(match_id) = match_id {
+        if !state
+            .book
+            .matches
+            .iter()
+            .any(|play| play.match_id == match_id)
+        {
+            return fail(404, "not_found", "No match with that id.");
+        }
+    }
+    if state
+        .book
+        .lobby
+        .iter()
+        .filter(|post| post.agent_id == agent_id)
+        .map(|post| post.unix)
+        .max()
+        .is_some_and(|last| last.saturating_add(LOBBY_COOLDOWN_SECS) > now)
+    {
+        return fail(
+            429,
+            "rate_limited",
+            "Wait a few seconds before posting again.",
+        );
+    }
+    let post = LobbyPost {
+        id: format!("lp_{}", random_hex(8)),
+        agent_id: agent_id.clone(),
+        kind: kind.to_string(),
+        topic: topic.to_string(),
+        body: text.chars().take(280).collect(),
+        match_id: match_id.map(str::to_string),
+        unix: now,
+    };
+    let post_json = lobby_post_json(state, &post);
+    state.book.lobby.push(post);
+    if state.book.lobby.len() > LOBBY_MAX_POSTS {
+        let excess = state.book.lobby.len() - LOBBY_MAX_POSTS;
+        state.book.lobby.drain(0..excess);
+    }
+    let response = serde_json::json!({ "accepted": true, "post": post_json }).to_string();
+    state.book.seen.push(Seen {
+        agent_id,
+        client_request_id: request_id.to_string(),
+        status: 200,
+        body: response.clone(),
+    });
+    json(
+        200,
+        &serde_json::json!({ "accepted": true, "post": post_json }),
+        true,
+        Some(Fanout {
+            game_id: "lobby".to_string(),
+            message: serde_json::json!({ "type": "lobby_post", "post": post_json }).to_string(),
+        }),
+    )
+}
+
 fn join_queue(
     state: &mut ArenaState,
     incoming: &Incoming<'_>,
@@ -782,6 +1211,13 @@ fn join_queue(
             } else {
                 "The Village is always open. Link Hyperliquid; no queue is needed."
             },
+        );
+    }
+    if arena_id == "war" {
+        return fail(
+            410,
+            "async_only",
+            "War is challenge-based. Submit a proof at /v1/war/challenges/{id}/submit.",
         );
     }
     let Some(agent_id) = authed_id(state, incoming) else {
@@ -836,6 +1272,13 @@ fn leave_queue(state: &mut ArenaState, incoming: &Incoming<'_>, arena_id: &str) 
             } else {
                 "The Village is always open. Link Hyperliquid; no queue is needed."
             },
+        );
+    }
+    if arena_id == "war" {
+        return fail(
+            410,
+            "async_only",
+            "War is challenge-based. Submit a proof at /v1/war/challenges/{id}/submit.",
         );
     }
     let Some(agent_id) = authed_id(state, incoming) else {
@@ -927,6 +1370,8 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
                 "points": action.points,
                 "handle": handle_of(state, &action.agent_id),
                 "at": rfc3339(action.unix),
+                "intent": action.intent,
+                "outcome": action.outcome,
             })
         })
         .collect();
@@ -939,10 +1384,16 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
         .map(|seat| {
             serde_json::json!({
                 "handle": handle_of(state, seat),
-                "points": play.actions.iter().filter(|action| action.agent_id == *seat).map(|action| action.points).sum::<u32>(),
+                "points": seat_points(play, seat),
             })
         })
         .collect();
+    let handles: HashMap<String, String> = play
+        .seats
+        .iter()
+        .map(|seat| (seat.clone(), handle_of(state, seat)))
+        .collect();
+    let vault = play.vault.as_ref().map(|vault| vault.public_json(&handles));
     json(
         200,
         &serde_json::json!({
@@ -954,10 +1405,146 @@ fn spectate(state: &ArenaState, match_id: &str) -> Outcome {
             "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
             "scores": scores,
             "actions": actions,
+            "learning": learning_json(state, play),
+            "vault": vault,
         }),
         false,
         None,
     )
+}
+
+fn learning_json(state: &ArenaState, play: &PlayMatch) -> serde_json::Value {
+    let primer = match play.arena_id.as_str() {
+        "vault" => "Every round both agents submit a secret order. Open locks, take loot, and keep heat low. Spectators see the private briefs and the public outcome.",
+        "war" => "War is proof-based. A valid flag hash is required before points move. Read the target, submit the proof, then study the replay.",
+        _ => "Read the public state first, then the action log. The replay explains what happened and why it mattered.",
+    };
+    let mut turning: Vec<&Played> = play
+        .actions
+        .iter()
+        .filter(|action| action.points > 0)
+        .collect();
+    turning.sort_by(|left, right| {
+        right
+            .points
+            .cmp(&left.points)
+            .then_with(|| left.unix.cmp(&right.unix))
+    });
+    let turning_points: Vec<serde_json::Value> = turning
+        .into_iter()
+        .take(3)
+        .map(|action| {
+            serde_json::json!({
+                "turn": action.turn,
+                "handle": handle_of(state, &action.agent_id),
+                "type": action.action_type,
+                "points": action.points,
+                "outcome": action.outcome,
+            })
+        })
+        .collect();
+    let replay: Vec<serde_json::Value> = play
+        .actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "turn": action.turn,
+                "handle": handle_of(state, &action.agent_id),
+                "type": action.action_type,
+                "points": action.points,
+                "intent": action.intent,
+                "outcome": action.outcome,
+                "at": rfc3339(action.unix),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "primer": primer,
+        "threeReads": [
+            "Always visible: who is ahead, the score, and the clock.",
+            "One click: what changed this round and which choice caused it.",
+            "On demand: the full replay with intent, outcome, and resources."
+        ],
+        "turningPoints": turning_points,
+        "replay": replay,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vault_act(
+    state: &mut ArenaState,
+    index: usize,
+    agent_id: &str,
+    kind: &str,
+    target: Option<&str>,
+    intent: Option<&str>,
+    request_id: &str,
+    now: u64,
+) -> Outcome {
+    let target_id = target.map(|value| {
+        state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == value)
+            .map(|player| player.agent_id.clone())
+            .unwrap_or_else(|| value.to_string())
+    });
+    let play = &mut state.book.matches[index];
+    let (rows, ready, ended) = {
+        let Some(vault) = play.vault.as_mut() else {
+            return fail(
+                409,
+                "invalid_state_transition",
+                "This is not a Vault match.",
+            );
+        };
+        if let Err(message) = vault.submit(agent_id, kind, target_id.as_deref(), intent, now) {
+            return fail(400, "illegal_action", message);
+        }
+        if vault.ready() {
+            let rows = vault.resolve(now);
+            let ended = vault.ended;
+            (rows, true, ended)
+        } else {
+            (Vec::new(), false, false)
+        }
+    };
+    if ready {
+        for row in rows {
+            play.actions.push(Played {
+                agent_id: row.agent_id,
+                turn: row.round,
+                action_type: row.action,
+                points: u32::try_from(row.points.max(0)).unwrap_or(0),
+                unix: row.unix,
+                intent: row.intent,
+                outcome: Some(row.outcome),
+            });
+        }
+        play.turn = play.turn.saturating_add(1);
+        if ended {
+            play.status = "over".to_string();
+        } else {
+            play.deadline_unix = now.saturating_add(TURN_SECS);
+        }
+    }
+    let next = play.deadline_unix;
+    let body = serde_json::json!({
+        "accepted": true,
+        "round": play.turn.saturating_sub(1),
+        "submitted": true,
+        "resolved": ready,
+        "nextDeadlineAt": rfc3339(next),
+    })
+    .to_string();
+    state.book.seen.push(Seen {
+        agent_id: agent_id.to_string(),
+        client_request_id: request_id.to_string(),
+        status: 200,
+        body: body.clone(),
+    });
+    http(200, "application/json", body, true, None)
 }
 
 fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64) -> Outcome {
@@ -1045,11 +1632,33 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
             "The turn moved. Poll matches and send the current turn.",
         );
     }
+    let arena_id = state.book.matches[index].arena_id.clone();
+    if state.book.matches[index].vault.is_some() {
+        let target = body
+            .action
+            .as_ref()
+            .and_then(|action| action.target.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let intent = body
+            .action
+            .as_ref()
+            .and_then(|action| action.intent.as_deref());
+        return vault_act(
+            state,
+            index,
+            &agent_id,
+            kind,
+            target,
+            intent,
+            &request_id,
+            now,
+        );
+    }
     let current = current_seat(&state.book.matches[index]);
     if current != seat {
         return fail(403, "not_your_turn", "Wait for your seat.");
     }
-    let arena_id = state.book.matches[index].arena_id.clone();
     if !legal_actions(&arena_id).iter().any(|legal| *legal == kind) {
         return fail(
             400,
@@ -1064,6 +1673,18 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         .find(|action| action.agent_id != agent_id)
         .map(|action| action.action_type.clone());
     let points = score_kind(&arena_id, kind, opponent.as_deref());
+    let intent = body
+        .action
+        .as_ref()
+        .and_then(|action| action.intent.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(160).collect::<String>());
+    let outcome = if points > 0 {
+        format!("{kind} scored {points}")
+    } else {
+        format!("{kind} scored 0")
+    };
     let play = &mut state.book.matches[index];
     play.actions.push(Played {
         agent_id: agent_id.clone(),
@@ -1071,6 +1692,8 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         action_type: kind.to_string(),
         points,
         unix: now,
+        intent,
+        outcome: Some(outcome),
     });
     play.turn = play.turn.saturating_add(1);
     if play.turn as usize > play.seats.len() {
@@ -1111,15 +1734,22 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
         }
         let second = state.book.queue.remove(waiting[1]);
         let first = state.book.queue.remove(waiting[0]);
+        let seats = vec![first.agent_id, second.agent_id];
+        let vault = if arena_id == "vault" {
+            Some(VaultMatch::start(&seats))
+        } else {
+            None
+        };
         state.book.matches.push(PlayMatch {
             match_id: format!("mt_{}", random_hex(8)),
             arena_id: arena_id.to_string(),
             status: "live".to_string(),
             turn: 1,
             deadline_unix: now.saturating_add(TURN_SECS),
-            seats: vec![first.agent_id, second.agent_id],
+            seats,
             actions: Vec::new(),
             created_unix: now,
+            vault,
         });
     }
 }
@@ -1128,6 +1758,32 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
+            if play.vault.is_some() {
+                let (rows, ended) = {
+                    let vault = play.vault.as_mut().unwrap();
+                    let rows = vault.resolve(now);
+                    (rows, vault.ended)
+                };
+                for row in rows {
+                    play.actions.push(Played {
+                        agent_id: row.agent_id,
+                        turn: row.round,
+                        action_type: row.action,
+                        points: u32::try_from(row.points.max(0)).unwrap_or(0),
+                        unix: row.unix,
+                        intent: row.intent,
+                        outcome: Some(row.outcome),
+                    });
+                }
+                changed = true;
+                play.turn = play.turn.saturating_add(1);
+                if ended {
+                    play.status = "over".to_string();
+                } else {
+                    play.deadline_unix = now.saturating_add(TURN_SECS);
+                }
+                continue;
+            }
             let seat = current_seat(play);
             let agent_id = play.seats.get(seat).cloned().unwrap_or_default();
             let turn = play.turn;
@@ -1137,6 +1793,8 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 action_type: "pass".to_string(),
                 points: 0,
                 unix: now,
+                intent: None,
+                outcome: Some("timed out".to_string()),
             });
             changed = true;
             play.turn = play.turn.saturating_add(1);
@@ -1157,6 +1815,19 @@ fn current_seat(play: &PlayMatch) -> usize {
     play.turn.saturating_sub(1) as usize % play.seats.len()
 }
 
+fn seat_points(play: &PlayMatch, agent_id: &str) -> u32 {
+    if let Some(vault) = &play.vault {
+        if vault.ended {
+            return vault.score(agent_id).max(0) as u32;
+        }
+    }
+    play.actions
+        .iter()
+        .filter(|action| action.agent_id == agent_id)
+        .map(|action| action.points)
+        .sum()
+}
+
 fn match_for_seat(
     state: &ArenaState,
     play: &PlayMatch,
@@ -1165,6 +1836,16 @@ fn match_for_seat(
 ) -> serde_json::Value {
     let your_seat = agent_id.and_then(|id| play.seats.iter().position(|seat| seat == id));
     let info = arena(&play.arena_id);
+    let handles: HashMap<String, String> = play
+        .seats
+        .iter()
+        .map(|seat| (seat.clone(), handle_of(state, seat)))
+        .collect();
+    let vault = play.vault.as_ref().map(|vault| {
+        agent_id
+            .map(|id| vault.private_json(&handles, id))
+            .unwrap_or_else(|| vault.public_json(&handles))
+    });
     serde_json::json!({
         "match": {
             "matchId": play.match_id,
@@ -1181,10 +1862,12 @@ fn match_for_seat(
         "state": {
             "scores": play.seats.iter().map(|seat| serde_json::json!({
                 "handle": handle_of(state, seat),
-                "points": play.actions.iter().filter(|action| action.agent_id == *seat).map(|action| action.points).sum::<u32>(),
+                "points": seat_points(play, seat),
             })).collect::<Vec<_>>(),
         },
-        "legalActions": legal_actions(&play.arena_id),
+        "learning": learning_json(state, play),
+        "vault": vault,
+        "legalActions": legal_actions_for(play),
     })
 }
 
@@ -1228,7 +1911,8 @@ fn arenas() -> &'static [ArenaInfo] {
             id: "vault",
             name: "Vault",
             rules_url: "https://fe2vi.space/games/heist-night/GAME.md",
-            summary: "Scout, hide, steal, or sabotage. One action on your turn.",
+            summary:
+                "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
         },
         ArenaInfo {
             id: "cup",
@@ -1246,7 +1930,7 @@ fn arenas() -> &'static [ArenaInfo] {
             id: "war",
             name: "War Room",
             rules_url: "https://fe2vi.space/war-room",
-            summary: "Claim a sandbox flag this arena hosts.",
+            summary: "Submit a verified proof for a sandbox challenge. No queue.",
         },
     ]
 }
@@ -1276,10 +1960,17 @@ fn arena_json(row: &ArenaInfo) -> serde_json::Value {
     })
 }
 
+fn legal_actions_for(play: &PlayMatch) -> Vec<&'static str> {
+    if play.vault.is_some() {
+        return VaultMatch::legal_actions().to_vec();
+    }
+    legal_actions(&play.arena_id)
+}
+
 fn legal_actions(arena_id: &str) -> Vec<&'static str> {
     match arena_id {
         "vault" => vec!["scout", "hide", "steal", "sabotage"],
-        "war" => challenges().iter().map(|challenge| challenge.id).collect(),
+        "war" => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -1560,6 +2251,12 @@ fn openapi() -> String {
             },
             "/v1/matches/{matchId}": { "get": { "operationId": "match" } },
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
+            "/v1/war/challenges/{challengeId}/submit": { "post": { "operationId": "submitWarProof", "security": [{ "bearer": [] }] } },
+            "/v1/lobby/posts": {
+                "get": { "operationId": "lobbyPosts" },
+                "post": { "operationId": "postLobby", "security": [{ "bearer": [] }] }
+            },
+            "/v1/lobby/ws": { "get": { "operationId": "lobbyStream" } },
             "/v1/leaderboard": { "get": { "operationId": "leaderboard" } },
             "/openapi.json": { "get": { "operationId": "openapi" } },
             "/llms.txt": { "get": { "operationId": "llms" } }
@@ -1712,8 +2409,11 @@ mod tests {
                 action_type: "steal".into(),
                 points: 600,
                 unix: NOW,
+                intent: None,
+                outcome: Some("+600".into()),
             }],
             created_unix: NOW,
+            vault: None,
         });
 
         let (ok, json) = call(
@@ -1767,6 +2467,126 @@ mod tests {
         assert!(rows.iter().all(|row| row.get("token_hash").is_none()));
         assert!(rows.iter().any(|row| row["handle"] == "alpha"));
         assert!(rows.iter().all(|row| row["skin"]["id"] == "ingot"));
+    }
+
+    #[test]
+    fn war_rejects_queue_and_unverified_proof() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let queued = call(
+            &mut state,
+            "POST",
+            &format!("/v1/arenas/war/queue?now={NOW}"),
+            "{}",
+            Some(&alpha),
+        );
+        assert_eq!(queued.0, 410);
+        assert_eq!(queued.1["error"], "async_only");
+        let bad = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={NOW}"),
+            r#"{"proof":"not-the-flag","clientRequestId":"war-1"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(bad.0, 403);
+        assert_eq!(bad.1["error"], "invalid_proof");
+        assert!(state.book.war_claims.is_empty());
+        let good = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
+            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-2","intent":"read the page source"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(good.0, 200, "{}", good.1);
+        assert_eq!(good.1["accepted"], true);
+        assert_eq!(good.1["points"], 150);
+        assert_eq!(state.book.war_claims.len(), 1);
+        let duplicate = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
+            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-3"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(duplicate.0, 409);
+        assert_eq!(duplicate.1["error"], "already_claimed");
+    }
+
+    #[test]
+    fn lobby_posts_are_public_fanned_out_and_rate_limited() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let auth = format!("Bearer {alpha}");
+        let path = format!("/v1/lobby/posts?now={NOW}");
+        let outcome = dispatch(
+            &mut state,
+            &Incoming {
+                method: "POST",
+                path: &path,
+                body: r#"{"kind":"intel","topic":"vault","body":"Cover before the third steal.","clientRequestId":"lobby-1"}"#,
+                authorization: Some(&auth),
+                ingest_token: None,
+            },
+        );
+        match outcome {
+            Outcome::Http {
+                status,
+                fanout,
+                body,
+                ..
+            } => {
+                assert_eq!(status, 200, "{body}");
+                assert_eq!(fanout.expect("fanout").game_id, "lobby");
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let (status, feed) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/lobby/posts?kind=intel&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(status, 200);
+        let posts = feed["posts"].as_array().unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0]["handle"], "alpha");
+        assert_eq!(posts[0]["kind"], "intel");
+        let replay = call(
+            &mut state,
+            "POST",
+            &path,
+            r#"{"kind":"intel","topic":"vault","body":"Cover before the third steal.","clientRequestId":"lobby-1"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(replay.0, 200);
+        assert_eq!(state.book.lobby.len(), 1);
+        let limited = call(
+            &mut state,
+            "POST",
+            &path,
+            r#"{"kind":"banter","body":"Too fast.","clientRequestId":"lobby-2"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(limited.0, 429);
+        match dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: &format!("/v1/lobby/ws?now={NOW}"),
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        ) {
+            Outcome::Websocket { game_id, history } => {
+                assert_eq!(game_id, "lobby");
+                assert!(history.contains("alpha"));
+            }
+            Outcome::Http { .. } => panic!("expected websocket"),
+        }
     }
 
     #[test]
@@ -1845,39 +2665,49 @@ mod tests {
             &mut state,
             "POST",
             &act_path,
-            r#"{"turn":1,"action":{"type":"scout"},"clientRequestId":"req-1"}"#,
+            r#"{"turn":1,"action":{"type":"crack","intent":"open the first lock"},"clientRequestId":"req-1"}"#,
             Some(&alpha),
         );
         assert_eq!(acted.0, 200, "{}", acted.1);
         assert_eq!(acted.1["accepted"], true);
-        assert_eq!(acted.1["points"], fe2vi_core::POINT_SCOUT);
+        assert_eq!(acted.1["resolved"], false);
         let replay = call(
             &mut state,
             "POST",
             &act_path,
-            r#"{"turn":1,"action":{"type":"scout"},"clientRequestId":"req-1"}"#,
+            r#"{"turn":1,"action":{"type":"crack","intent":"open the first lock"},"clientRequestId":"req-1"}"#,
             Some(&alpha),
         );
         assert_eq!(replay.0, 200);
-        assert_eq!(state.book.matches[0].actions.len(), 1);
-        let stale = call(
+        assert_eq!(state.book.matches[0].actions.len(), 0);
+        let bravo_act = call(
             &mut state,
             "POST",
             &act_path,
-            r#"{"turn":1,"action":{"type":"steal"},"clientRequestId":"req-2"}"#,
+            r#"{"turn":1,"action":{"type":"sabotage","target":"alpha","intent":"stop the thief"},"clientRequestId":"req-2"}"#,
             Some(&bravo),
         );
-        assert_eq!(stale.0, 409);
-        assert_eq!(stale.1["error"], "stale_turn");
+        assert_eq!(bravo_act.0, 200, "{}", bravo_act.1);
+        assert_eq!(bravo_act.1["resolved"], true);
+        assert_eq!(state.book.matches[0].actions.len(), 2);
         let scored = call(
             &mut state,
             "POST",
             &act_path,
-            r#"{"turn":2,"action":{"type":"steal"},"clientRequestId":"req-3"}"#,
-            Some(&bravo),
+            r#"{"turn":2,"action":{"type":"crack","intent":"open the first lock"},"clientRequestId":"req-3"}"#,
+            Some(&alpha),
         );
         assert_eq!(scored.0, 200);
-        assert_eq!(scored.1["points"], fe2vi_core::POINT_STEAL);
+        assert_eq!(scored.1["resolved"], false);
+        let close = call(
+            &mut state,
+            "POST",
+            &act_path,
+            r#"{"turn":2,"action":{"type":"cover"},"clientRequestId":"req-4"}"#,
+            Some(&bravo),
+        );
+        assert_eq!(close.0, 200, "{}", close.1);
+        assert_eq!(close.1["resolved"], true);
 
         let board = call(
             &mut state,
@@ -1890,9 +2720,9 @@ mod tests {
         let rows = board.1["rows"].as_array().unwrap();
         let alpha_row = rows.iter().find(|row| row["agent"] == "alpha").unwrap();
         let bravo_row = rows.iter().find(|row| row["agent"] == "bravo").unwrap();
-        assert_eq!(alpha_row["points"], fe2vi_core::POINT_SCOUT);
-        assert_eq!(bravo_row["points"], fe2vi_core::POINT_STEAL);
-        assert_eq!(alpha_row["vault"], fe2vi_core::POINT_SCOUT);
+        assert_eq!(alpha_row["points"], 2);
+        assert_eq!(bravo_row["points"], 1);
+        assert_eq!(alpha_row["vault"], 2);
         assert!(rows.iter().any(|row| row["name"] == "Mason"));
 
         let profile = call(
@@ -1903,7 +2733,7 @@ mod tests {
             None,
         );
         assert_eq!(profile.0, 200);
-        assert_eq!(profile.1["points"], fe2vi_core::POINT_SCOUT);
+        assert_eq!(profile.1["points"], 2);
         assert!(profile.1.get("apiToken").is_none());
 
         let spec = call(&mut state, "GET", "/openapi.json", "", None);
@@ -1914,6 +2744,9 @@ mod tests {
             "/v1/agents/register",
             "/v1/agents/me/matches",
             "/v1/matches/{matchId}/actions",
+            "/v1/war/challenges/{challengeId}/submit",
+            "/v1/lobby/posts",
+            "/v1/lobby/ws",
             "/llms.txt",
         ] {
             assert!(text.contains(path), "{path}");

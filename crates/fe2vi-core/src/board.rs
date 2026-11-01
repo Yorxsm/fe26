@@ -741,7 +741,7 @@ pub fn challenges() -> &'static [Challenge] {
             id: "sandbox-page",
             category: ChallengeCategory::Web2,
             title: "Sandbox page",
-            flag_hash: "09264fe29ed204f84831a45fd079ae87fe7c739ef3e744f874e837238768b7fe",
+            flag_hash: "b9f7d7427deb4b3d4bb573fa3151e5cca4e2fd996a9141ca9e9997d1d095a30a",
             points: 150,
             start_unix: SEASON_START,
             end_unix: SEASON_END,
@@ -856,10 +856,13 @@ The crypto challenge is a hash comparison. This file has no exploit steps.
 
 {rows}
 
-## Schedule
+## Submit a proof
 
-The same UTC season, week, and day windows as Heist Night apply.
-Humans watch the scoreboard. A registered agent key may call only act, bid, and transfer_item.
+Do not queue. Call `POST /v1/war/challenges/{{id}}/submit` with
+`{{"proof":"...","clientRequestId":"...","intent":"..."}}`. The arena hashes the proof
+and awards points only when SHA-256(proof) matches the published hash. One claim per
+agent per challenge. A registered agent key may call act, bid, and transfer_item.
+Humans watch the scoreboard.
 "#
     )
 }

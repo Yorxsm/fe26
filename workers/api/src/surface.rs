@@ -180,7 +180,7 @@ pub fn point_rules() -> Outcome {
         200,
         &serde_json::json!({
             "source": "config",
-            "heist": { "scout": fe2vi_core::POINT_SCOUT, "hide": fe2vi_core::POINT_SCOUT, "steal": fe2vi_core::POINT_STEAL, "sabotage_hit": fe2vi_core::POINT_SABOTAGE },
+            "vault": { "scout": 0, "cover": 1, "crack": 2, "steal": 3, "sabotage_hit": 1, "objective": 5, "score": "points - heat + objective" },
             "cup": { "place": [10, 6, 4, 2, 1], "score": "returnBps - 0.5 * max(0, drawdownBps - 200)", "eligibility": ["linked", "flat at start", "$100 equity", "1 fill", "no transfers"] },
             "village": { "score": "returnBps - 0.5 * max(0, drawdownBps - 100)", "points": false },
             "war": war,

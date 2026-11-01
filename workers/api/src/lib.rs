@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod agents;
 mod indexer;
 mod live;
@@ -8,6 +10,7 @@ mod logic;
 mod markets;
 mod skins;
 mod surface;
+mod vault;
 
 pub use indexer::{apply_chain_events, refuse_mainnet};
 pub use logic::{dispatch, ingest_allowed, ArenaState, Incoming, Outcome};
@@ -347,8 +350,10 @@ mod edge {
         for statement in [
             "CREATE TABLE IF NOT EXISTS players (agent_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, owner_contact TEXT, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, wallets_json TEXT NOT NULL DEFAULT '{}', capabilities_json TEXT NOT NULL DEFAULT '[]', skin_id TEXT NOT NULL DEFAULT 'ingot')",
             "CREATE TABLE IF NOT EXISTS player_queue (arena_id TEXT NOT NULL, agent_id TEXT NOT NULL, queued_unix INTEGER NOT NULL, PRIMARY KEY (arena_id, agent_id))",
-            "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_unix INTEGER NOT NULL DEFAULT 0)",
+            "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_unix INTEGER NOT NULL DEFAULT 0, vault_json TEXT NOT NULL DEFAULT 'null')",
             "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (agent_id, client_request_id))",
+            "CREATE TABLE IF NOT EXISTS player_war_claims (agent_id TEXT NOT NULL, challenge_id TEXT NOT NULL, stage TEXT NOT NULL, points INTEGER NOT NULL, unix INTEGER NOT NULL, proof_hash TEXT NOT NULL, intent TEXT, PRIMARY KEY (agent_id, challenge_id))",
+            "CREATE TABLE IF NOT EXISTS player_lobby_posts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, topic TEXT NOT NULL, body TEXT NOT NULL, match_id TEXT, unix INTEGER NOT NULL)",
         ] {
             sql.exec(statement, None::<Vec<worker::SqlStorageValue>>)?;
         }
@@ -357,6 +362,7 @@ mod edge {
             "ALTER TABLE players ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE players ADD COLUMN skin_id TEXT NOT NULL DEFAULT 'ingot'",
             "ALTER TABLE player_matches ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE player_matches ADD COLUMN vault_json TEXT NOT NULL DEFAULT 'null'",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
         }
@@ -408,6 +414,27 @@ mod edge {
             seats_json: String,
             actions_json: String,
             created_unix: i64,
+            vault_json: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct WarClaimRow {
+            agent_id: String,
+            challenge_id: String,
+            stage: String,
+            points: i64,
+            unix: i64,
+            proof_hash: String,
+            intent: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct LobbyPostRow {
+            id: String,
+            agent_id: String,
+            kind: String,
+            topic: String,
+            body: String,
+            match_id: Option<String>,
+            unix: i64,
         }
         #[derive(serde::Deserialize)]
         struct SeenRow {
@@ -423,7 +450,19 @@ mod edge {
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<QueueRow>()?;
-        let matches = sql.exec("SELECT match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix FROM player_matches", None::<Vec<worker::SqlStorageValue>>)?.to_array::<MatchRow>()?;
+        let matches = sql.exec("SELECT match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix, vault_json FROM player_matches", None::<Vec<worker::SqlStorageValue>>)?.to_array::<MatchRow>()?;
+        let war_claims = sql
+            .exec(
+                "SELECT agent_id, challenge_id, stage, points, unix, proof_hash, intent FROM player_war_claims",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<WarClaimRow>()?;
+        let lobby = sql
+            .exec(
+                "SELECT id, agent_id, kind, topic, body, match_id, unix FROM player_lobby_posts",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<LobbyPostRow>()?;
         let seen = sql
             .exec(
                 "SELECT agent_id, client_request_id, status, body FROM player_seen",
@@ -467,6 +506,31 @@ mod edge {
                     seats: serde_json::from_str(&row.seats_json).unwrap_or_default(),
                     actions: serde_json::from_str(&row.actions_json).unwrap_or_default(),
                     created_unix: row.created_unix as u64,
+                    vault: serde_json::from_str(&row.vault_json).unwrap_or(None),
+                })
+                .collect(),
+            war_claims: war_claims
+                .into_iter()
+                .map(|row| crate::agents::WarClaim {
+                    agent_id: row.agent_id,
+                    challenge_id: row.challenge_id,
+                    stage: row.stage,
+                    points: u32::try_from(row.points.max(0)).unwrap_or(0),
+                    unix: row.unix as u64,
+                    proof_hash: row.proof_hash,
+                    intent: row.intent,
+                })
+                .collect(),
+            lobby: lobby
+                .into_iter()
+                .map(|row| crate::agents::LobbyPost {
+                    id: row.id,
+                    agent_id: row.agent_id,
+                    kind: row.kind,
+                    topic: row.topic,
+                    body: row.body,
+                    match_id: row.match_id,
+                    unix: row.unix as u64,
                 })
                 .collect(),
             seen: seen
@@ -482,7 +546,14 @@ mod edge {
     }
 
     fn save_player_book(sql: &worker::SqlStorage, book: &crate::agents::PlayerBook) -> Result<()> {
-        for table in ["players", "player_queue", "player_matches", "player_seen"] {
+        for table in [
+            "players",
+            "player_queue",
+            "player_matches",
+            "player_seen",
+            "player_war_claims",
+            "player_lobby_posts",
+        ] {
             sql.exec(
                 &format!("DELETE FROM {table}"),
                 None::<Vec<worker::SqlStorageValue>>,
@@ -519,7 +590,7 @@ mod edge {
         }
         for play in &book.matches {
             sql.exec(
-                "INSERT INTO player_matches (match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO player_matches (match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix, vault_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 Some(vec![
                     play.match_id.clone().into(),
                     play.arena_id.clone().into(),
@@ -529,6 +600,35 @@ mod edge {
                     serde_json::to_string(&play.seats).unwrap_or_else(|_| "[]".into()).into(),
                     serde_json::to_string(&play.actions).unwrap_or_else(|_| "[]".into()).into(),
                     (play.created_unix as i64).into(),
+                    serde_json::to_string(&play.vault).unwrap_or_else(|_| "null".into()).into(),
+                ]),
+            )?;
+        }
+        for claim in &book.war_claims {
+            sql.exec(
+                "INSERT INTO player_war_claims (agent_id, challenge_id, stage, points, unix, proof_hash, intent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                Some(vec![
+                    claim.agent_id.clone().into(),
+                    claim.challenge_id.clone().into(),
+                    claim.stage.clone().into(),
+                    (claim.points as i64).into(),
+                    (claim.unix as i64).into(),
+                    claim.proof_hash.clone().into(),
+                    claim.intent.clone().into(),
+                ]),
+            )?;
+        }
+        for post in &book.lobby {
+            sql.exec(
+                "INSERT INTO player_lobby_posts (id, agent_id, kind, topic, body, match_id, unix) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                Some(vec![
+                    post.id.clone().into(),
+                    post.agent_id.clone().into(),
+                    post.kind.clone().into(),
+                    post.topic.clone().into(),
+                    post.body.clone().into(),
+                    post.match_id.clone().into(),
+                    (post.unix as i64).into(),
                 ]),
             )?;
         }
