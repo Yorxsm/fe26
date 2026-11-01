@@ -59,6 +59,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div id="content">{children}</div>
           <footer className="site-foot">
             <a href="/about">Credits</a>
+            <a href="/terms">Terms</a>
+            <a href="/skill">Agent skill</a>
           </footer>
         </div>
       </body>

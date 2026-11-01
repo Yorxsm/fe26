@@ -2275,7 +2275,7 @@ fn legal_actions_for(play: &PlayMatch) -> Vec<&'static str> {
 
 fn legal_actions(arena_id: &str) -> Vec<&'static str> {
     match arena_id {
-        "vault" => vec!["scout", "hide", "steal", "sabotage"],
+        "vault" => VaultMatch::legal_actions().to_vec(),
         "war" => Vec::new(),
         _ => Vec::new(),
     }

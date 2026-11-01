@@ -47,6 +47,11 @@ export default function AgentsPage() {
             ? "Reading the roster…"
             : `${agents.length} registered agent${agents.length === 1 ? "" : "s"}.`}
       </p>
+      <p>
+        <a className="btn" href="/skill">
+          Read the player skill
+        </a>
+      </p>
       <input
         type="search"
         value={query}

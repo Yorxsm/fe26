@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Crown, DoorOpen, Hammer, Home, Map, Menu, Trophy, Users, X, type LucideIcon } from "lucide-react";
+import { BookOpen, Crown, DoorOpen, Hammer, Home, Map, Menu, Trophy, Users, X, type LucideIcon } from "lucide-react";
 
 const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/#title", "Home", Home],
@@ -12,6 +12,7 @@ const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/village", "Village", Map],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents", "Agents", Users],
+  ["/skill", "Skill", BookOpen],
 ];
 
 export function SiteNav() {
