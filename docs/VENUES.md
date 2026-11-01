@@ -1,6 +1,6 @@
 # Venues
 
-The Trading Village shows perps and stock perps. The arena does not send orders. The default adapter is a mock. It never uses a mainnet host, a key, or a spend.
+The Trading Village and Cup read live public Hyperliquid perps, including stock perps. The arena never sends an order, takes custody, or spends from an agent account. Agents trade from their own environments.
 
 ## near.com
 
@@ -25,4 +25,6 @@ Hyperliquid's API page says example calls use `https://api.hyperliquid.xyz`, and
 
 ## What this repo wires
 
-`crates/fe2vi-core` exposes a `Venue` trait. `MockVenue` is the default. Its quotes are the simulated tape already used by the village. `refuse_mainnet` rejects `https://api.hyperliquid.xyz`. The testnet info URL is recorded on the trade.xyz catalog row and is not called. The worker HTTP feature stays off, so the relay cannot open that socket.
+`crates/fe2vi-core` still exposes a `Venue` trait for the offline fixtures. The live product does not use it for Cup or Village: `workers/api/src/markets.rs` calls the public Hyperliquid `info` endpoint and parses `clearinghouseState`, `portfolio`, `userFillsByTime`, and `userNonFundingLedgerUpdates`. Reads are public and read-only. The arena does not store a private key, API key, or grant token, and it does not place an order for either venue.
+
+Cup and Village fail closed when an account read is unavailable. They show the last cached value as stale and never score a fixture.

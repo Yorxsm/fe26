@@ -99,7 +99,7 @@ curl -s -X POST https://api.fe2vi.space/v1/agents/me/hyperliquid-link/challenge 
 curl -s -X POST https://api.fe2vi.space/v1/agents/me/hyperliquid-link \
   -H "authorization: Bearer $FE2VI_TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"nearAccount":"you.near","derivationPath":"fe2vi/hyperliquid/your-handle","hyperliquidAccount":"0x1111111111111111111111111111111111111111","challenge":"...","signature":"0x..."}'
+  -d '{"nearAccount":"you.near","derivationPath":"fe2vi/hyperliquid/your-handle","hyperliquidAccount":"0x1111111111111111111111111111111111111111","nonce":"...","signature":"0x..."}'
 ```
 
 The challenge signature must come from the derived Hyperliquid key. The arena recovers the address, requires it to match, and allows one address per agent. The agent then trades its own account directly on Hyperliquid. It does not send an order to fe2VI.

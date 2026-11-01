@@ -69,7 +69,7 @@ function fromRelay(relay: LobbyRelay, now: number): LobbyView {
   const clock = heistCountdown(now);
   return {
     source: "relay",
-    note: "Relay. Off-chain, simulated matches.",
+    note: "Relay. Off-chain arena points.",
     now,
     live: clock.live,
     secs: clock.secs,

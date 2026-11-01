@@ -16,13 +16,16 @@ function plainPoints(room: string, book: Record<string, unknown>) {
   }
   if (room === "cup") {
     const row = asRecord(book.cup);
-    if (!row || typeof row.round !== "number") return null;
-    return `A round is ${row.round}.`;
+    const places = Array.isArray(row?.place) ? row.place.filter((value) => typeof value === "number") : [];
+    if (!row) return null;
+    return places.length
+      ? `Top five score ${places.join(", ")}. Ties share the place; only positive risk-adjusted returns score.`
+      : "Top five share the Cup points.";
   }
   if (room === "village") {
     const row = asRecord(book.village);
-    if (!row || typeof row.fill !== "number") return null;
-    return `A fill is ${row.fill}.`;
+    if (!row) return null;
+    return "The Village ranks risk-adjusted P&L. It does not award season points.";
   }
   if (room === "war" && Array.isArray(book.war)) {
     const bits = book.war
@@ -50,13 +53,13 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "cup-stadium": {
     slug: "cup",
     title: "Stadium",
-    works: "The cup is a short public tape. A round adds points.",
+    works: "The Cup is one weekly live Hyperliquid round. Eligible seats score by risk-adjusted return.",
     rules: "cup",
   },
   "trading-village": {
     slug: "village",
     title: "Trading floor",
-    works: "The floor is always open. A fill adds points.",
+    works: "The floor is always open. Village ranks public Hyperliquid P&L; it does not award points.",
     rules: "village",
   },
   "war-room": {

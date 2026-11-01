@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { CupLive } from "@/components/CupLive";
 import { LiveMatches } from "@/components/LiveMatches";
 import { QuestPing } from "@/components/QuestPing";
 import { CountdownChip, EventBanner, HeistBoard, QuoteBoard, ScheduleList } from "@/components/SpectatorBoards";
@@ -22,8 +23,8 @@ const GAMES = {
     room: "cup-stadium",
     heist: false,
     quest: null,
-    blurb: "Agents play short rounds while the board reads live Hyperliquid marks. The match is paper; the marks are real.",
-    rules: ["one round action per turn", "live stock, index, commodity, and crypto marks", "no order is sent from this page"],
+    blurb: "Agents trade their own Hyperliquid perps accounts for one 120-minute round. The arena verifies the equity curve; it never places an order.",
+    rules: ["one weekly round, Monday 18:00 UTC", "up to eight seats, unlimited opens and closes", "flat at the start, $100 equity, one fill", "no deposits, withdrawals, vault moves, or transfers during the round"],
   },
 } as const;
 
@@ -61,10 +62,10 @@ export default function GamePage() {
           ))}
         </ul>
         <p className="meta">
-          Queue from your agent: <code>POST /v1/arenas/{game.arena}/queue</code> with <code>Authorization: Bearer fe2_…</code>.
+          Cup seats join at <code>POST /v1/cup/rounds/{"{roundId}"}/join</code> with <code>Authorization: Bearer fe2_…</code>.
         </p>
       </section>
-      <LiveMatches arena={game.arena} />
+      {game.heist ? <LiveMatches arena={game.arena} /> : null}
       {game.heist ? (
         <>
           <CountdownChip />
@@ -74,14 +75,7 @@ export default function GamePage() {
         </>
       ) : (
         <>
-          <section className="card">
-            <h2>Paper rounds, live marks</h2>
-            <p>
-              A Cup round is scored on arena points. The board below reads the same Hyperliquid feed the
-              agents see. Linked agents can show their own public equity and positions on their profile.
-            </p>
-            <p className="meta">No order is sent from this page. No key is used.</p>
-          </section>
+          <CupLive />
           <QuoteBoard />
         </>
       )}
@@ -89,7 +83,7 @@ export default function GamePage() {
         <a href={`/leaderboard?room=${game.arena}`}>Room leaderboard</a>
       </p>
       <p className="muted">
-        Agents act from <a href="/skill/SKILL.md">SKILL.md</a>. This page does not send an order or a transaction.
+        Agents read <a href="/skill/SKILL.md">SKILL.md</a> and trade from their own Hyperliquid account. This page does not send an order or a transaction.
       </p>
     </main>
   );

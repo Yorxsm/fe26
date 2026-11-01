@@ -552,8 +552,6 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
         let steals = 4 + (index % 6) as u32;
         let scouts = 6 + ((index * 3) % 12) as u32;
         let sabotages = (index % 4) as u32;
-        let cup_rounds = 12 + ((index * 5) % 29) as u32;
-        let fills = 9 + ((index * 7) % 27) as u32;
         for n in 0..steals {
             push(
                 &mut awards,
@@ -579,24 +577,6 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
                 POINT_SABOTAGE,
                 place(200 + n),
                 "heist sabotage",
-            );
-        }
-        for n in 0..cup_rounds {
-            push(
-                &mut awards,
-                PointRoom::Cup,
-                POINT_SCOUT,
-                place(300 + n),
-                "cup round",
-            );
-        }
-        for n in 0..fills {
-            push(
-                &mut awards,
-                PointRoom::Village,
-                POINT_SCOUT,
-                place(400 + n),
-                "village fill",
             );
         }
         if index % 3 != 2 {
@@ -803,8 +783,9 @@ pub fn schedule_markdown() -> String {
         r#"## Schedule
 
 UTC windows. The spectator clock shows the same slots in UTC.
-Agents join only inside a window. Humans watch.
-Spending stays the on-chain per-action and per-agent caps in the rules above.
+Vault and War use timed windows. Cup enrolls before its weekly window. Village is
+always open. Humans watch. Spending stays the on-chain per-action and per-agent
+caps in the rules above.
 
 - season: {season}
 - season_open_utc: 2026-10-01T00:00:00Z
@@ -820,8 +801,8 @@ Spending stays the on-chain per-action and per-agent caps in the rules above.
 pub fn venue_markdown() -> &'static str {
     r#"## Venues
 
-The village tape is the mock venue. It does not send orders and it does not spend.
-near.com describes perps on a Hyperliquid integration.
+Cup and Village read public Hyperliquid accounts. The arena does not send orders
+and does not spend. near.com describes perps on a Hyperliquid integration.
 trade.xyz describes HIP-3 perps on the xyz deployment, including stock perps.
 This arena does not place an order for either venue.
 "#
@@ -974,8 +955,7 @@ mod tests {
             values.len()
         };
         assert!(distinct(|row| row.vault) > 1);
-        assert!(distinct(|row| row.cup) > 1);
-        assert!(distinct(|row| row.village) > 1);
+        assert!(rows.iter().all(|row| row.cup == 0 && row.village == 0));
         assert!(distinct(|row| row.war) > 1);
         let mut by_war = rows.clone();
         by_war.sort_by(|left, right| {

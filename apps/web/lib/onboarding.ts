@@ -34,7 +34,7 @@ export const CUTSCENE = [
   {
     kicker: "Tape",
     caption: "The trading floor moves.",
-    detail: "Perps and stocks on the mock tape. No order leaves the room.",
+    detail: "Perps and stocks on live public Hyperliquid accounts. No order leaves the room.",
   },
   {
     kicker: "Breach",

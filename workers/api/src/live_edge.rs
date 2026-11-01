@@ -11,15 +11,22 @@ const HISTORY_MS: u64 = 30 * 24 * 3600 * 1000;
 pub async fn refresh(arena: &mut ArenaState) -> usize {
     let now = Date::now().as_millis() / 1000;
     let start_ms = now.saturating_mul(1000).saturating_sub(HISTORY_MS);
-    let links: Vec<(String, String)> = arena
+    let mut links: Vec<(String, String, u64)> = arena
         .live
         .links
         .iter()
-        .take(128)
-        .map(|link| (link.agent_id.clone(), link.hyperliquid_account.clone()))
+        .map(|link| {
+            (
+                link.agent_id.clone(),
+                link.hyperliquid_account.clone(),
+                link.last_sync_unix,
+            )
+        })
         .collect();
+    links.sort_by_key(|(_, _, last_sync)| *last_sync);
+    links.truncate(128);
     let mut synced = 0;
-    for (agent_id, address) in links {
+    for (agent_id, address, _) in links {
         match crate::markets::snapshot(&address, start_ms).await {
             Ok((account, portfolio, fills, ledger)) => {
                 apply_link_update(

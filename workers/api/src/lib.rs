@@ -182,6 +182,19 @@ mod edge {
                     arena.book = book;
                 }
             }
+            let live_read = method == "GET"
+                && (route.starts_with("/v1/village/")
+                    || route.starts_with("/v1/cup/")
+                    || route.starts_with("/v1/live/"));
+            let now = worker::Date::now().as_millis() / 1000;
+            let mut refreshed = false;
+            if live_read
+                && !arena.live.links.is_empty()
+                && arena.live.last_tick_unix.saturating_add(60) < now
+            {
+                let _ = crate::live_edge::refresh(&mut arena).await;
+                refreshed = true;
+            }
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -201,7 +214,7 @@ mod edge {
                     fanout,
                     location,
                 } => {
-                    if mutated {
+                    if mutated || refreshed {
                         let sql = self.state.storage().sql();
                         let _ = ensure_player_sql(&sql)
                             .and_then(|_| save_player_book(&sql, &arena.book));

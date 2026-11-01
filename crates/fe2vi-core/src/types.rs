@@ -97,8 +97,8 @@ pub fn heist_night_example() -> GameRules {
     }
 }
 
-/// Trading Cup example. Same numeric caps as Heist Night so the only hash change
-/// is the template id. The tape is fake. No mainnet asset is priced.
+/// Trading Cup example. These are legacy structured caps for the archived game
+/// template; the live Cup uses its own weekly round rules.
 pub fn trading_cup_example() -> GameRules {
     GameRules {
         template_id: TEMPLATE_CUP.to_string(),

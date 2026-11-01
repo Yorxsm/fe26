@@ -4,6 +4,8 @@
 //! This module verifies account control, caches public reads, and scores the
 //! resulting equity curve. It deliberately has no paper balance or simulated fill.
 
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+
 use fe2vi_market::{AccountState, Fill, LedgerUpdate, PortfolioWindow, Position};
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -98,6 +100,7 @@ pub struct CupSeat {
     pub pnl_usd: f64,
     pub volume_usd: f64,
     pub trades: u32,
+    pub enrolled_unix: u64,
     pub eligible: bool,
     pub disqualified: Option<String>,
     pub rank: u32,
@@ -616,6 +619,7 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
         pnl_usd: 0.0,
         volume_usd: 0.0,
         trades: 0,
+        enrolled_unix: now,
         eligible: false,
         disqualified: None,
         rank: 0,
@@ -937,6 +941,11 @@ pub fn mark_link_stale(book: &mut LiveBook, agent_id: &str) {
     if let Some(link) = book.link_mut(agent_id) {
         link.stale = true;
     }
+    for row in &mut book.village {
+        if row.agent_id == agent_id {
+            row.stale = true;
+        }
+    }
 }
 
 pub fn refresh_seats(book: &mut LiveBook, now: u64) {
@@ -1027,6 +1036,21 @@ pub fn refresh_seats(book: &mut LiveBook, now: u64) {
                 }
             }
         }
+        if now >= round.end_unix && round.settled_unix == 0 {
+            for seat in &mut round.seats {
+                if seat.disqualified.is_some() {
+                    continue;
+                }
+                let stale = links
+                    .iter()
+                    .find(|link| link.agent_id == seat.agent_id)
+                    .map(|link| link.stale || link.last_sync_unix < round.start_unix)
+                    .unwrap_or(true);
+                if stale {
+                    seat.disqualified = Some("stale_at_end".to_string());
+                }
+            }
+        }
     }
     let ended: Vec<String> = book
         .rounds
@@ -1074,6 +1098,13 @@ fn finalize_round(book: &mut LiveBook, round_id: String, now: u64) {
                         .partial_cmp(&right.max_drawdown_bps)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
+                .then_with(|| {
+                    right
+                        .volume_usd
+                        .partial_cmp(&left.volume_usd)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| left.enrolled_unix.cmp(&right.enrolled_unix))
                 .then_with(|| left.handle.cmp(&right.handle))
         });
         let points = [10u32, 6, 4, 2, 1];
@@ -1174,18 +1205,15 @@ pub fn verify_personal_signature(address: &str, message: &str, signature: &str) 
     if signature.len() != 65 {
         return false;
     }
-    let Some(mut recovery) = RecoveryId::from_byte(signature[64])
-        .map(Some)
-        .unwrap_or(None)
-    else {
+    let recovery_byte = match signature[64] {
+        value @ 0..=1 => value,
+        value @ 27..=28 => value - 27,
+        value @ 35..=38 => (value - 35) % 2,
+        _ => return false,
+    };
+    let Some(recovery) = RecoveryId::from_byte(recovery_byte) else {
         return false;
     };
-    if signature[64] >= 27 {
-        let Some(next) = RecoveryId::from_byte(signature[64] - 27) else {
-            return false;
-        };
-        recovery = next;
-    }
     let Ok(signature) = Signature::from_slice(&signature[..64]) else {
         return false;
     };
@@ -1274,6 +1302,7 @@ mod tests {
             pnl_usd: 0.0,
             volume_usd: 0.0,
             trades,
+            enrolled_unix: 0,
             eligible: false,
             disqualified: None,
             rank: 0,
@@ -1332,6 +1361,10 @@ mod tests {
         let signature = format!("0x{}", to_hex(&bytes));
         assert!(verify_personal_signature(&address, message, &signature));
         assert!(!verify_personal_signature(&address, "other", &signature));
+        let mut legacy = hex_bytes(&signature).unwrap();
+        legacy[64] += 27;
+        let legacy = format!("0x{}", to_hex(&legacy));
+        assert!(verify_personal_signature(&address, message, &legacy));
     }
 
     #[test]
