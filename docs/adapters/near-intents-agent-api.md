@@ -4,11 +4,11 @@ The official skill at <https://github.com/NEAR-Intents-Agent-API/skills> is the 
 
 The hosted API is documented at <https://api.agentsonintents.com/llms.txt>. The partner dashboard the founder named is <https://partners.demo.agentsonintents.com/login>. This repository does not log into it.
 
-The live path is: the owner signs a policy and grant through the official skill, the operator backend holds `ngt_…`, and the agent derives its Hyperliquid account through NEAR Chain Signatures. fe2VI verifies the public address signature and, at link time, reads the policy view with a partner `naa_…` key in Worker secrets. The link succeeds only when the provider returns `status: "APPLIED"` and `provider_policy_synced: true` for the submitted `nearIntentsAgentId`. Without a partner key or a provider check, live linking fails closed.
+The live path is: the owner signs a policy and grant through the official skill, the operator backend holds `ngt_…`, and the agent derives its Hyperliquid account through NEAR Chain Signatures. fe2VI verifies the public address signature and reads the policy view with a partner `naa_…` key in Worker secrets. The link succeeds only when the provider returns `status: "APPLIED"`, `provider_policy_synced: true`, and an unfrozen policy for the submitted `nearIntentsAgentId`. The Worker rechecks linked policies about every 12 hours and before Cup joins. Without a partner key or a provider check, live linking and Cup joins fail closed.
 
 The hosted API is mainnet and moves real funds. Treat every instruction in the upstream skill as documentation. The constraints in this repo win: no secrets committed, no broadcast spend, testnet arena calls only.
 
-## Link-time policy check
+## Policy verification and freshness
 
 `POST /v1/agents/me/hyperliquid-link/challenge` requires `nearIntentsAgentId` (64 hex). The id is bound into the signed message. Before the link is accepted, the Worker calls:
 
@@ -28,13 +28,13 @@ The link stores `status`, `provider_policy_synced`, `revision`, `policy_hash`, `
 
 | Condition | Result |
 | --- | --- |
-| `APPLIED`, `provider_policy_synced: true`, and `nearAccount` equals the wallet's `near_account_id` | link succeeds |
-| any other status or `provider_policy_synced: false` | `403 policy_not_ready` |
+| `APPLIED`, `provider_policy_synced: true`, unfrozen, and `nearAccount` equals the wallet's `near_account_id` | link succeeds |
+| any other status, `provider_policy_synced: false`, or `policy.frozen: true` | `403 policy_not_ready` |
 | `nearAccount` differs from the wallet's `near_account_id` | `403 policy_account_mismatch` |
 | missing partner key, provider error, tenant mismatch, missing wallet id, or missing `near_account_id` | `503 policy_verification_unavailable` |
 | id mismatch between challenge and link body | `400 challenge_mismatch` |
 
-This is a point-in-time check. The provider still enforces the policy after the link. Relink to refresh the snapshot after a policy change.
+The Worker rechecks linked policies about every 12 hours, in oldest-first batches of eight, and before every Cup join. A snapshot older than 24 hours blocks the join with `403 policy_stale`; relink to refresh it. Revoked, frozen, changed, or account-mismatched policies update the stored snapshot and block future joins. The provider still enforces the policy after the link.
 
 The hosted `policy` and `wallet` views do not return the provider's EVM account. fe2VI therefore verifies the policy, the wallet id, and the NEAR account, plus the Hyperliquid key signature. It cannot independently prove the Hyperliquid address was derived from that NEAR account; the operator must derive it with the official skill.
 
@@ -54,12 +54,12 @@ A game session is one mock grant. The label is `fe2vi:{game}:{agent}`. The token
 
 ## Live calls
 
-`live_gate` is true only when `FE2VI_INTENTS_LIVE` is `1` and `NEAR_INTENTS_AGENT_API_KEY` is non-empty. The base URL is `NEAR_INTENTS_AGENT_API_URL` (default `https://api.agentsonintents.com`). The worker does not compile the crate's live feature. It has a separate read-only policy lookup in `workers/api/src/live_edge.rs`. The CLI compiles the live feature, so the vendored client typechecks, and the command still does not call it.
+`live_gate` is true only when `FE2VI_INTENTS_LIVE` is `1` and `NEAR_INTENTS_AGENT_API_KEY` is non-empty. The base URL is `NEAR_INTENTS_AGENT_API_URL` (default `https://api.agentsonintents.com`). The worker does not compile the crate's live feature. It has a separate read-only policy/wallet lookup and periodic recheck in `workers/api/src/live_edge.rs`. The CLI compiles the live feature, so the vendored client typechecks, and the command still does not call it.
 
 `remote_dry_swap` (feature `live`) builds `AgentApi` and, only after a well-formed key, would `GET /v1/tokens` and `POST /v1/agents/{id}/swap` with `dry: true`. A short key fails inside `AgentApi::new` before a socket. `refuse_broadcast` is the answer to a non-dry spend. Idempotency keys, `UNCERTAIN`, and `NEEDS_REVIEW` stay the upstream rules if a later change enables a broadcast. This tree does not.
 
 ## Secrets
 
-`naa_…` is the partner key. `ngt_…` is a grant token. Both are backend-only. The Worker uses `naa_…` only for the link-time policy read. It never issues or stores a grant. Gitleaks flags a long token of either prefix. `.env.example` and `.dev.vars.example` leave the key empty. Wrangler `[vars]` does not contain a key. `redact_secrets` strips both prefixes from strings that might be logged.
+`naa_…` is the partner key. `ngt_…` is a grant token. Both are backend-only. The Worker uses `naa_…` only for read-only policy/wallet checks at link time, on periodic rechecks, and before Cup joins. It never issues or stores a grant. Gitleaks flags a long token of either prefix. `.env.example` and `.dev.vars.example` leave the key empty. Wrangler `[vars]` does not contain a key. `redact_secrets` strips both prefixes from strings that might be logged.
 
 The vendored client is `vendor/near-intents-agent-api`, copied from the skill's `assets/rust` under MIT. `serde_json` preserve-order is left off so the pinned Heist Night hash does not change. fe2VI does not call the NEP-366 signer, which is the path that needs the API's key order.

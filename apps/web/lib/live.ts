@@ -80,6 +80,7 @@ export type LiveAccount = {
   nearIntentsAgentId?: string;
   policyStatus?: string;
   providerPolicySynced?: boolean;
+  policyFrozen?: boolean;
   policyRevision?: number | null;
   policyHash?: string | null;
   policyCheckedAt?: string | null;

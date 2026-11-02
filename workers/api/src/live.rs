@@ -19,6 +19,7 @@ pub const MAX_CUP_SEATS: usize = 8;
 const CHALLENGE_SECS: u64 = 600;
 const SNAPSHOT_LIMIT: usize = 500;
 const FILL_LIMIT: usize = 400;
+pub const POLICY_MAX_AGE_SECS: u64 = 24 * 3600;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +29,7 @@ pub struct PolicySnapshot {
     pub provider_policy_synced: bool,
     pub revision: Option<u64>,
     pub policy_hash: Option<String>,
+    pub policy_frozen: bool,
     pub wallet_id: Option<String>,
     pub wallet_near_account: Option<String>,
     pub checked_unix: u64,
@@ -36,19 +38,30 @@ pub struct PolicySnapshot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PolicyCheck {
     Active(PolicySnapshot),
-    Inactive(String),
+    Inactive(PolicySnapshot, String),
     Unavailable(String),
 }
 
 impl PolicyCheck {
     pub fn active(snapshot: PolicySnapshot) -> Self {
-        if snapshot.status == "APPLIED" && snapshot.provider_policy_synced {
+        if snapshot.status == "APPLIED"
+            && snapshot.provider_policy_synced
+            && !snapshot.policy_frozen
+        {
             Self::Active(snapshot)
         } else {
-            Self::Inactive(format!(
-                "NEAR Intents policy is {} with provider_policy_synced={}.",
-                snapshot.status, snapshot.provider_policy_synced
-            ))
+            let message = if snapshot.policy_frozen {
+                format!(
+                    "NEAR Intents policy is frozen with status {}.",
+                    snapshot.status
+                )
+            } else {
+                format!(
+                    "NEAR Intents policy is {} with provider_policy_synced={}.",
+                    snapshot.status, snapshot.provider_policy_synced
+                )
+            };
+            Self::Inactive(snapshot, message)
         }
     }
 }
@@ -71,6 +84,7 @@ pub fn policy_snapshot_from_view(
         provider_policy_synced: view["provider_policy_synced"].as_bool().unwrap_or(false),
         revision: view["revision"].as_u64(),
         policy_hash: view["policy_hash"].as_str().map(str::to_string),
+        policy_frozen: view["policy"]["frozen"].as_bool().unwrap_or(false),
         wallet_id: view["wallet_id"].as_str().map(str::to_string),
         wallet_near_account: None,
         checked_unix,
@@ -110,6 +124,8 @@ pub struct LiveLink {
     pub policy_status: String,
     #[serde(default)]
     pub provider_policy_synced: bool,
+    #[serde(default)]
+    pub policy_frozen: bool,
     #[serde(default)]
     pub policy_revision: Option<u64>,
     #[serde(default)]
@@ -241,7 +257,45 @@ pub struct LinkUpdate {
 
 impl LiveLink {
     pub fn policy_active(&self) -> bool {
-        self.policy_status == "APPLIED" && self.provider_policy_synced
+        self.policy_status == "APPLIED" && self.provider_policy_synced && !self.policy_frozen
+    }
+
+    pub fn policy_stale(&self, now: u64) -> bool {
+        self.policy_checked_unix == 0
+            || now.saturating_sub(self.policy_checked_unix) > POLICY_MAX_AGE_SECS
+    }
+
+    pub fn policy_active_at(&self, now: u64) -> bool {
+        self.policy_active() && !self.policy_stale(now)
+    }
+}
+
+pub(crate) fn apply_policy_snapshot(link: &mut LiveLink, snapshot: &PolicySnapshot) {
+    link.policy_status = snapshot.status.clone();
+    link.provider_policy_synced = snapshot.provider_policy_synced;
+    link.policy_frozen = snapshot.policy_frozen;
+    link.policy_revision = snapshot.revision;
+    link.policy_hash = snapshot.policy_hash.clone();
+    link.policy_checked_unix = snapshot.checked_unix;
+}
+
+pub(crate) fn mark_policy_mismatch(link: &mut LiveLink, checked_unix: u64) {
+    link.policy_status = "MISMATCH".to_string();
+    link.provider_policy_synced = false;
+    link.policy_frozen = false;
+    link.policy_revision = None;
+    link.policy_hash = None;
+    link.policy_checked_unix = checked_unix;
+}
+
+fn persist_policy(state: &mut ArenaState, link: &LiveLink) {
+    if let Some(stored) = state.live.link_mut(&link.agent_id) {
+        stored.policy_status = link.policy_status.clone();
+        stored.provider_policy_synced = link.provider_policy_synced;
+        stored.policy_frozen = link.policy_frozen;
+        stored.policy_revision = link.policy_revision;
+        stored.policy_hash = link.policy_hash.clone();
+        stored.policy_checked_unix = link.policy_checked_unix;
     }
 }
 
@@ -548,12 +602,14 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             )
         }
         Some(PolicyCheck::Active(snapshot))
-            if snapshot.status != "APPLIED" || !snapshot.provider_policy_synced =>
+            if snapshot.status != "APPLIED"
+                || !snapshot.provider_policy_synced
+                || snapshot.policy_frozen =>
         {
             return fail(
                 403,
                 "policy_not_ready",
-                "The NEAR Intents policy is not APPLIED and synced.",
+                "The NEAR Intents policy is not APPLIED, synced, and unfrozen.",
             )
         }
         Some(PolicyCheck::Active(snapshot))
@@ -573,7 +629,7 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             );
         }
         Some(PolicyCheck::Active(snapshot)) => snapshot.clone(),
-        Some(PolicyCheck::Inactive(message)) => {
+        Some(PolicyCheck::Inactive(_, message)) => {
             return fail(403, "policy_not_ready", message.as_str())
         }
         Some(PolicyCheck::Unavailable(message)) => {
@@ -598,6 +654,7 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         near_intents_agent_id: policy.agent_id.clone(),
         policy_status: policy.status.clone(),
         provider_policy_synced: policy.provider_policy_synced,
+        policy_frozen: policy.policy_frozen,
         policy_revision: policy.revision,
         policy_hash: policy.policy_hash.clone(),
         policy_checked_unix: policy.checked_unix,
@@ -736,13 +793,6 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
             "The Hyperliquid link is not verified.",
         );
     }
-    if !link.policy_active() {
-        return fail(
-            403,
-            "policy_not_verified",
-            "Relink after the NEAR Intents policy reports APPLIED and provider_policy_synced.",
-        );
-    }
     let round = ensure_round(state, now);
     if round.round_id != round_id {
         return fail(404, "not_found", "That Cup round is not the current round.");
@@ -768,6 +818,80 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
             }),
             false,
             None,
+        );
+    }
+    let start_unix = round.start_unix;
+    let end_unix = round.end_unix;
+
+    let mut link = link;
+    if let Some(check) = incoming.policy_check {
+        match check {
+            PolicyCheck::Active(snapshot) => {
+                if snapshot.agent_id != link.near_intents_agent_id {
+                    mark_policy_mismatch(&mut link, snapshot.checked_unix);
+                    persist_policy(state, &link);
+                    return fail_mutated(
+                        403,
+                        "policy_mismatch",
+                        "The NEAR Intents policy check did not match nearIntentsAgentId.",
+                        true,
+                    );
+                }
+                if snapshot.status != "APPLIED"
+                    || !snapshot.provider_policy_synced
+                    || snapshot.policy_frozen
+                {
+                    apply_policy_snapshot(&mut link, snapshot);
+                    persist_policy(state, &link);
+                    return fail_mutated(
+                        403,
+                        "policy_not_ready",
+                        "The NEAR Intents policy is not APPLIED, synced, and unfrozen.",
+                        true,
+                    );
+                }
+                let Some(wallet_near_account) = snapshot.wallet_near_account.as_deref() else {
+                    return fail(
+                        503,
+                        "policy_verification_unavailable",
+                        "The NEAR Intents provider did not return the agent wallet's near_account_id.",
+                    );
+                };
+                if wallet_near_account != link.near_account {
+                    mark_policy_mismatch(&mut link, snapshot.checked_unix);
+                    persist_policy(state, &link);
+                    return fail_mutated(
+                        403,
+                        "policy_account_mismatch",
+                        "nearAccount does not match the NEAR Intents agent wallet.",
+                        true,
+                    );
+                }
+                apply_policy_snapshot(&mut link, snapshot);
+                persist_policy(state, &link);
+            }
+            PolicyCheck::Inactive(snapshot, message) => {
+                apply_policy_snapshot(&mut link, snapshot);
+                persist_policy(state, &link);
+                return fail_mutated(403, "policy_not_ready", message.as_str(), true);
+            }
+            PolicyCheck::Unavailable(message) => {
+                return fail(503, "policy_verification_unavailable", message.as_str())
+            }
+        }
+    }
+    if link.policy_stale(now) {
+        return fail(
+            403,
+            "policy_stale",
+            "The NEAR Intents policy snapshot is older than 24 hours. Relink to recheck it.",
+        );
+    }
+    if !link.policy_active() {
+        return fail(
+            403,
+            "policy_not_verified",
+            "Relink after the NEAR Intents policy reports APPLIED and provider_policy_synced.",
         );
     }
     let round = state
@@ -802,8 +926,8 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
             "joined": true,
             "roundId": round_id,
             "handle": link.handle,
-            "startsAt": crate::agents::rfc3339(round.start_unix),
-            "endsAt": crate::agents::rfc3339(round.end_unix),
+            "startsAt": crate::agents::rfc3339(start_unix),
+            "endsAt": crate::agents::rfc3339(end_unix),
         }),
         true,
         None,
@@ -899,7 +1023,8 @@ fn status(state: &ArenaState, now: u64) -> Outcome {
             "lastTickAt": if state.live.last_tick_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(state.live.last_tick_unix)) },
             "links": state.live.links.len(),
             "verifiedLinks": state.live.links.iter().filter(|link| link.verified).count(),
-            "policyVerifiedLinks": state.live.links.iter().filter(|link| link.policy_active()).count(),
+            "policyVerifiedLinks": state.live.links.iter().filter(|link| link.policy_active_at(now)).count(),
+            "policyStaleLinks": state.live.links.iter().filter(|link| link.policy_stale(now)).count(),
             "rounds": state.live.rounds.len(),
             "fills": state.live.fills.len(),
             "mode": "live-only",
@@ -919,6 +1044,7 @@ fn link_json(link: &LiveLink) -> serde_json::Value {
         "nearIntentsAgentId": link.near_intents_agent_id,
         "policyStatus": link.policy_status,
         "providerPolicySynced": link.provider_policy_synced,
+        "policyFrozen": link.policy_frozen,
         "policyRevision": link.policy_revision,
         "policyHash": link.policy_hash,
         "policyCheckedAt": if link.policy_checked_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(link.policy_checked_unix)) },
@@ -1454,10 +1580,14 @@ fn path_only(path: &str) -> &str {
 }
 
 fn fail(status: u16, code: &str, message: &str) -> Outcome {
+    fail_mutated(status, code, message, false)
+}
+
+fn fail_mutated(status: u16, code: &str, message: &str, mutated: bool) -> Outcome {
     json(
         status,
         &serde_json::json!({ "error": code, "message": message }),
-        false,
+        mutated,
         None,
     )
 }
@@ -1643,7 +1773,20 @@ mod tests {
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
-        let inactive = PolicyCheck::Inactive("policy is SIGNED".into());
+        let inactive = PolicyCheck::Inactive(
+            PolicySnapshot {
+                agent_id: near_intents_agent_id.clone(),
+                status: "SIGNED".into(),
+                provider_policy_synced: false,
+                revision: Some(3),
+                policy_hash: Some("old".into()),
+                policy_frozen: false,
+                wallet_id: Some("wallet".into()),
+                wallet_near_account: None,
+                checked_unix: now,
+            },
+            "policy is SIGNED".into(),
+        );
         let rejected = dispatch(
             &mut state,
             &crate::logic::Incoming {
@@ -1668,6 +1811,7 @@ mod tests {
             provider_policy_synced: true,
             revision: Some(4),
             policy_hash: Some("hash".into()),
+            policy_frozen: false,
             wallet_id: Some("wallet".into()),
             wallet_near_account: Some("other.near".into()),
             checked_unix: now,
@@ -1696,6 +1840,7 @@ mod tests {
             provider_policy_synced: true,
             revision: Some(4),
             policy_hash: Some("hash".into()),
+            policy_frozen: false,
             wallet_id: Some("wallet".into()),
             wallet_near_account: Some("linker.near".into()),
             checked_unix: now,
@@ -1758,8 +1903,206 @@ mod tests {
         );
         assert!(matches!(
             PolicyCheck::active(unsigned),
-            PolicyCheck::Inactive(_)
+            PolicyCheck::Inactive(..)
         ));
+        let frozen = policy_snapshot_from_view(
+            &"a".repeat(64),
+            &serde_json::json!({
+                "status": "APPLIED",
+                "provider_policy_synced": true,
+                "policy": { "frozen": true },
+            }),
+            42,
+        );
+        assert!(frozen.policy_frozen);
+        assert!(matches!(
+            PolicyCheck::active(frozen),
+            PolicyCheck::Inactive(..)
+        ));
+    }
+
+    fn live_link(agent_id: &str, near_account: &str, checked_unix: u64) -> LiveLink {
+        LiveLink {
+            agent_id: agent_id.into(),
+            handle: "joiner".into(),
+            near_account: near_account.into(),
+            derivation_path: "fe2vi/hyperliquid/joiner".into(),
+            hyperliquid_account: "0x1111111111111111111111111111111111111111".into(),
+            near_intents_agent_id: "a".repeat(64),
+            policy_status: "APPLIED".into(),
+            provider_policy_synced: true,
+            policy_frozen: false,
+            policy_revision: Some(1),
+            policy_hash: Some("old".into()),
+            policy_checked_unix: checked_unix,
+            verified: true,
+            linked_unix: checked_unix,
+            last_sync_unix: 0,
+            stale: false,
+            account_value: 0.0,
+            withdrawable: 0.0,
+            margin_used: 0.0,
+            positions: Vec::new(),
+            portfolio: Vec::new(),
+            fills: Vec::new(),
+            ledger: Vec::new(),
+        }
+    }
+
+    fn register_agent(state: &mut ArenaState, handle: &str, now: u64) -> (String, String) {
+        let outcome = crate::logic::dispatch(
+            state,
+            &crate::logic::Incoming {
+                method: "POST",
+                path: &format!("/v1/agents/register?now={now}"),
+                body: &format!(
+                    r#"{{"handle":"{handle}","name":"{handle}","description":"joins"}}"#
+                ),
+                authorization: None,
+                ingest_token: None,
+                policy_check: None,
+            },
+        );
+        let Outcome::Http { status, body, .. } = outcome else {
+            panic!("expected http");
+        };
+        assert_eq!(status, 201, "{body}");
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        (
+            value["agentId"].as_str().unwrap().to_string(),
+            value["apiToken"].as_str().unwrap().to_string(),
+        )
+    }
+
+    fn join_with_policy(
+        state: &mut ArenaState,
+        auth: &str,
+        round_id: &str,
+        now: u64,
+        policy_check: Option<&PolicyCheck>,
+    ) -> Outcome {
+        crate::logic::dispatch(
+            state,
+            &crate::logic::Incoming {
+                method: "POST",
+                path: &format!("/v1/cup/rounds/{round_id}/join?now={now}"),
+                body: "{}",
+                authorization: Some(auth),
+                ingest_token: None,
+                policy_check,
+            },
+        )
+    }
+
+    #[test]
+    fn policy_recheck_tracks_changes_revocation_and_freeze() {
+        let now = 1_000_000;
+        let mut link = live_link("agt_test", "joiner.near", now);
+        link.policy_checked_unix = now.saturating_sub(POLICY_MAX_AGE_SECS);
+        assert!(!link.policy_stale(now));
+        link.policy_checked_unix = now.saturating_sub(POLICY_MAX_AGE_SECS + 1);
+        assert!(link.policy_stale(now));
+        let changed = PolicySnapshot {
+            agent_id: "a".repeat(64),
+            status: "APPLIED".into(),
+            provider_policy_synced: true,
+            revision: Some(9),
+            policy_hash: Some("new".into()),
+            policy_frozen: false,
+            wallet_id: Some("wallet".into()),
+            wallet_near_account: Some("joiner.near".into()),
+            checked_unix: now,
+        };
+        apply_policy_snapshot(&mut link, &changed);
+        assert!(link.policy_active_at(now));
+        assert_eq!(link.policy_revision, Some(9));
+        assert_eq!(link.policy_hash.as_deref(), Some("new"));
+
+        let revoked = PolicySnapshot {
+            status: "SIGNED".into(),
+            provider_policy_synced: false,
+            revision: Some(10),
+            checked_unix: now + 1,
+            ..changed.clone()
+        };
+        apply_policy_snapshot(&mut link, &revoked);
+        assert!(!link.policy_active_at(now + 1));
+        assert_eq!(link.policy_status, "SIGNED");
+
+        let frozen = PolicySnapshot {
+            status: "APPLIED".into(),
+            provider_policy_synced: true,
+            policy_frozen: true,
+            revision: Some(11),
+            checked_unix: now + 2,
+            ..changed
+        };
+        assert!(matches!(
+            PolicyCheck::active(frozen.clone()),
+            PolicyCheck::Inactive(..)
+        ));
+        apply_policy_snapshot(&mut link, &frozen);
+        assert!(!link.policy_active_at(now + 2));
+        assert!(link.policy_frozen);
+    }
+
+    #[test]
+    fn cup_join_rechecks_policy_and_rejects_stale_or_unbound_links() {
+        let now = fe2vi_core::weekly_slot(1_790_900_000)
+            .start_unix
+            .saturating_sub(30);
+        let mut state = ArenaState::default();
+        let (agent_id, token) = register_agent(&mut state, "joiner", now);
+        state.live.links.push(live_link(
+            &agent_id,
+            "joiner.near",
+            now.saturating_sub(POLICY_MAX_AGE_SECS + 1),
+        ));
+        let round = ensure_round(&mut state, now);
+        let round_id = round.round_id.clone();
+        let auth = format!("Bearer {token}");
+
+        let stale = join_with_policy(&mut state, &auth, &round_id, now, None);
+        let Outcome::Http { status, body, .. } = stale else {
+            panic!("expected http");
+        };
+        assert_eq!(status, 403, "{body}");
+        assert!(body.contains("policy_stale"));
+
+        let unbound = PolicyCheck::Active(PolicySnapshot {
+            agent_id: "a".repeat(64),
+            status: "APPLIED".into(),
+            provider_policy_synced: true,
+            revision: Some(2),
+            policy_hash: Some("new".into()),
+            policy_frozen: false,
+            wallet_id: Some("wallet".into()),
+            wallet_near_account: None,
+            checked_unix: now,
+        });
+        let missing = join_with_policy(&mut state, &auth, &round_id, now, Some(&unbound));
+        let Outcome::Http { status, body, .. } = missing else {
+            panic!("expected http");
+        };
+        assert_eq!(status, 503, "{body}");
+        assert!(body.contains("policy_verification_unavailable"));
+
+        let fresh = PolicyCheck::Active(PolicySnapshot {
+            wallet_near_account: Some("joiner.near".into()),
+            ..match unbound {
+                PolicyCheck::Active(snapshot) => snapshot,
+                _ => unreachable!(),
+            }
+        });
+        let joined = join_with_policy(&mut state, &auth, &round_id, now, Some(&fresh));
+        let Outcome::Http { status, body, .. } = joined else {
+            panic!("expected http");
+        };
+        assert_eq!(status, 200, "{body}");
+        let stored = state.live.link(&agent_id).unwrap();
+        assert_eq!(stored.policy_revision, Some(2));
+        assert_eq!(stored.policy_hash.as_deref(), Some("new"));
+        assert_eq!(stored.policy_checked_unix, now);
     }
 
     #[test]
@@ -1774,6 +2117,7 @@ mod tests {
             near_intents_agent_id: "b".repeat(64),
             policy_status: "APPLIED".into(),
             provider_policy_synced: true,
+            policy_frozen: false,
             policy_revision: Some(3),
             policy_hash: Some("hash".into()),
             policy_checked_unix: 1,

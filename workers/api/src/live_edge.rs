@@ -3,11 +3,16 @@
 
 use worker::{Date, Env, Fetch, Headers, Method, Request, RequestInit};
 
-use crate::live::{apply_link_update, mark_link_stale, refresh_seats, LinkUpdate, PolicyCheck};
+use crate::live::{
+    apply_link_update, apply_policy_snapshot, mark_link_stale, mark_policy_mismatch, refresh_seats,
+    LinkUpdate, PolicyCheck, POLICY_MAX_AGE_SECS,
+};
 use crate::logic::ArenaState;
 
 const HISTORY_MS: u64 = 30 * 24 * 3600 * 1000;
 const DEFAULT_INTENTS_URL: &str = "https://api.agentsonintents.com";
+const POLICY_REFRESH_SECS: u64 = POLICY_MAX_AGE_SECS / 2;
+const POLICY_REFRESH_LIMIT: usize = 8;
 
 /// Ask the NEAR Intents provider for the policy view before a live link.
 /// The partner key stays in the Worker secret store and never reaches the client.
@@ -23,7 +28,7 @@ pub async fn policy_check(env: &Env, agent_id: &str) -> PolicyCheck {
     };
     let checked_unix = Date::now().as_millis() / 1000;
     let mut snapshot = crate::live::policy_snapshot_from_view(agent_id, &view, checked_unix);
-    if snapshot.status != "APPLIED" || !snapshot.provider_policy_synced {
+    if snapshot.status != "APPLIED" || !snapshot.provider_policy_synced || snapshot.policy_frozen {
         return PolicyCheck::active(snapshot);
     }
 
@@ -119,6 +124,67 @@ async fn get_json(key: &str, url: &str, label: &str) -> Result<serde_json::Value
         ));
     }
     serde_json::from_str(&text).map_err(|_| format!("NEAR Intents {label} response was not JSON."))
+}
+
+pub async fn refresh_policies(env: &Env, arena: &mut ArenaState) -> usize {
+    let now = Date::now().as_millis() / 1000;
+    let mut due: Vec<(u64, String, String)> = arena
+        .live
+        .links
+        .iter()
+        .filter(|link| !link.near_intents_agent_id.is_empty())
+        .filter(|link| now.saturating_sub(link.policy_checked_unix) >= POLICY_REFRESH_SECS)
+        .map(|link| {
+            (
+                link.policy_checked_unix,
+                link.agent_id.clone(),
+                link.near_intents_agent_id.clone(),
+            )
+        })
+        .collect();
+    due.sort_by_key(|(checked, _, _)| *checked);
+    due.truncate(POLICY_REFRESH_LIMIT);
+    let mut revalidated = 0;
+    for (_, agent_id, near_intents_agent_id) in due {
+        let check = policy_check(env, &near_intents_agent_id).await;
+        let Some(link) = arena.live.link_mut(&agent_id) else {
+            continue;
+        };
+        match check {
+            PolicyCheck::Active(snapshot) => {
+                if snapshot.agent_id != link.near_intents_agent_id {
+                    mark_policy_mismatch(link, snapshot.checked_unix);
+                    revalidated += 1;
+                    continue;
+                }
+                if snapshot.status != "APPLIED"
+                    || !snapshot.provider_policy_synced
+                    || snapshot.policy_frozen
+                {
+                    apply_policy_snapshot(link, &snapshot);
+                    revalidated += 1;
+                    continue;
+                }
+                match snapshot.wallet_near_account.as_deref() {
+                    Some(near_account) if near_account == link.near_account => {
+                        apply_policy_snapshot(link, &snapshot);
+                        revalidated += 1;
+                    }
+                    Some(_) => {
+                        mark_policy_mismatch(link, snapshot.checked_unix);
+                        revalidated += 1;
+                    }
+                    None => {}
+                }
+            }
+            PolicyCheck::Inactive(snapshot, _) => {
+                apply_policy_snapshot(link, &snapshot);
+                revalidated += 1;
+            }
+            PolicyCheck::Unavailable(_) => {}
+        }
+    }
+    revalidated
 }
 
 pub async fn refresh(arena: &mut ArenaState) -> usize {

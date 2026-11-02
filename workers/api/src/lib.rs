@@ -186,38 +186,63 @@ mod edge {
                 }
             }
             let route_path = route.split('?').next().unwrap_or(route.as_str());
-            let policy_check = if method == "POST" && route_path == "/v1/agents/me/hyperliquid-link"
-            {
-                let authorized = crate::agents::authed_id(
-                    &arena,
-                    &Incoming {
-                        method,
-                        path: &route,
-                        body: &body,
-                        authorization: authorization.as_deref(),
-                        ingest_token: ingest_token.as_deref(),
-                        policy_check: None,
-                    },
-                )
-                .is_some();
-                let agent_id = serde_json::from_str::<serde_json::Value>(&body)
-                    .ok()
-                    .and_then(|value| {
-                        value
-                            .get("nearIntentsAgentId")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::trim)
-                            .filter(|value| crate::live::valid_near_intents_agent_id(value))
-                            .map(str::to_string)
-                    });
-                match (authorized, agent_id) {
-                    (true, Some(agent_id)) => {
-                        Some(crate::live_edge::policy_check(&self.env, &agent_id).await)
+            let policy_target = match (method, route_path) {
+                ("POST", "/v1/agents/me/hyperliquid-link") => {
+                    let authorized = crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    )
+                    .is_some();
+                    if authorized {
+                        serde_json::from_str::<serde_json::Value>(&body)
+                            .ok()
+                            .and_then(|value| {
+                                value
+                                    .get("nearIntentsAgentId")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(str::trim)
+                                    .filter(|value| crate::live::valid_near_intents_agent_id(value))
+                                    .map(str::to_string)
+                            })
+                    } else {
+                        None
                     }
-                    _ => None,
                 }
-            } else {
-                None
+                ("POST", path)
+                    if path.starts_with("/v1/cup/rounds/") && path.ends_with("/join") =>
+                {
+                    crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    )
+                    .and_then(|agent_id| {
+                        arena
+                            .live
+                            .link(&agent_id)
+                            .map(|link| link.near_intents_agent_id.clone())
+                    })
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| crate::live::valid_near_intents_agent_id(value))
+                }
+                _ => None,
+            };
+            let policy_check = match policy_target {
+                Some(agent_id) => Some(crate::live_edge::policy_check(&self.env, &agent_id).await),
+                None => None,
             };
             let live_read = method == "GET"
                 && (route.starts_with("/v1/village/")
@@ -366,6 +391,8 @@ mod edge {
             }
             let added = indexer::apply_chain_events(&mut arena, &found, scanned);
             let synced = crate::live_edge::refresh(&mut arena).await;
+            let policy_revalidated =
+                crate::live_edge::refresh_policies(&self.env, &mut arena).await;
             storage.put("arena", &arena).await?;
             let cron_now = worker::Date::now().as_millis() / 1000;
             let _ = storage.put("metric_cron_last", &cron_now).await;
@@ -374,6 +401,7 @@ mod edge {
                 "added": added,
                 "indexed_height": arena.indexed_height,
                 "live_synced": synced,
+                "policy_revalidated": policy_revalidated,
                 "network": "testnet",
             })
             .to_string();
