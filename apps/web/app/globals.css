@@ -1912,7 +1912,7 @@ button.pronounce:focus-visible {
   display: grid;
   gap: 6px;
 }
-.room-activity h2 { margin: 0; font-size: 0.95rem; }
+.room-activity h2 { margin: 0; font-size: var(--type-body); font-weight: 700; }
 .room-activity p, .room-activity li { margin: 0; }
 .room-activity ul { margin: 0; padding-left: 1.1rem; }
 .say-bubble {
@@ -1921,7 +1921,7 @@ button.pronounce:focus-visible {
   border-radius: 999px;
   background: #141416;
   color: #f4efe6;
-  font-size: 12px;
+  font-size: var(--type-caption);
 }
 @media (max-height: 620px) {
   .room-board { max-height: 38vh; }
