@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+
 //! Every abuse and lobby limit lives here. Route handlers and wrangler.toml
 //! both follow these constants. The Workers Rate Limiting binding only accepts
 //! a 10 or 60 second period, so the per-minute caps are bindings and the
@@ -188,5 +190,7 @@ mod tests {
         assert!(toml.contains(&format!(
             "name = \"{READ_BINDING}\"\nnamespace_id = \"1003\"\nsimple = {{ limit = {READ_PER_MINUTE}, period = {READ_PERIOD_SECS} }}"
         )));
+        assert_eq!(BINDINGS.len(), 3);
+        assert!(BINDINGS.iter().all(|row| row.1 > 0 && row.2 == 60));
     }
 }

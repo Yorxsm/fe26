@@ -2615,6 +2615,7 @@ pub fn prune_seen(state: &mut ArenaState, now: u64) -> bool {
 }
 
 /// Rows to write. Unchanged rows are absent, so a save does not rewrite the book.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Clone, Debug, Default)]
 pub struct SqlPlan {
     pub upsert_players: Vec<Player>,
@@ -2635,6 +2636,7 @@ pub struct SqlPlan {
     pub delete_reactions: Vec<(String, String, String)>,
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 impl SqlPlan {
     pub fn is_empty(&self) -> bool {
         self.upsert_players.is_empty()
@@ -2656,6 +2658,7 @@ impl SqlPlan {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
     let mut plan = SqlPlan::default();
     let (players, deleted_players) =
@@ -2732,6 +2735,7 @@ pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
     plan
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
     before: &[T],
     after: &[T],
