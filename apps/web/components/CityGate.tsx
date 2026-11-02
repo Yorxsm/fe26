@@ -749,13 +749,15 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     <button
                       type="button"
                       className="btn btn-ghost"
+                      title="Free camera"
+                      aria-label="Free camera"
                       onClick={() => {
                         setFocusId(null);
                         setFollowIndex(null);
                       }}
                     >
                       <Video aria-hidden="true" strokeWidth={1.75} />
-                      Free camera
+                      <span className="bar-label">Free camera</span>
                     </button>
                   )}
                 </div>

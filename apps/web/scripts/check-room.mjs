@@ -277,12 +277,20 @@ for (let attempt = 0; attempt < 20; attempt += 1) {
         if (door.x < rect.left + 8 || door.x > rect.right - 8 || door.y < rect.top + 8 || door.y > rect.bottom - 64) continue;
         if (document.elementFromPoint(door.x, door.y) === canvas) hit += 1;
       }
-      return { hit };
+      const drawn = window.__fe2viRoom && window.__fe2viRoom.drawn;
+      return { hit, y: drawn ? drawn.y : 0 };
     })()`,
     returnByValue: true,
   });
   doorHits = covered.result?.value?.hit ?? 0;
-  if (doorHits >= 6) break;
+  const drawnY = Number(covered.result?.value?.y ?? 0);
+  if (doorHits >= 6 && drawnY > 40) break;
+}
+if (doorHits < 6) {
+  console.error(`Only ${doorHits} buildings are clickable from the overview`);
+  ws.close();
+  stop();
+  process.exit(1);
 }
 const viewOf = async () => {
   const result = await send("Runtime.evaluate", {
@@ -299,20 +307,34 @@ const viewOf = async () => {
 const grab = async (name) => {
   const view = await viewOf();
   if (!view || view.width < 32 || view.height < 32) return null;
-  const shot = await send("Page.captureScreenshot", { format: "png", fromSurface: true });
+  const shot = await send("Page.captureScreenshot", { format: "png", fromSurface: false });
   const png = Buffer.from(shot.data, "base64");
   if (name) await import("node:fs/promises").then((fs) => fs.writeFile(`/tmp/fe2vi-${name}.png`, png));
-  const left = Math.round(view.x + view.width * 0.42);
-  const top = Math.round(view.y + view.height * 0.18);
-  const width = Math.round(view.width * 0.4);
-  const height = Math.round(view.height * 0.48);
-  const { data, info } = await sharp(png)
-    .extract({ left, top, width, height })
+  const top = Math.round(view.y + view.height * 0.22);
+  const height = Math.round(view.height * 0.46);
+  const mid = await sharp(png)
+    .extract({
+      left: Math.round(view.x + view.width * 0.42),
+      top,
+      width: Math.round(view.width * 0.4),
+      height,
+    })
     .resize(96, 64, { fit: "fill" })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  return { data, info, view };
+  const band = await sharp(png)
+    .extract({
+      left: Math.round(view.x + view.width * 0.06),
+      top,
+      width: Math.round(view.width * 0.36),
+      height,
+    })
+    .resize(64, 48, { fit: "fill" })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  return { data: mid.data, info: mid.info, view, band };
 };
 const meanDelta = (a, b) => {
   const count = Math.min(a.length, b.length);
@@ -320,7 +342,62 @@ const meanDelta = (a, b) => {
   for (let i = 0; i < count; i += 1) sum += Math.abs(a[i] - b[i]);
   return count ? sum / count : 0;
 };
-const before = await grab("before");
+const changedFraction = (a, b) => {
+  const pixels = Math.floor(Math.min(a.length, b.length) / 3);
+  let changed = 0;
+  for (let i = 0; i < pixels; i += 1) {
+    const offset = i * 3;
+    const delta = Math.abs(a[offset] - b[offset]) + Math.abs(a[offset + 1] - b[offset + 1]) + Math.abs(a[offset + 2] - b[offset + 2]);
+    if (delta > 36) changed += 1;
+  }
+  return pixels ? changed / pixels : 0;
+};
+const darkFraction = (buf) => {
+  const pixels = Math.floor(buf.length / 3);
+  let dark = 0;
+  for (let i = 0; i < pixels; i += 1) {
+    const offset = i * 3;
+    if (buf[offset] < 28 && buf[offset + 1] < 28 && buf[offset + 2] < 28) dark += 1;
+  }
+  return pixels ? dark / pixels : 1;
+};
+let before = null;
+for (let attempt = 0; attempt < 6; attempt += 1) {
+  before = await grab(attempt === 5 ? "before" : "");
+  if (before?.band && darkFraction(before.band) <= 0.4) break;
+  await delay(400);
+}
+const dragFrom = before?.view;
+let dragFraction = 0;
+if (dragFrom) {
+  const spot = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const canvas = document.querySelector("canvas");
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const candidates = [[0.5, 0.5], [0.42, 0.48], [0.58, 0.55], [0.36, 0.42]];
+      for (const [u, v] of candidates) {
+        const x = rect.left + rect.width * u;
+        const y = rect.top + rect.height * v;
+        if (document.elementFromPoint(x, y) === canvas) return { x, y };
+      }
+      return null;
+    })()`,
+    returnByValue: true,
+  });
+  const origin = spot.result?.value;
+  const x = Math.round(origin?.x ?? dragFrom.x + dragFrom.width * 0.5);
+  const y = Math.round(origin?.y ?? dragFrom.y + dragFrom.height * 0.5);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  for (let step = 1; step <= 6; step += 1) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x - step * 50, y, button: "left" });
+  }
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 300, y, button: "left", clickCount: 1 });
+  await delay(700);
+  const dragged = await grab("drag");
+  if (dragged) dragFraction = changedFraction(before.data, dragged.data);
+}
 let clicked = null;
 for (let attempt = 0; attempt < 24; attempt += 1) {
   const mark = await send("Runtime.evaluate", {
@@ -403,7 +480,7 @@ const clickInside = clickCamera && clickCamera.y > 0.8 && clickCamera.y < 6 && c
 console.log(JSON.stringify({
   direct: { meshes, camera, focusId: direct?.focusId ?? null },
   click: { meshes: clickMeshes, camera: clickCamera, focusId: clicked?.focusId ?? null },
-  pixels: { changed: Number(changed.toFixed(2)), versusLink: Number(versusLink.toFixed(2)) },
+  pixels: { changed: Number(changed.toFixed(2)), versusLink: Number(versusLink.toFixed(2)), drag: Number((dragFraction * 100).toFixed(1)) },
 }));
 if (meshes < 1 || !inside || !clickInside) {
   console.error("Room rendered empty or the camera stayed outside");
@@ -414,6 +491,14 @@ if (meshes < 1 || !inside || !clickInside) {
 // has to resemble the same room opened with ?room=, which does render.
 if (!before || !after || changed < 12) {
   console.error("Click left the overview on screen");
+  process.exit(1);
+}
+if (dragFraction < 0.1) {
+  console.error(`A drag changed ${(dragFraction * 100).toFixed(1)}% of the overview`);
+  process.exit(1);
+}
+if (before.band && darkFraction(before.band) > 0.4) {
+  console.error("The overview mural covers the frame");
   process.exit(1);
 }
 if (linked && versusLink > 60) {

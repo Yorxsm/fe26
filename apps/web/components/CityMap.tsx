@@ -3,7 +3,6 @@
 import { Billboard, Html, OrbitControls, Text, useGLTF } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode } from "postprocessing";
 import dynamic from "next/dynamic";
 
 const Interiors = dynamic(() => import("@/components/Interiors").then((mod) => mod.Interiors), { ssr: false });
@@ -250,10 +249,14 @@ function VillageMural() {
       dead = true;
     };
   }, []);
+  const narrow = useThree((state) => state.size.width < state.size.height);
+  if (!map) return null;
+  const width = narrow ? 7.2 : 12;
+  const height = width * 0.52;
   return (
-    <mesh position={[-17.5, 12, 26]} rotation={[0, 0, 0]} raycast={() => undefined}>
-      <planeGeometry args={[16, 8.2]} />
-      {map ? <meshBasicMaterial key="painted" map={map} toneMapped={false} side={THREE.DoubleSide} /> : <meshBasicMaterial key="plain" color="#141416" toneMapped={false} side={THREE.DoubleSide} />}
+    <mesh position={narrow ? [-4, 6.4, 14] : [-12, 8.2, 20]} rotation={[0, 0, 0]} raycast={() => undefined}>
+      <planeGeometry args={[width, height]} />
+      <meshBasicMaterial map={map} toneMapped={false} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -1803,55 +1806,13 @@ function AgentMesh({
   );
 }
 
-function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; quality: QualityTier }) {
+function Grade({ shot }: { shot: "interior" | "hero" | "overview"; quality?: QualityTier }) {
   const gl = useThree((state) => state.gl);
-  const scene = useThree((state) => state.scene);
-  const camera = useThree((state) => state.camera);
-  const size = useThree((state) => state.size);
   const shotKind = useRef(shot);
   shotKind.current = shot;
-  const grade = useMemo(() => {
-    const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
-    composer.addPass(new RenderPass(scene, camera));
-    if (quality === "low") {
-      composer.addPass(
-        new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC })),
-      );
-    } else {
-      composer.addPass(
-        new EffectPass(
-          camera,
-          new BloomEffect({
-            intensity: quality === "high" ? 0.4 : 0.24,
-            luminanceThreshold: 0.82,
-            luminanceSmoothing: 0.18,
-            mipmapBlur: true,
-            radius: 0.55,
-            levels: 5,
-          }),
-          new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
-        ),
-      );
-    }
-    if (quality === "high") {
-      composer.addPass(new EffectPass(camera, new SMAAEffect()));
-    }
-    postBudget.composerPasses = composer.passes.length;
-    return { composer };
-  }, [camera, gl, quality, scene]);
+  postBudget.composerPasses = 1;
 
-  useLayoutEffect(() => {
-    grade.composer.setSize(size.width, size.height);
-  }, [grade, size.height, size.width]);
-
-  useLayoutEffect(
-    () => () => {
-      grade.composer.dispose();
-    },
-    [grade],
-  );
-
-  useFrame((state, delta) => {
+  useFrame((state) => {
     const live = state.camera;
     if (renderShot.on && live instanceof THREE.PerspectiveCamera) {
       live.position.copy(renderShot.eye);
@@ -1861,20 +1822,17 @@ function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; qual
         live.fov = renderShot.fov;
         live.updateProjectionMatrix();
       }
+    }
+    if (live instanceof THREE.PerspectiveCamera) {
       live.matrixAutoUpdate = true;
       live.matrixWorldAutoUpdate = true;
       live.updateMatrixWorld(true);
     }
     gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : 1;
-    // The composer keeps the overview view after a click even when this camera
-    // has moved inside. Draw the room with the renderer camera directly.
-    if (renderShot.on && live instanceof THREE.PerspectiveCamera) {
-      gl.setRenderTarget(null);
-      gl.render(state.scene, live);
-    } else {
-      grade.composer.setMainCamera(live);
-      grade.composer.render(delta);
-    }
+    gl.setRenderTarget(null);
+    gl.render(state.scene, live);
+    const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+    probe.drawn = { x: live.position.x, y: live.position.y, z: live.position.z };
   }, 1);
 
   return null;
