@@ -478,12 +478,30 @@ pub(crate) fn path_with_query(path: &str, query: Option<&str>) -> String {
     }
 }
 
-/// Explicit `?now=` wins. Host tests otherwise stay on [`fe2vi_core::DEMO_EPOCH`].
-/// The deployed worker uses the wall clock.
+/// Tests may pass `?now=`. Production ignores it and uses the wall clock.
+/// A dev build can opt in with `FE2VI_ALLOW_NOW=1` at compile time.
 pub(crate) fn query_now(path: &str) -> u64 {
-    query_param(path, "now")
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(wall_unix)
+    let override_now = if clock_override_allowed() {
+        query_param(path, "now").and_then(|value| value.parse().ok())
+    } else {
+        None
+    };
+    resolve_now(override_now, wall_unix())
+}
+
+pub(crate) fn resolve_now(override_now: Option<u64>, wall: u64) -> u64 {
+    override_now.unwrap_or(wall)
+}
+
+fn clock_override_allowed() -> bool {
+    #[cfg(test)]
+    {
+        true
+    }
+    #[cfg(not(test))]
+    {
+        option_env!("FE2VI_ALLOW_NOW") == Some("1")
+    }
 }
 
 fn wall_unix() -> u64 {
@@ -924,6 +942,25 @@ mod tests {
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
+    }
+
+    #[test]
+    fn production_clock_ignores_the_query_override() {
+        let wall = 1_700_000_000u64;
+        assert_eq!(resolve_now(None, wall), wall);
+        assert_eq!(resolve_now(Some(9_999_999_999), wall), 9_999_999_999);
+        assert!(
+            !include_str!("logic.rs").contains("query_param(path, \"now\")\n        .and_then"),
+            "production query_now must not apply ?now= before the allow check"
+        );
+        let source = include_str!("logic.rs");
+        let allow = source
+            .split("fn clock_override_allowed")
+            .nth(1)
+            .unwrap_or("");
+        assert!(allow.contains("cfg(test)"));
+        assert!(allow.contains("FE2VI_ALLOW_NOW"));
+        assert!(allow.contains("option_env!"));
     }
 
     #[test]
