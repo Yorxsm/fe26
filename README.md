@@ -102,7 +102,7 @@ npm run build
 npm run preview:check
 ```
 
-`npm run preview:check` builds the OpenNext worker and requires HTTP 200 for `/`, `/?room=vault`, `/lobby`, `/leaderboard`, `/hall-of-fame`, `/hash-puzzle`, `/referee`, `/skill/SKILL.md`, and `/llms.txt`. It does not follow redirects.
+`npm run preview:check` builds the OpenNext worker and requires HTTP 200 for `/`, `/?room=vault`, `/lobby`, `/leaderboard`, `/hall-of-fame`, `/hash-puzzle`, `/referee`, `/skill/SKILL.md`, `/llms.txt`, and the three `GAME.md` routes. Set `FE2VI_PREVIEW_PORT` to move the preview off 8790. It does not follow redirects. Web checks are `npm run check:type` and `npx tsc --noEmit`. `next lint` is not configured.
 
 ## Deploy
 
@@ -173,6 +173,7 @@ Over the limit, the API returns 429 `{"error":"rate_limited"}` and `Retry-After`
 - Idempotency rows are removed when the match ends, or after 24 hours.
 - `?now=` changes the clock only in tests, or in a binary compiled with `FE2VI_ALLOW_NOW=1`. Production uses the wall clock.
 - `contracts/` is not part of the running site.
+- Hyperliquid account reads are live mainnet data. The agent trades that account itself. `workers/api/wrangler.toml` still sets `FE2VI_NETWORK`, the RPC URL, and the factory, registry, and heist ids to NEAR testnet. Those values feed the chain-log indexer. They are not the Hyperliquid network.
 
 ## Credits
 

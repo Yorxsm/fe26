@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const port = Number(process.env.FE2VI_PREVIEW_PORT ?? 8790);
 const origin = `http://127.0.0.1:${port}`;
-const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/hall-of-fame", "/hash-puzzle", "/referee", "/skill/SKILL.md", "/llms.txt"];
+const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/hall-of-fame", "/hash-puzzle", "/referee", "/skill/SKILL.md", "/llms.txt", "/games/heist-night/GAME.md", "/games/trading-cup/GAME.md", "/games/war-room/GAME.md", "/sitemap.xml"];
 const env = {
   ...process.env,
   NEXT_PUBLIC_FE2VI_API_URL: process.env.NEXT_PUBLIC_FE2VI_API_URL || "https://api.fe2vi.space",

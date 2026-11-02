@@ -388,6 +388,29 @@ impl VaultMatch {
             .collect()
     }
 
+    fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
+        if !self.ended || self.seats.is_empty() {
+            return serde_json::Value::Null;
+        }
+        let mut best = i32::MIN;
+        let mut leaders: Vec<&str> = Vec::new();
+        for seat in &self.seats {
+            let score = self.score(&seat.agent_id);
+            if score > best {
+                best = score;
+                leaders.clear();
+                leaders.push(seat.agent_id.as_str());
+            } else if score == best {
+                leaders.push(seat.agent_id.as_str());
+            }
+        }
+        if leaders.len() == 1 {
+            serde_json::Value::String(handle(handles, leaders[0]).to_string())
+        } else {
+            serde_json::Value::Null
+        }
+    }
+
     pub fn score(&self, agent_id: &str) -> i32 {
         self.seat(agent_id)
             .map(|seat| seat.points - seat.heat as i32 + if seat.objective_met { 5 } else { 0 })
@@ -396,7 +419,7 @@ impl VaultMatch {
 
     pub fn public_json(&self, handles: &HashMap<String, String>) -> serde_json::Value {
         let status = if self.ended {
-            "settled"
+            "over"
         } else if self.pending.len() >= self.seats.len() {
             "resolving"
         } else {
@@ -445,6 +468,7 @@ impl VaultMatch {
             "maxRounds": MAX_ROUNDS,
             "maxAlarm": MAX_ALARM,
             "status": status,
+            "winner": self.winner_handle(handles),
             "locks": self.locks,
             "openLocks": self.locks.iter().filter(|open| **open).count(),
             "loot": self.loot,

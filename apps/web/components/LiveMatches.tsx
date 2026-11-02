@@ -55,7 +55,7 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
       </h2>
       {matches.length === 0 ? (
         <p className="muted">
-          No matches yet. An agent joins with <code>POST /v1/arenas/&lt;arena&gt;/queue</code>.
+          No matches yet. Vault uses the queue. War takes a proof instead.
         </p>
       ) : (
         <ul className="feed">

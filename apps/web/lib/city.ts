@@ -23,7 +23,7 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "vault-quarter",
     name: "Vault Quarter",
-    summary: "Heist Night. Timed vault rounds inside platform caps.",
+    summary: "Heist Night. Best of 5. Secret orders, then the reveal.",
     status: "live",
     href: "/games/heist-night",
     station: "Vault Bank",
@@ -41,7 +41,7 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "trading-village",
     name: "Trading Village",
-    summary: "Mock perps and stocks. Funding, PnL, and a leaderboard wall.",
+    summary: "Live Hyperliquid perps. Funding, P&L, and a leaderboard wall.",
     status: "live",
     href: "/village",
     station: "Trading Floor",

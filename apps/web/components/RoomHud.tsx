@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Info, Trophy } from "lucide-react";
 import { useHeistNow, useRoomClocks } from "@/lib/clock";
-import { CITY_AGENTS, INTERIOR_CAST } from "@/lib/city";
 import { apiBase } from "@/lib/protocol";
 import { formatClock, formatCountdown, heistCountdown } from "@/lib/schedule";
 
@@ -47,7 +46,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "vault-quarter": {
     slug: "vault",
     title: "Vault",
-    works: "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
+    works: "Two roles, hidden objectives, and simultaneous secret orders. Best of 5 rounds.",
     rules: "vault",
   },
   "cup-stadium": {
@@ -123,9 +122,6 @@ export function RoomHud({
   const [boardError, setBoardError] = useState(false);
   const now = useHeistNow();
   const clock = now == null ? null : heistCountdown(now);
-  const crew = (INTERIOR_CAST[roomId] ?? [])
-    .map((member) => CITY_AGENTS[member.index]?.name)
-    .filter(Boolean);
   const slug = about?.slug ?? "all";
 
   useEffect(() => {
@@ -234,9 +230,11 @@ export function RoomHud({
         <section className="room-panel">
           <h2>{about.title}</h2>
           <p>{about.works}</p>
-          <p className="meta">{clock ? `${clock.live ? "Live" : "Next"} · ${formatClock(clock.secs)}` : "Next"}</p>
+          {roomId === "skin-forge" ? null : (
+            <p className="meta">{clock ? `${clock.live ? "Live" : "Next"} · ${formatClock(clock.secs)}` : "Next"}</p>
+          )}
           {rules ? <p className="meta">{rules}</p> : null}
-          <p>Inside now: {crew.length ? crew.join(", ") : "No one"}</p>
+          <p>Inside now: No one yet</p>
           {tip ? <p className="meta">{tip}</p> : null}
         </section>
       )}

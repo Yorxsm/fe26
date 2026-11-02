@@ -974,9 +974,9 @@ button.enter {
   .shell:has(.game-root) > .site-foot {
     top: 8px;
     bottom: auto;
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
+    left: auto;
+    right: 8px;
+    transform: none;
   }
 }
 .sign-list {
@@ -2097,6 +2097,19 @@ button.pronounce:focus-visible {
   border-top: 1px solid var(--line);
 }
 .site-foot a { color: var(--ink-secondary); font-size: var(--type-small); text-decoration: none; }
+.vantage { padding-top: 72px; }
+.dispatch {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: #141416;
+  overflow: auto;
+}
+.md-doc h2, .md-doc h3 { margin-top: 16px; }
+.md-doc ol, .md-doc ul { margin: 8px 0 8px 20px; }
+.md-doc pre { overflow: auto; white-space: pre-wrap; }
+.md-code { position: relative; }
+.md-code button { position: absolute; top: 8px; right: 8px; }
 @media (max-width: 800px) {
   .lobby-span-7,
   .lobby-span-5 { grid-column: 1 / -1; }

@@ -60,7 +60,7 @@ function RoomMesh({ url }: { url: string }) {
         if (name.includes("beam")) mesh.visible = false;
         if (name.includes("laser")) standard.emissiveIntensity = 2.1;
         else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
-        else standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.05);
+        else if (standard.emissiveIntensity > 2) standard.emissiveIntensity = 2;
       });
     });
     return cloned;
@@ -594,6 +594,8 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   return (
     <Suspense fallback={null}>
       <group position={room.position}>
+        <ambientLight color="#d4d2cc" intensity={1.15} />
+        <hemisphereLight color="#f4efe6" groundColor="#4a4036" intensity={0.85} />
         <RoomMesh key={room.url} url={room.url} />
         {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
           <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />

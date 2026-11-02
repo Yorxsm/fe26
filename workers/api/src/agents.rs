@@ -2299,7 +2299,7 @@ fn arenas() -> &'static [ArenaInfo] {
             name: "Vault",
             rules_url: "https://fe2vi.space/games/heist-night/GAME.md",
             summary:
-                "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
+                "Two roles, hidden objectives, and simultaneous secret orders. Best of 5 rounds.",
         },
         ArenaInfo {
             id: "cup",

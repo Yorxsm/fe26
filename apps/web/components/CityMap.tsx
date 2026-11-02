@@ -52,6 +52,13 @@ function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
         <mesh
           key={district.id}
           position={[district.x, 5, district.z]}
+          onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+            event.stopPropagation();
+            document.body.style.cursor = "pointer";
+          }}
+          onPointerOut={() => {
+            document.body.style.cursor = "auto";
+          }}
           onClick={(event: ThreeEvent<MouseEvent>) => {
             event.stopPropagation();
             showPick(district.name, district.x, district.z);
@@ -166,8 +173,8 @@ function VillageMural() {
     };
   }, []);
   return (
-    <mesh position={[-6, 4.4, 6]} rotation={[0, -0.46, 0]}>
-      <planeGeometry args={[18, 10]} />
+    <mesh position={[24, 3.2, 16]} rotation={[0, 0.9, 0]}>
+      <planeGeometry args={[9, 5]} />
       {map ? <meshBasicMaterial map={map} toneMapped={false} /> : <meshStandardMaterial color="#141416" roughness={0.6} />}
     </mesh>
   );
@@ -1619,7 +1626,7 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
-        scale={bodyScale}
+        scale={frameMode === "in" && focusId ? bodyScale * 0.62 : bodyScale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           showPick(agent.name, poseRef.current.x, poseRef.current.z);
