@@ -31,7 +31,7 @@ function stop() {
 }
 
 let up = false;
-for (let attempt = 0; attempt < 40; attempt += 1) {
+for (let attempt = 0; attempt < 100; attempt += 1) {
   try {
     const probe = await fetch(`http://127.0.0.1:${port}/json/version`);
     if (probe.ok) {
@@ -41,7 +41,7 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
   } catch {
     // chrome is still booting
   }
-  await delay(250);
+  await delay(300);
 }
 if (!up) {
   stop();
