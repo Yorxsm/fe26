@@ -310,13 +310,13 @@ const grab = async (name) => {
   const shot = await send("Page.captureScreenshot", { format: "png", fromSurface: false });
   const png = Buffer.from(shot.data, "base64");
   if (name) await import("node:fs/promises").then((fs) => fs.writeFile(`/tmp/fe2vi-${name}.png`, png));
-  const top = Math.round(view.y + view.height * 0.22);
-  const height = Math.round(view.height * 0.46);
+  const top = Math.round(view.y + view.height * 0.16);
+  const height = Math.round(view.height * 0.62);
   const mid = await sharp(png)
     .extract({
-      left: Math.round(view.x + view.width * 0.42),
+      left: Math.round(view.x + view.width * 0.12),
       top,
-      width: Math.round(view.width * 0.4),
+      width: Math.round(view.width * 0.76),
       height,
     })
     .resize(96, 64, { fit: "fill" })
@@ -388,12 +388,12 @@ if (dragFrom) {
   const origin = spot.result?.value;
   const x = Math.round(origin?.x ?? dragFrom.x + dragFrom.width * 0.5);
   const y = Math.round(origin?.y ?? dragFrom.y + dragFrom.height * 0.5);
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0, pointerType: "mouse" });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1, pointerType: "mouse" });
   for (let step = 1; step <= 6; step += 1) {
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x - step * 50, y, button: "left" });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x - step * 50, y, button: "left", buttons: 1, pointerType: "mouse" });
   }
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 300, y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 300, y, button: "left", buttons: 0, clickCount: 1, pointerType: "mouse" });
   await delay(700);
   const dragged = await grab("drag");
   if (dragged) dragFraction = changedFraction(before.data, dragged.data);
