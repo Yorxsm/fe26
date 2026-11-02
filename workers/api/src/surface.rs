@@ -321,10 +321,12 @@ pub fn challenges() -> Outcome {
                 "title": challenge.title,
                 "points": challenge.points,
                 "season": fe2vi_core::SEASON_ID,
-                "proof": format!(
-                    "<FE2VI_WAR_SECRET>:{}:{}",
-                    fe2vi_core::SEASON_ID, challenge.id
-                ),
+                "how": match challenge.id {
+                    "sandbox-page" => "Read GET /v1/war/challenges/sandbox-page and call the flag printer it names.",
+                    "referee" => "Read GET /v1/war/challenges/referee and call the method that claims without a flag.",
+                    "hash-puzzle" => "Read GET /v1/war/challenges/hash-puzzle and find the flag whose SHA-256 is the target.",
+                    _ => "Solve the challenge, then submit the flag.",
+                },
                 "start_unix": challenge.start_unix,
                 "end_unix": challenge.end_unix,
             })

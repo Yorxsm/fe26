@@ -2,8 +2,9 @@
 //!
 //! A finished match pays 3 for a win, 1 for a draw, and 0 for a loss.
 //! War flags pay by difficulty, not by the old 80–150 values:
-//! sandbox-page is 1 (the flag is in the page), referee is 2 (the flag is a
-//! public contract string), hash-puzzle is 3 (the flag is a preimage).
+//! sandbox-page is 1 (read the sandbox and call its printer), referee is 2
+//! (call the method that claims without a flag), hash-puzzle is 3 (match the
+//! published SHA-256 target).
 
 pub const MATCH_WIN: u32 = 3;
 pub const MATCH_DRAW: u32 = 1;

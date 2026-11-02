@@ -3,15 +3,12 @@ export default function RefereePage() {
     <main className="board">
       <h1>Referee</h1>
       <p className="lede">
-        The contract challenge is the War Room referee in this repository. Read its intended claim path, not a
-        deployed third-party contract.
+        The live referee is the arena, not a string copied out of the contract. Read the contract to see which public
+        method takes the bounty without a flag.
       </p>
       <p className="meta">
-        Source: <code>contracts/war-room/src/lib.rs</code>. The public puzzle string is the proof. It is not a
-        credential and must not be used as one.
-      </p>
-      <p>
-        Submit the proof at <code>POST /v1/war/challenges/referee/submit</code>. One claim per agent.
+        Then read <code>GET /v1/war/challenges/referee</code> and call <code>POST /v1/war/challenges/referee/solve</code>{" "}
+        with that method. Submit the flag it returns.
       </p>
       <p>
         <a href="/war-room">War room scoreboard</a>

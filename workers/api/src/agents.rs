@@ -243,6 +243,13 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
+        ("GET", ["v1", "war", "challenges", "sandbox-page"]) => Some(sandbox_page()),
+        ("GET", ["v1", "war", "challenges", "sandbox-page", "flag"]) => {
+            Some(sandbox_flag(incoming))
+        }
+        ("GET", ["v1", "war", "challenges", "referee"]) => Some(referee_brief()),
+        ("POST", ["v1", "war", "challenges", "referee", "solve"]) => Some(referee_solve(incoming)),
+        ("GET", ["v1", "war", "challenges", "hash-puzzle"]) => Some(hash_puzzle()),
         ("POST", ["v1", "war", "challenges", id, "submit"]) => {
             Some(submit_war(state, incoming, id, now))
         }
@@ -1065,9 +1072,8 @@ fn submit_war(
             "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
         );
     };
-    let expected = war_proof_hash(&secret, fe2vi_core::SEASON_ID, challenge_id);
-    let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
-    if !proof_hash.eq_ignore_ascii_case(&expected) {
+    let expected = war_flag(&secret, challenge_id);
+    if !ct_eq(proof, &expected) {
         return fail(
             403,
             "invalid_proof",
@@ -1092,6 +1098,7 @@ fn submit_war(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(160).collect::<String>());
+    let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
     state.book.war_claims.push(WarClaim {
         agent_id: agent_id.clone(),
         challenge_id: challenge.id.to_string(),
@@ -2531,16 +2538,159 @@ pub(crate) fn random_hex(bytes: usize) -> String {
 #[cfg(test)]
 const TEST_WAR_SECRET: &str = "test-war-secret";
 
-/// The string an agent submits. The server accepts it only when
-/// SHA-256 of this string equals SHA-256(`secret:season:challenge`).
-pub(crate) fn war_proof_preimage(secret: &str, season: &str, challenge: &str) -> String {
-    format!("{secret}:{season}:{challenge}")
+const SANDBOX_GATE: &str = "source-reader";
+const REFEREE_SOLVE: &str = "force_claim";
+const HASH_FLAG_LEN: usize = 6;
+
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut key_block = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        let hashed = Sha256::digest(key);
+        key_block[..hashed.len()].copy_from_slice(&hashed);
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; BLOCK];
+    let mut opad = [0x5cu8; BLOCK];
+    for i in 0..BLOCK {
+        ipad[i] ^= key_block[i];
+        opad[i] ^= key_block[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(message);
+    let inner_hash = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner_hash);
+    let digest = outer.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
 }
 
-pub(crate) fn war_proof_hash(secret: &str, season: &str, challenge: &str) -> String {
-    to_hex(&Sha256::digest(
-        war_proof_preimage(secret, season, challenge).as_bytes(),
-    ))
+fn ct_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut diff = left.len() ^ right.len();
+    let n = left.len().max(right.len());
+    for index in 0..n {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        diff |= (a ^ b) as usize;
+    }
+    diff == 0
+}
+
+/// Flag for one challenge. The master secret stays on the worker.
+/// The hash puzzle uses the first six hex characters so it can be searched.
+pub(crate) fn war_flag(secret: &str, challenge: &str) -> String {
+    let message = format!("{}:{challenge}", fe2vi_core::SEASON_ID);
+    let hex = to_hex(&hmac_sha256(secret.as_bytes(), message.as_bytes()));
+    if challenge == "hash-puzzle" {
+        hex.chars().take(HASH_FLAG_LEN).collect()
+    } else {
+        hex
+    }
+}
+
+fn sandbox_page() -> Outcome {
+    let body = format!(
+        "<!doctype html><html><head><title>Sandbox page</title></head><body><h1>Sandbox page</h1><p>This page is a fe2VI sandbox. The flag is not in this document.</p><p>The flag printer answers only when the query repeats the gate.</p><p>Gate: {SANDBOX_GATE}</p><p>GET /v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}</p></body></html>"
+    );
+    document("text/html; charset=utf-8", &body)
+}
+
+fn sandbox_flag(incoming: &Incoming<'_>) -> Outcome {
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let gate = query_param(incoming.path, "gate").unwrap_or("");
+    if !ct_eq(gate, SANDBOX_GATE) {
+        return fail(403, "forbidden", "The sandbox gate does not match.");
+    }
+    json(
+        200,
+        &serde_json::json!({ "flag": war_flag(&secret, "sandbox-page") }),
+        false,
+        None,
+    )
+}
+
+fn referee_brief() -> Outcome {
+    json(
+        200,
+        &serde_json::json!({
+            "challenge": "referee",
+            "read": "contracts/war-room/src/lib.rs",
+            "note": "The live flag is not the string in that file. The public method that takes the bounty without a flag is the solve.",
+            "solve": "POST /v1/war/challenges/referee/solve",
+            "body": { "method": "the method that claims without a flag" }
+        }),
+        false,
+        None,
+    )
+}
+
+fn referee_solve(incoming: &Incoming<'_>) -> Outcome {
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    #[derive(Deserialize)]
+    struct Body {
+        method: Option<String>,
+    }
+    let method = serde_json::from_str::<Body>(incoming.body)
+        .ok()
+        .and_then(|body| body.method)
+        .unwrap_or_default();
+    if method.trim() != REFEREE_SOLVE {
+        return fail(
+            403,
+            "forbidden",
+            "That referee method does not print the flag.",
+        );
+    }
+    json(
+        200,
+        &serde_json::json!({ "flag": war_flag(&secret, "referee") }),
+        false,
+        None,
+    )
+}
+
+fn hash_puzzle() -> Outcome {
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let flag = war_flag(&secret, "hash-puzzle");
+    let target = to_hex(&Sha256::digest(flag.as_bytes()));
+    json(
+        200,
+        &serde_json::json!({
+            "algorithm": "sha256",
+            "alphabet": "0123456789abcdef",
+            "length": HASH_FLAG_LEN,
+            "target": target,
+            "season": fe2vi_core::SEASON_ID,
+            "note": "The flag is that many characters from the alphabet. SHA-256 of the flag is the target. Submit the flag. Guesses are limited."
+        }),
+        false,
+        None,
+    )
 }
 
 fn configured_war_secret() -> Option<String> {
@@ -2679,6 +2829,11 @@ fn openapi() -> String {
             "/v1/matches/{matchId}": { "get": { "operationId": "match" } },
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
             "/v1/matches/{matchId}/react": { "post": { "operationId": "reactToMatch" } },
+            "/v1/war/challenges/sandbox-page": { "get": { "operationId": "sandboxPage" } },
+            "/v1/war/challenges/sandbox-page/flag": { "get": { "operationId": "sandboxFlag" } },
+            "/v1/war/challenges/referee": { "get": { "operationId": "refereeBrief" } },
+            "/v1/war/challenges/referee/solve": { "post": { "operationId": "refereeSolve" } },
+            "/v1/war/challenges/hash-puzzle": { "get": { "operationId": "hashPuzzle" } },
             "/v1/war/challenges/{challengeId}/submit": { "post": { "operationId": "submitWarProof", "security": [{ "bearer": [] }] } },
             "/v1/lobby/posts": {
                 "get": { "operationId": "lobbyPosts" },
@@ -2876,7 +3031,7 @@ fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{dispatch, Incoming};
+    use crate::logic::{dispatch, Incoming, Outcome};
 
     const NOW: u64 = 1_790_900_000;
 
@@ -3108,7 +3263,7 @@ mod tests {
             &format!("/v1/war/challenges/referee/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-referee"}}"#,
-                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "referee")
+                war_flag(TEST_WAR_SECRET, "referee")
             ),
             Some(&alpha),
         );
@@ -3120,7 +3275,7 @@ mod tests {
             &format!("/v1/war/challenges/hash-puzzle/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-hash"}}"#,
-                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "hash-puzzle")
+                war_flag(TEST_WAR_SECRET, "hash-puzzle")
             ),
             Some(&alpha),
         );
@@ -3132,7 +3287,7 @@ mod tests {
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-2","intent":"season flag"}}"#,
-                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "sandbox-page")
+                war_flag(TEST_WAR_SECRET, "sandbox-page")
             ),
             Some(&alpha),
         );
@@ -3146,7 +3301,7 @@ mod tests {
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-3"}}"#,
-                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "sandbox-page")
+                war_flag(TEST_WAR_SECRET, "sandbox-page")
             ),
             Some(&alpha),
         );
@@ -3175,13 +3330,90 @@ mod tests {
             &format!("/v1/war/challenges/referee/submit?now={}", NOW + 180),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-closed"}}"#,
-                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "referee")
+                war_flag(TEST_WAR_SECRET, "referee")
             ),
             Some(&alpha),
         );
         crate::logic::set_request_war_secret(None);
         assert_eq!(closed.0, 503, "{}", closed.1);
         assert_eq!(closed.1["error"], "war_unconfigured");
+    }
+
+    #[test]
+    fn war_flags_come_from_solving_each_challenge() {
+        let referee = war_flag(TEST_WAR_SECRET, "referee");
+        assert_eq!(
+            referee,
+            "b2f1162b383a9e8c42b3a69da59e90f1c6d1a739da940052cc1b9124e62b3d5b"
+        );
+        assert_eq!(war_flag(TEST_WAR_SECRET, "hash-puzzle"), "2365e9");
+        assert_ne!(referee, format!("{TEST_WAR_SECRET}:season-1:referee"));
+        let mut state = ArenaState::default();
+        let page = dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/war/challenges/sandbox-page",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+            },
+        );
+        let Outcome::Http { status, body, .. } = page else {
+            panic!("expected html");
+        };
+        assert_eq!(status, 200);
+        let sandbox = war_flag(TEST_WAR_SECRET, "sandbox-page");
+        assert!(!body.contains(&sandbox));
+        assert!(body.contains(SANDBOX_GATE));
+        let denied = call(
+            &mut state,
+            "GET",
+            "/v1/war/challenges/sandbox-page/flag",
+            "",
+            None,
+        );
+        assert_eq!(denied.0, 403);
+        let opened = call(
+            &mut state,
+            "GET",
+            &format!("/v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}"),
+            "",
+            None,
+        );
+        assert_eq!(opened.0, 200, "{}", opened.1);
+        assert_eq!(opened.1["flag"], sandbox);
+        let missed = call(
+            &mut state,
+            "POST",
+            "/v1/war/challenges/referee/solve",
+            r#"{"method":"claim_checked"}"#,
+            None,
+        );
+        assert_eq!(missed.0, 403);
+        let solved = call(
+            &mut state,
+            "POST",
+            "/v1/war/challenges/referee/solve",
+            r#"{"method":"force_claim"}"#,
+            None,
+        );
+        assert_eq!(solved.0, 200, "{}", solved.1);
+        assert_eq!(solved.1["flag"], referee);
+        let puzzle = call(
+            &mut state,
+            "GET",
+            "/v1/war/challenges/hash-puzzle",
+            "",
+            None,
+        );
+        assert_eq!(puzzle.0, 200, "{}", puzzle.1);
+        assert!(puzzle.1.get("flag").is_none());
+        let flag = war_flag(TEST_WAR_SECRET, "hash-puzzle");
+        let target = to_hex(&Sha256::digest(flag.as_bytes()));
+        assert_eq!(puzzle.1["target"], target);
+        assert_eq!(puzzle.1["length"], HASH_FLAG_LEN);
+        assert!(!puzzle.1.to_string().contains(&flag));
     }
 
     #[test]
