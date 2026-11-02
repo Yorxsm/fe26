@@ -724,17 +724,16 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     <Trophy aria-hidden="true" strokeWidth={1.75} />
                     <span className="bar-label">Leaderboard</span>
                   </a>
+                  <button type="button" className="btn btn-secondary" title="Games" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                    <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
+                    <span className="bar-label">Games</span>
+                  </button>
                   {DISTRICTS.find((district) => district.id === focusId)?.href ? (
-                    <a className="btn btn-secondary" title="Enter the room" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                    <a className="btn btn-secondary room-enter" title="Enter the room" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
                       <span className="bar-label">Enter the room</span>
                     </a>
-                  ) : (
-                    <button type="button" className="btn btn-secondary" title="Games" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
-                      <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
-                      <span className="bar-label">Games</span>
-                    </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn-secondary"

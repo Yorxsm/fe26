@@ -971,13 +971,8 @@ button.enter {
     background: transparent;
     border: 0;
   }
-  .shell:has(.game-root) > .site-foot {
-    top: 8px;
-    bottom: auto;
-    left: auto;
-    right: 8px;
-    transform: none;
-  }
+  .shell:has(.game-root) > .site-foot { display: none; }
+  .hud-bc .btn, .hud-bc a.btn { overflow: hidden; }
 }
 .sign-list {
   display: none;
@@ -2162,6 +2157,49 @@ button.pronounce:focus-visible {
 .md-code { position: relative; }
 .md-code button { position: absolute; top: 8px; right: 8px; }
 @media (max-width: 800px) {
+  .game-root, .city-stage, .city-frame { overflow: hidden; max-width: 100%; }
+  .hud-tl { top: 8px; left: 8px; right: 8px; width: auto; max-width: none; }
+  .hud-tr { top: 8px; right: 8px; max-width: calc(100% - 16px); }
+  .hud-nav { flex-wrap: wrap; max-width: 100%; }
+  .hud-bl {
+    left: 8px;
+    right: 8px;
+    bottom: 64px;
+    width: auto;
+    max-height: 30vh;
+  }
+  .hud-bl .hint-toggle,
+  .hud-bl .quest-hint,
+  .hud-bl .hud-note {
+    width: 100%;
+    max-width: 100%;
+    max-height: 26vh;
+    overflow: auto;
+  }
+  .room-frame .hud-bc { display: flex; }
+  .room-enter { display: none; }
+  .room-hud {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 64px;
+    width: auto;
+    max-height: min(46vh, calc(100dvh - 140px));
+    overflow: auto;
+  }
+  .room-hud.is-sheet {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 8px;
+    max-height: none;
+    overflow: visible;
+    background: transparent;
+  }
+  .room-leave,
+  .room-sheet-toggle,
+  .hud-bc .btn,
+  .hud-bc a.btn { min-height: 44px; min-width: 44px; }
   .lobby-span-7,
   .lobby-span-5 { grid-column: 1 / -1; }
   .lobby-hero { grid-template-columns: 1fr; }

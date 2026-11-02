@@ -251,8 +251,8 @@ function VillageMural() {
     };
   }, []);
   return (
-    <mesh position={[-10, 6.2, 22]} rotation={[0, 0.35, 0]} raycast={() => undefined}>
-      <planeGeometry args={[10, 5.6]} />
+    <mesh position={[-17.5, 12, 26]} rotation={[0, 0, 0]} raycast={() => undefined}>
+      <planeGeometry args={[16, 8.2]} />
       {map ? <meshBasicMaterial key="painted" map={map} toneMapped={false} side={THREE.DoubleSide} /> : <meshBasicMaterial key="plain" color="#141416" toneMapped={false} side={THREE.DoubleSide} />}
     </mesh>
   );
@@ -288,8 +288,27 @@ function InteriorBackdrop({ id }: { id: string | null }) {
   );
 }
 
-const overviewEye = new THREE.Vector3(-32, 16, 58);
-const overviewAim = new THREE.Vector3(14, 6, -4);
+const overviewEye = new THREE.Vector3(0, 84, 108);
+const overviewAim = new THREE.Vector3(0, 0, -2);
+/** Shot the composer must draw. CameraDriver fills it; Grade applies it in the render callback. */
+const renderShot = {
+  on: false,
+  eye: new THREE.Vector3(),
+  aim: new THREE.Vector3(),
+  fov: 48,
+};
+/** Pull back until all six plots sit inside the desktop and phone frames, clear of the bars. */
+function overviewFrame(aspect: number) {
+  const narrow = !Number.isFinite(aspect) || aspect < 0.9;
+  if (narrow) {
+    overviewEye.set(0, 200, 110);
+    overviewAim.set(0, 0, 6);
+    return 60;
+  }
+  overviewEye.set(0, 84, 108);
+  overviewAim.set(0, 0, -2);
+  return 48;
+}
 /**
  * Lobby. Almost level, from above the roofs, so the horizon lands near
  * mid-frame and the lit plaza fills the lower half. Mobile looks a little
@@ -1832,9 +1851,30 @@ function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; qual
     [grade],
   );
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
+    const live = state.camera;
+    if (renderShot.on && live instanceof THREE.PerspectiveCamera) {
+      live.position.copy(renderShot.eye);
+      live.up.set(0, 1, 0);
+      live.lookAt(renderShot.aim);
+      if (Math.abs(live.fov - renderShot.fov) > 0.2) {
+        live.fov = renderShot.fov;
+        live.updateProjectionMatrix();
+      }
+      live.matrixAutoUpdate = true;
+      live.matrixWorldAutoUpdate = true;
+      live.updateMatrixWorld(true);
+    }
     gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : 1;
-    grade.composer.render(delta);
+    // The composer keeps the overview view after a click even when this camera
+    // has moved inside. Draw the room with the renderer camera directly.
+    if (renderShot.on && live instanceof THREE.PerspectiveCamera) {
+      gl.setRenderTarget(null);
+      gl.render(state.scene, live);
+    } else {
+      grade.composer.setMainCamera(live);
+      grade.composer.render(delta);
+    }
   }, 1);
 
   return null;
@@ -1919,7 +1959,7 @@ function widenOrbit(controls: Rig | null) {
   if (!controls) return;
   controls.minDistance = 8;
   controls.maxDistance = 360;
-  controls.minPolarAngle = 0.35;
+  controls.minPolarAngle = 0.15;
   controls.maxPolarAngle = 1.5;
   controls.enablePan = true;
   const delta = (controls as Rig & { _sphericalDelta?: { set: (x: number, y: number, z: number) => void } })._sphericalDelta;
@@ -1996,6 +2036,8 @@ function CameraDriver({
   useFrame((state, delta) => {
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
+    renderShot.on = false;
+    const overviewFov = overviewFrame(camera.aspect);
     const driving = mode === "cutscene" || lineup || street || Boolean(poster) || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
@@ -2012,7 +2054,7 @@ function CameraDriver({
     if (fovTarget.current === null) fovTarget.current = camera.fov;
 
     if (mode === "orbit" && !focusId) {
-      fovTarget.current = lobby ? 46 : 48;
+      fovTarget.current = lobby ? 46 : overviewFov;
       if (lobby) {
         rig.enabled = false;
         const mobileLobby = camera.aspect < 0.7;
@@ -2045,7 +2087,7 @@ function CameraDriver({
           const blend = 1 - Math.exp(-delta * 3);
           rig.target.lerp(aim, blend);
           camera.position.lerp(eye, blend);
-          collideCamera(camera.position, rig.target, null);
+          if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
           camera.lookAt(rig.target);
           dampFov(camera, fovTarget.current, delta, false);
           return;
@@ -2058,7 +2100,7 @@ function CameraDriver({
       rig.enabled = true;
       const held = cameraHeld() || pointer.current.down || reduce.current;
       applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-      collideCamera(camera.position, rig.target, null);
+      if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
       camera.lookAt(rig.target);
       dampFov(camera, fovTarget.current, delta, reduce.current);
       return;
@@ -2067,7 +2109,7 @@ function CameraDriver({
     if (!driving && homing.current) {
       rig.enabled = false;
       widenOrbit(controls);
-      fovTarget.current = 48;
+      fovTarget.current = overviewFov;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 4);
@@ -2172,7 +2214,7 @@ function CameraDriver({
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room && frameMode === "out") {
-        fovTarget.current = 48;
+        fovTarget.current = overviewFov;
         if (!depart.current) depart.current = { from: camera.position.clone(), at: state.clock.elapsedTime };
         const trip = depart.current;
         const t = Math.min(1, (state.clock.elapsedTime - trip.at) / 1.15);
@@ -2221,6 +2263,11 @@ function CameraDriver({
         }
         camera.lookAt(rig.target);
         dampFov(camera, fovTarget.current, delta, reduce.current);
+        renderShot.on = true;
+        renderShot.eye.copy(eye);
+        renderShot.aim.copy(aim);
+        renderShot.fov = fovTarget.current ?? 50;
+        rig.enabled = false;
         const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
         probe.focusId = focusId;
         probe.camera = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
@@ -2239,9 +2286,21 @@ function CameraDriver({
     }
     if (!drive) {
       if (mode === "play" && !lineup && !street && !poster && followIndex === null && !focusId) {
+        fovTarget.current = overviewFov;
+        const far = camera.position.distanceTo(overviewEye) > 2.6 || rig.target.distanceTo(overviewAim) > 3;
+        if (far) {
+          rig.enabled = false;
+          const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 6);
+          rig.target.lerp(overviewAim, blend);
+          camera.position.lerp(overviewEye, blend);
+          camera.lookAt(rig.target);
+          dampFov(camera, fovTarget.current, delta, reduce.current);
+          return;
+        }
+        rig.enabled = true;
         const held = cameraHeld() || pointer.current.down || reduce.current;
         applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-        collideCamera(camera.position, rig.target, null);
+        if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
         if (!held) camera.lookAt(rig.target);
       }
       dampFov(camera, fovTarget.current, delta, reduce.current);
@@ -2796,7 +2855,7 @@ export default function CityMap({
       className="city-canvas"
       dpr={dpr}
       shadows={quality !== "low"}
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
+      camera={{ position: [0, 84, 108], fov: 48, near: 0.35, far: 2500 }}
       frameloop={paused && !openInterior ? "demand" : "always"}
       gl={{
         antialias: quality !== "low",
@@ -2930,7 +2989,7 @@ export default function CityMap({
         dampingFactor={0.08}
         autoRotate={false}
         touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
-        minPolarAngle={0.35}
+        minPolarAngle={0.15}
         maxPolarAngle={1.5}
         minDistance={lean ? 6 : 8}
         maxDistance={360}
