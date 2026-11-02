@@ -251,10 +251,10 @@ function VillageMural() {
   }, []);
   const narrow = useThree((state) => state.size.width < state.size.height);
   if (!map) return null;
-  const width = narrow ? 7.2 : 12;
+  const width = narrow ? 11 : 12;
   const height = width * 0.52;
   return (
-    <mesh position={narrow ? [-4, 6.4, 14] : [-12, 8.2, 20]} rotation={[0, 0, 0]} raycast={() => undefined}>
+    <mesh position={narrow ? [-2, 7.2, 10] : [-12, 8.2, 20]} rotation={[0, 0, 0]} raycast={() => undefined}>
       <planeGeometry args={[width, height]} />
       <meshBasicMaterial map={map} toneMapped={false} side={THREE.DoubleSide} />
     </mesh>
@@ -304,9 +304,9 @@ const renderShot = {
 function overviewFrame(aspect: number) {
   const narrow = !Number.isFinite(aspect) || aspect < 0.9;
   if (narrow) {
-    overviewEye.set(0, 200, 110);
-    overviewAim.set(0, 0, 6);
-    return 60;
+    overviewEye.set(0, 120, 78);
+    overviewAim.set(0, 2, 0);
+    return 76;
   }
   overviewEye.set(0, 84, 108);
   overviewAim.set(0, 0, -2);
@@ -1806,6 +1806,19 @@ function AgentMesh({
   );
 }
 
+function PhoneAir() {
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  useFrame(() => {
+    const fog = scene.fog as THREE.Fog | null;
+    if (!fog || !("near" in fog)) return;
+    const narrow = camera instanceof THREE.PerspectiveCamera && camera.aspect < 0.9;
+    fog.near = narrow ? 90 : 70;
+    fog.far = narrow ? 480 : 280;
+  });
+  return null;
+}
+
 function Grade({ shot }: { shot: "interior" | "hero" | "overview"; quality?: QualityTier }) {
   const gl = useThree((state) => state.gl);
   const shotKind = useRef(shot);
@@ -1828,7 +1841,8 @@ function Grade({ shot }: { shot: "interior" | "hero" | "overview"; quality?: Qua
       live.matrixWorldAutoUpdate = true;
       live.updateMatrixWorld(true);
     }
-    gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : 1;
+    const narrow = live instanceof THREE.PerspectiveCamera && live.aspect < 0.9;
+    gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : narrow ? 1.45 : 1;
     gl.setRenderTarget(null);
     gl.render(state.scene, live);
     const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
@@ -2846,6 +2860,7 @@ export default function CityMap({
     >
       <color attach="background" args={["#070a1a"]} />
       <QualitySettings quality={quality} />
+      <PhoneAir />
       <World quality={quality} environment={detail} />
       <InteriorBackdrop id={openInterior} />
       <BuildingVolumes hideId={openInterior} />
