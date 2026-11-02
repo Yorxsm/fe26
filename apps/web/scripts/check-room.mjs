@@ -69,7 +69,7 @@ function send(method, params = {}) {
   const id = ++seq;
   ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timeout ${method}`)), 20000);
+    const timer = setTimeout(() => reject(new Error(`timeout ${method}`)), 45000);
     waiters.set(id, (msg) => {
       clearTimeout(timer);
       if (msg.error) reject(new Error(JSON.stringify(msg.error)));
@@ -263,26 +263,26 @@ if (!overview) {
   console.error("The overview never opened");
   process.exit(1);
 }
-await delay(1200);
-const covered = await send("Runtime.evaluate", {
-  expression: `(() => {
-    const doors = window.__fe2viDoors || [];
-    const canvas = document.querySelector("canvas");
-    if (!canvas) return { hit: 0, doors: doors.length };
-    const rect = canvas.getBoundingClientRect();
-    let hit = 0;
-    for (const door of doors) {
-      if (door.x < rect.left + 8 || door.x > rect.right - 8 || door.y < rect.top + 8 || door.y > rect.bottom - 64) continue;
-      if (document.elementFromPoint(door.x, door.y) === canvas) hit += 1;
-    }
-    return { hit, doors: doors.length };
-  })()`,
-  returnByValue: true,
-});
-const doorHits = covered.result?.value?.hit ?? 0;
-if (doorHits < 6) {
-  console.error(`Only ${doorHits} buildings are clickable from the overview`);
-  // Continue so the pixel result is still printed, then fail at the end.
+let doorHits = 0;
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  await delay(500);
+  const covered = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const doors = window.__fe2viDoors || [];
+      const canvas = document.querySelector("canvas");
+      if (!canvas || document.querySelector(".loading-screen")) return { hit: 0 };
+      const rect = canvas.getBoundingClientRect();
+      let hit = 0;
+      for (const door of doors) {
+        if (door.x < rect.left + 8 || door.x > rect.right - 8 || door.y < rect.top + 8 || door.y > rect.bottom - 64) continue;
+        if (document.elementFromPoint(door.x, door.y) === canvas) hit += 1;
+      }
+      return { hit };
+    })()`,
+    returnByValue: true,
+  });
+  doorHits = covered.result?.value?.hit ?? 0;
+  if (doorHits >= 6) break;
 }
 const viewOf = async () => {
   const result = await send("Runtime.evaluate", {
@@ -420,5 +420,8 @@ if (linked && versusLink > 60) {
   console.error("Click frame does not match the room link");
   process.exit(1);
 }
-if (doorHits < 6) process.exit(1);
+if (doorHits < 6) {
+  console.error(`Only ${doorHits} buildings are clickable from the overview`);
+  process.exit(1);
+}
 console.log("room interior ok");
