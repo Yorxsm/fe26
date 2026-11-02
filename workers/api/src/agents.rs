@@ -1,5 +1,5 @@
 //! Registered agents. Tokens are stored as sha256 only. Points come from the
-//! same constants the mock crew uses. There is no rate limit and no registration cap.
+//! same constants the mock crew uses. The player book is persisted as SQL rows.
 
 use fe2vi_core::{
     award_in_window, challenges, score_actions, ActionKind, BoardWindow, PointRoom, PublicRow,
@@ -11,13 +11,13 @@ use sha2::{Digest, Sha256};
 use crate::logic::{http, json, query_param, ArenaState, Fanout, Incoming, Outcome};
 use crate::skins;
 use crate::vault::VaultMatch;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const TURN_SECS: u64 = 60;
 const API_ORIGIN: &str = "https://api.fe2vi.space";
 const SITE_ORIGIN: &str = "https://fe2vi.space";
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct PlayerBook {
     #[serde(default)]
     pub players: Vec<Player>,
@@ -35,7 +35,7 @@ pub struct PlayerBook {
     pub reactions: Vec<Reaction>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Player {
     pub agent_id: String,
     pub handle: String,
@@ -60,7 +60,7 @@ fn default_skin_id() -> String {
 
 /// Public chain addresses only. The arena never stores a private key, an API
 /// key, or a grant token for an agent.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wallets {
     #[serde(default)]
@@ -71,14 +71,14 @@ pub struct Wallets {
     pub hyperliquid_account: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Queued {
     pub arena_id: String,
     pub agent_id: String,
     pub queued_unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlayMatch {
     pub match_id: String,
     pub arena_id: String,
@@ -93,7 +93,7 @@ pub struct PlayMatch {
     pub vault: Option<VaultMatch>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Played {
     pub agent_id: String,
     pub turn: u32,
@@ -106,15 +106,21 @@ pub struct Played {
     pub outcome: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Seen {
     pub agent_id: String,
     pub client_request_id: String,
     pub status: u16,
     pub body: String,
+    /// Set for match actions so the row can be dropped when that match ends.
+    #[serde(default)]
+    pub match_id: String,
+    /// Unix seconds. Zero means a legacy row with no age, which is kept.
+    #[serde(default)]
+    pub created_unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WarClaim {
     pub agent_id: String,
     pub challenge_id: String,
@@ -126,7 +132,7 @@ pub struct WarClaim {
     pub intent: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LobbyPost {
     pub id: String,
     pub agent_id: String,
@@ -141,7 +147,7 @@ pub struct LobbyPost {
     pub reports: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reaction {
     pub target_type: String,
     pub target_id: String,
@@ -224,7 +230,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
     let path = path_only(incoming.path);
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     let now = crate::logic::query_now(incoming.path);
-    let changed = settle(state, now);
+    let changed = settle(state, now) || prune_seen(state, now);
     let outcome = match (incoming.method, parts.as_slice()) {
         ("GET", ["openapi.json"]) => Some(document("application/json", &openapi())),
         ("GET", ["llms.txt"]) => Some(document("text/plain; charset=utf-8", onboarding_text())),
@@ -1023,6 +1029,8 @@ fn submit_war(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id: String::new(),
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
@@ -1288,6 +1296,8 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         client_request_id: request_id.to_string(),
         status: 200,
         body: response.clone(),
+        match_id: match_id.unwrap_or("").to_string(),
+        created_unix: now,
     });
     json(
         200,
@@ -1836,6 +1846,7 @@ fn vault_act(
         }
     }
     let next = play.deadline_unix;
+    let match_id = play.match_id.clone();
     let body = serde_json::json!({
         "accepted": true,
         "round": play.turn.saturating_sub(1),
@@ -1849,6 +1860,8 @@ fn vault_act(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id,
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
@@ -2015,11 +2028,14 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         "nextDeadlineAt": rfc3339(next),
     })
     .to_string();
+    let seen_match = play.match_id.clone();
     state.book.seen.push(Seen {
         agent_id,
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id: seen_match,
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
@@ -2574,6 +2590,178 @@ fn openapi() -> String {
         }
     })
     .to_string()
+}
+
+/// Idempotency rows older than this are dropped. Rows tied to a match are
+/// dropped when that match is no longer live.
+pub const SEEN_KEEP_SECS: u64 = 24 * 60 * 60;
+
+pub fn prune_seen(state: &mut ArenaState, now: u64) -> bool {
+    let live: HashSet<String> = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.status == "live")
+        .map(|play| play.match_id.clone())
+        .collect();
+    let before = state.book.seen.len();
+    state.book.seen.retain(|seen| {
+        if !seen.match_id.is_empty() && !live.contains(&seen.match_id) {
+            return false;
+        }
+        if seen.created_unix > 0 && now.saturating_sub(seen.created_unix) >= SEEN_KEEP_SECS {
+            return false;
+        }
+        true
+    });
+    state.book.seen.len() != before
+}
+
+/// Rows to write. Unchanged rows are absent, so a save does not rewrite the book.
+#[derive(Clone, Debug, Default)]
+pub struct SqlPlan {
+    pub upsert_players: Vec<Player>,
+    pub delete_player_ids: Vec<String>,
+    pub upsert_queue: Vec<Queued>,
+    pub delete_queue: Vec<(String, String)>,
+    pub upsert_matches: Vec<PlayMatch>,
+    pub delete_match_ids: Vec<String>,
+    pub upsert_actions: Vec<(String, Played)>,
+    pub delete_actions: Vec<(String, u32, String)>,
+    pub upsert_seen: Vec<Seen>,
+    pub delete_seen: Vec<(String, String)>,
+    pub upsert_war: Vec<WarClaim>,
+    pub delete_war: Vec<(String, String)>,
+    pub upsert_lobby: Vec<LobbyPost>,
+    pub delete_lobby: Vec<String>,
+    pub upsert_reactions: Vec<Reaction>,
+    pub delete_reactions: Vec<(String, String, String)>,
+}
+
+impl SqlPlan {
+    pub fn is_empty(&self) -> bool {
+        self.upsert_players.is_empty()
+            && self.delete_player_ids.is_empty()
+            && self.upsert_queue.is_empty()
+            && self.delete_queue.is_empty()
+            && self.upsert_matches.is_empty()
+            && self.delete_match_ids.is_empty()
+            && self.upsert_actions.is_empty()
+            && self.delete_actions.is_empty()
+            && self.upsert_seen.is_empty()
+            && self.delete_seen.is_empty()
+            && self.upsert_war.is_empty()
+            && self.delete_war.is_empty()
+            && self.upsert_lobby.is_empty()
+            && self.delete_lobby.is_empty()
+            && self.upsert_reactions.is_empty()
+            && self.delete_reactions.is_empty()
+    }
+}
+
+pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
+    let mut plan = SqlPlan::default();
+    let (players, deleted_players) =
+        diff_by_key(&before.players, &after.players, |row| row.agent_id.clone());
+    plan.upsert_players = players;
+    plan.delete_player_ids = deleted_players;
+    let (queue, deleted_queue) = diff_by_key(&before.queue, &after.queue, |row| {
+        (row.arena_id.clone(), row.agent_id.clone())
+    });
+    plan.upsert_queue = queue;
+    plan.delete_queue = deleted_queue;
+    let (matches, deleted_matches) =
+        diff_by_key(&before.matches, &after.matches, |row| row.match_id.clone());
+    plan.upsert_matches = matches;
+    plan.delete_match_ids = deleted_matches;
+
+    let before_matches: HashMap<String, &PlayMatch> = before
+        .matches
+        .iter()
+        .map(|play| (play.match_id.clone(), play))
+        .collect();
+    let after_matches: HashMap<String, &PlayMatch> = after
+        .matches
+        .iter()
+        .map(|play| (play.match_id.clone(), play))
+        .collect();
+    for (id, play) in &after_matches {
+        let previous = before_matches
+            .get(id)
+            .map(|row| row.actions.as_slice())
+            .unwrap_or(&[]);
+        let (actions, removed) = diff_by_key(previous, &play.actions, |row| {
+            (row.turn, row.agent_id.clone())
+        });
+        for action in actions {
+            plan.upsert_actions.push((id.clone(), action));
+        }
+        for (turn, agent_id) in removed {
+            plan.delete_actions.push((id.clone(), turn, agent_id));
+        }
+    }
+    for (id, play) in &before_matches {
+        if after_matches.contains_key(id) {
+            continue;
+        }
+        for action in &play.actions {
+            plan.delete_actions
+                .push((id.clone(), action.turn, action.agent_id.clone()));
+        }
+    }
+
+    let (seen, deleted_seen) = diff_by_key(&before.seen, &after.seen, |row| {
+        (row.agent_id.clone(), row.client_request_id.clone())
+    });
+    plan.upsert_seen = seen;
+    plan.delete_seen = deleted_seen;
+    let (war, deleted_war) = diff_by_key(&before.war_claims, &after.war_claims, |row| {
+        (row.agent_id.clone(), row.challenge_id.clone())
+    });
+    plan.upsert_war = war;
+    plan.delete_war = deleted_war;
+    let (lobby, deleted_lobby) = diff_by_key(&before.lobby, &after.lobby, |row| row.id.clone());
+    plan.upsert_lobby = lobby;
+    plan.delete_lobby = deleted_lobby;
+    let (reactions, deleted_reactions) = diff_by_key(&before.reactions, &after.reactions, |row| {
+        (
+            row.target_type.clone(),
+            row.target_id.clone(),
+            row.viewer_id.clone(),
+        )
+    });
+    plan.upsert_reactions = reactions;
+    plan.delete_reactions = deleted_reactions;
+    plan
+}
+
+fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
+    before: &[T],
+    after: &[T],
+    key: impl Fn(&T) -> K,
+) -> (Vec<T>, Vec<K>) {
+    let mut before_map: HashMap<K, &T> = HashMap::new();
+    for row in before {
+        before_map.insert(key(row), row);
+    }
+    let mut after_map: HashMap<K, &T> = HashMap::new();
+    for row in after {
+        after_map.insert(key(row), row);
+    }
+    let mut upserts = Vec::new();
+    for (id, row) in &after_map {
+        match before_map.get(id) {
+            Some(previous) if *previous == *row => {}
+            _ => upserts.push((*row).clone()),
+        }
+    }
+    let mut deletes = Vec::new();
+    for id in before_map.keys() {
+        if !after_map.contains_key(id) {
+            deletes.push(id.clone());
+        }
+    }
+    (upserts, deletes)
 }
 
 #[cfg(test)]
@@ -3275,5 +3463,149 @@ mod tests {
             200
         );
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn storage_plan_is_incremental_and_arena_json_omits_the_book() {
+        let player = Player {
+            agent_id: "ag".into(),
+            handle: "alpha".into(),
+            name: "Alpha".into(),
+            description: "d".into(),
+            owner_contact: None,
+            token_hash: "deadbeefdeadbeef".into(),
+            token_prefix: "fe2_dead".into(),
+            status: "active".into(),
+            created_unix: 10,
+            wallets: Wallets::default(),
+            capabilities: Vec::new(),
+            skin_id: "ingot".into(),
+        };
+        let done = PlayMatch {
+            match_id: "mt_done".into(),
+            arena_id: "vault".into(),
+            status: "over".into(),
+            turn: 2,
+            deadline_unix: 50,
+            seats: vec!["ag".into(), "bg".into()],
+            actions: vec![Played {
+                agent_id: "ag".into(),
+                turn: 1,
+                action_type: "scout".into(),
+                points: 1,
+                unix: 40,
+                intent: None,
+                outcome: None,
+            }],
+            created_unix: 30,
+            vault: None,
+        };
+        let live = PlayMatch {
+            match_id: "mt_live".into(),
+            arena_id: "vault".into(),
+            status: "live".into(),
+            turn: 1,
+            deadline_unix: 90,
+            seats: vec!["ag".into(), "bg".into()],
+            actions: Vec::new(),
+            created_unix: 80,
+            vault: None,
+        };
+        let mut before = PlayerBook::default();
+        before.players.push(player);
+        before.matches.push(done);
+        before.matches.push(live);
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "finished".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_done".into(),
+            created_unix: 40,
+        });
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "old".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: String::new(),
+            created_unix: 1,
+        });
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "live-row".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_live".into(),
+            created_unix: 100,
+        });
+
+        let mut state = ArenaState::default();
+        state.book = before.clone();
+        let now = 1 + SEEN_KEEP_SECS;
+        assert!(prune_seen(&mut state, now));
+        assert_eq!(state.book.seen.len(), 1);
+        state.book.matches[1].actions.push(Played {
+            agent_id: "ag".into(),
+            turn: 1,
+            action_type: "crack".into(),
+            points: 0,
+            unix: now,
+            intent: None,
+            outcome: Some("opened".into()),
+        });
+        state.book.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "new".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_live".into(),
+            created_unix: now,
+        });
+        let plan = plan_writes(&before, &state.book);
+        assert!(plan.upsert_players.is_empty());
+        assert!(plan.delete_player_ids.is_empty());
+        assert_eq!(plan.upsert_matches.len(), 1);
+        assert_eq!(plan.upsert_matches[0].match_id, "mt_live");
+        assert_eq!(plan.upsert_actions.len(), 1);
+        assert_eq!(plan.upsert_actions[0].1.action_type, "crack");
+        assert!(plan.delete_actions.is_empty());
+        assert_eq!(plan.delete_seen.len(), 2);
+        assert_eq!(plan.upsert_seen.len(), 1);
+        assert!(!plan.is_empty());
+
+        let mut baseline = state.book.clone();
+        baseline.players[0].token_hash.clear();
+        baseline.players[0].token_prefix.clear();
+        baseline.matches[0].actions.clear();
+        baseline.matches[1].actions.clear();
+        let backfill = plan_writes(&baseline, &state.book);
+        assert_eq!(backfill.upsert_players.len(), 1);
+        assert_eq!(backfill.upsert_actions.len(), 2);
+        assert!(backfill.delete_player_ids.is_empty());
+        assert!(backfill.delete_match_ids.is_empty());
+
+        let encoded = serde_json::to_string(&state).unwrap();
+        assert!(!encoded.contains("deadbeefdeadbeef"));
+        assert!(!encoded.contains("token_hash"));
+        let mut legacy = serde_json::to_value(&state).unwrap();
+        legacy["book"] = serde_json::json!({
+            "players": [{
+                "agent_id": "ag",
+                "handle": "alpha",
+                "name": "Alpha",
+                "description": "d",
+                "owner_contact": null,
+                "token_hash": "deadbeefdeadbeef",
+                "token_prefix": "fe2_dead",
+                "status": "active",
+                "created_unix": 1
+            }]
+        });
+        let restored: ArenaState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.book.players[0].token_hash, "deadbeefdeadbeef");
+        let again = serde_json::to_string(&restored).unwrap();
+        assert!(!again.contains("deadbeefdeadbeef"));
+        assert!(plan_writes(&state.book, &state.book).is_empty());
     }
 }

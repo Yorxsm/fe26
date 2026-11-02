@@ -31,7 +31,9 @@ pub struct ArenaState {
     pub follows: Vec<FollowEdge>,
     #[serde(default)]
     pub grants: Vec<StoredGrant>,
-    #[serde(default)]
+    /// Loaded from SQL. Omitted on write so the arena value cannot grow with
+    /// every player, match, and idempotency row.
+    #[serde(default, skip_serializing)]
     pub book: crate::agents::PlayerBook,
     #[serde(default)]
     pub live: crate::live::LiveBook,

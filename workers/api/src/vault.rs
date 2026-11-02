@@ -11,7 +11,7 @@ pub const MAX_ROUNDS: u32 = 8;
 pub const MAX_ALARM: u32 = 3;
 pub const LOCKS: usize = 3;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultSeat {
     pub agent_id: String,
     pub role: String,
@@ -26,7 +26,7 @@ pub struct VaultSeat {
     pub objective_met: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultSubmission {
     pub agent_id: String,
     pub action: String,
@@ -35,7 +35,7 @@ pub struct VaultSubmission {
     pub unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultResult {
     pub round: u32,
     pub agent_id: String,
@@ -47,7 +47,7 @@ pub struct VaultResult {
     pub unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultMatch {
     pub round: u32,
     pub locks: Vec<bool>,
