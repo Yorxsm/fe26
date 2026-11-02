@@ -14,10 +14,6 @@ const TABLE = "/models/props/dining_table.glb";
 const BASKET = "/models/props/wicker_basket_01.glb";
 const APPLE = "/models/props/food_apple_01.glb";
 
-for (const url of [BENCH, PLANTER_A, PLANTER_B, CRATE, BARRELS, CART, TABLE, BASKET, APPLE]) {
-  useGLTF.preload(url, false, true);
-}
-
 type Vec3 = [number, number, number];
 
 function Prop({

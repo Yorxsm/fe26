@@ -1,41 +1,40 @@
 # Performance
 
-Measured on 2 Nov 2026 from production `next build` output. The before build is commit `6e99cf4` (the city before this pass). The after build is the tree that lazy-loads interiors, caps the pixel ratio, and stops the frame loop while the city is paused.
+Measured in headless Chrome with `--use-gl=angle --use-angle=swiftshader` against `next start`. The network throttle is Chrome's Fast 4G preset: 1.6 Mbps down, 750 Kbps up, 150 ms latency. Cache was disabled. `renderer.info` is read from a probe in the canvas. The postprocessing composer does not add its passes to that counter, so draw calls and triangles there stay near 1 / 12 even while the village is on screen. Texture and geometry counts from `renderer.info.memory` do move.
 
 ## Before
 
-| | |
-| --- | --- |
-| `/` first load, as Next reports it | 307 KB |
-| All static JS, gzip | 728.5 KB |
-| Largest JS chunk, gzip | 166.6 KB |
-| Interior glbs preloaded with the city | vault 211 KB, market 189 KB, war 215 KB, stadium 54 KB, forge 83 KB (752 KB) |
-| City models that still download up front | station 3.8 MB, kits 1.6 MB, agent 499 KB |
+The loader waited on the whole village.
 
-Draw calls, triangles, texture memory, time to interactive, and frames per second were not measured. A headless Chrome using SwiftShader lost the WebGL context once the full city started, so those counters never became available.
+| Asset | On disk |
+| --- | --- |
+| `station.glb` | 3,930 KB |
+| `kits.glb` | 1,679 KB |
+| `agent.glb` | 499 KB |
+| props, nature, and the HDR | about 2.4 MB more, preloaded with the city |
+
+On Fast 4G the loader had not finished after 60 seconds. The model responses had barely started. Draw calls were not available because the scene never became playable in that run.
 
 ## After
 
+`npm run optimize-models` reads `apps/web/models-src` and writes the files below. The core keeps terrain, roads, and pads. Trees, the duplicate building shells, and the pier, club, and oracle scaffolds are pruned. Textures are WebP, 1024 on desktop and 512 on a narrow screen. Geometry is `EXT_meshopt_compression`. `MeshoptDecoder` is the copy bundled with Three.js. Kit atlases stay as authored, because recompressing them dropped the alpha mask and the buildings disappeared. They are still deduped, pruned, and meshopt-compressed.
+
+| Asset | On disk | Role |
+| --- | --- | --- |
+| `station-core.glb` | 455 KB | Desktop ground. The loader waits for this. |
+| `station-core-512.glb` | 200 KB | The same ground for a viewport under 800 px. |
+| `kits.glb` | 1,269 KB | Building kits. Requested after the loader finishes. Was 1,679 KB. |
+
+Fast 4G, desktop core, same browser:
+
 | | |
 | --- | --- |
-| `/` first load, as Next reports it | 308 KB |
-| `/` first-load chunks, gzip | 113.3 KB (shared chunks plus the home page chunk) |
-| All static JS, gzip | 732.9 KB |
-| Largest JS chunk, gzip | 166.6 KB (the Three.js runtime) |
-| Interiors | not requested until a building opens. One room's glb, not all five |
+| `station-core.glb` transferSize | 359 KB |
+| Time to download that file | 1.9 s |
+| Time until the loading screen cleared | 11.8 s |
+| `renderer.info.memory` after the vault opened | 10 textures, 113 geometries |
+| `renderer.info.render` | 1 call, 12 triangles. The composer draws the real scene outside this counter. |
 
-The initial JavaScript is under the 300 KB gzip target. The city is not under a 3 second first playable load on a fast link, because `station.glb` and `kits.glb` are still about 5.5 MB before a frame can show the village.
+The ground file is under the 1.5 MB village budget, and that file alone arrives in under 3 seconds on this throttle. The loading screen does not. At 150 ms round trip the script chunks sit in front of the model, and the full page took 11.8 seconds. Kits, props, nature, and the HDR start only after that screen clears, so they are not in the 11.8 seconds.
 
-## What changed
-
-- Room interiors are a separate client chunk and are fetched when a building opens, not during the first city load.
-- Device pixel ratio is capped at 1.5, and at 1 on a narrow screen or a machine with four cores or fewer.
-- The canvas uses `frameloop="demand"` while the city is paused and no room is open.
-- `preserveDrawingBuffer` is off.
-- Interior meshes are frustum-culled.
-- Mobile and other low tiers already skip shadows.
-- Repeated props were already merged or instanced. That stayed.
-
-## Not done
-
-Textures and glbs were not re-encoded to KTX2 or Draco. That rewrite needs an encoder pass and a visual check on a GPU, and this environment could not hold a SwiftShader frame of the full city. `station.glb` (3.8 MB) is the transfer to cut next.
+SwiftShader did keep the context for these runs. The village screenshot shows the compressed ground, paths, and building volumes. The vault screenshot shows the in-room board and the activity panel. The entry wall is still dark in this software GL view.

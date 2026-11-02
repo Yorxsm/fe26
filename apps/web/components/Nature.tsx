@@ -6,8 +6,6 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { DISTRICTS } from "@/lib/city";
 
-useGLTF.preload("/models/nature.glb", false, true);
-
 const RING: Array<[number, number]> = [
   [-54, -2],
   [-38, -24],

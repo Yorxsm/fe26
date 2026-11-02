@@ -1,6 +1,5 @@
 "use client";
 
-import "@/lib/loadProgress";
 import { Billboard, Html, OrbitControls, Text, useGLTF } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
@@ -11,20 +10,19 @@ const Interiors = dynamic(() => import("@/components/Interiors").then((mod) => m
 import { Nature } from "@/components/Nature";
 import { Props } from "@/components/Props";
 import { World } from "@/components/World";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
+import { pendingLoadSteps } from "@/lib/loadProgress";
+import { villageCoreUrl, villageKitsUrl, villageTier, type VillageTier } from "@/lib/village";
 import { FRAME_BOARDS } from "@/lib/boards";
 import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
 
-useGLTF.preload("/models/kits.glb", false, true);
-useGLTF.preload("/models/station.glb", false, true);
-useGLTF.preload("/models/agent.glb", false, true);
 
 const ROOM_PREFIX: Record<string, string> = {
   vault: "vault-quarter",
@@ -49,10 +47,10 @@ function showPick(name: string, x: number, z: number) {
   node.textContent = name;
 }
 
-function BuildingVolumes() {
+function BuildingVolumes({ hideId }: { hideId: string | null }) {
   return (
     <group>
-      {DISTRICTS.filter((district) => district.status === "live").map((district) => {
+      {DISTRICTS.filter((district) => district.status === "live" && district.id !== hideId).map((district) => {
         const { hx, hz, height } = district.footprint;
         const bodyH = Math.min(height * 0.62, 9);
         return (
@@ -725,17 +723,19 @@ function buildingGrade(name: string) {
 }
 
 function Kits({
+  url,
   onPick,
   focusId,
   frameMode,
   beatId,
 }: {
+  url: string;
   onPick: (district: District) => void;
   focusId: string | null;
   frameMode: "in" | "out";
   beatId: string | null;
 }) {
-  const gltf = useGLTF("/models/kits.glb", false, true);
+  const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
     cloned.traverse((node) => {
@@ -1127,17 +1127,19 @@ function applyLook(root: THREE.Object3D, skin: SkinTraits, mood: Mood) {
 }
 
 function Station({
+  url,
   onPick,
   focusId,
   beatPrefix,
   concealed,
 }: {
+  url: string;
   onPick: (district: District) => void;
   focusId: string | null;
   beatPrefix: string | null;
   concealed: boolean;
 }) {
-  const gltf = useGLTF("/models/station.glb", false, true);
+  const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const root = dress(gltf.scene.clone(true));
     mergeStatic(root, (mesh) => {
@@ -1805,6 +1807,26 @@ function fitInterior(
     aim: [aim.x, aim.y, aim.z] as [number, number, number],
     fov,
   };
+}
+
+function PerfProbe() {
+  const gl = useThree((state) => state.gl);
+  useFrame(() => {
+    let node = document.getElementById("fe2vi-perf");
+    if (!node) {
+      node = document.createElement("p");
+      node.id = "fe2vi-perf";
+      node.hidden = true;
+      document.body.appendChild(node);
+    }
+    const calls = gl.info.render.calls;
+    const triangles = gl.info.render.triangles;
+    if (calls > Number(node.dataset.calls || 0)) node.dataset.calls = String(calls);
+    if (triangles > Number(node.dataset.triangles || 0)) node.dataset.triangles = String(triangles);
+    node.dataset.textures = String(gl.info.memory.textures);
+    node.dataset.geometries = String(gl.info.memory.geometries);
+  });
+  return null;
 }
 
 function cameraHeld() {
@@ -2661,6 +2683,8 @@ export default function CityMap({
   lines?: Record<string, string>;
 }) {
   const crew = visitors;
+  const [tier] = useState<VillageTier>(villageTier);
+  const [detail, setDetail] = useState(false);
   const [lean, setLean] = useState(false);
   const [quality, setQuality] = useState<QualityTier>("medium");
   const [dpr, setDpr] = useState(1);
@@ -2684,6 +2708,17 @@ export default function CityMap({
   const [peek, setPeek] = useState<{ x: number; y: number; z: number } | null>(null);
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
+  useEffect(() => {
+    const coreArrived = () => performance.getEntriesByType("resource").some((entry) => entry.name.includes("station-core"));
+    const ready = (step: { active?: boolean; total?: number }) => step.active === false && (step.total ?? 0) > 0 && coreArrived();
+    if (pendingLoadSteps().some(ready)) setDetail(true);
+    const onLoad = (event: Event) => {
+      const step = (event as CustomEvent<{ active?: boolean; total?: number }>).detail;
+      if (step && ready(step)) setDetail(true);
+    };
+    window.addEventListener("fe2vi-load", onLoad);
+    return () => window.removeEventListener("fe2vi-load", onLoad);
+  }, []);
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
 
@@ -2718,13 +2753,16 @@ export default function CityMap({
     >
       <color attach="background" args={["#070a1a"]} />
       <QualitySettings quality={quality} />
-      <World quality={quality} />
-      <Nature />
-      <Props />
+      <World quality={quality} environment={detail} />
       <InteriorBackdrop id={openInterior} />
-      <BuildingVolumes />
-      <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
-      <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
+      <BuildingVolumes hideId={openInterior} />
+      <PerfProbe />
+      <Suspense fallback={null}>
+        {detail ? <Nature /> : null}
+        {detail ? <Props /> : null}
+        {detail ? <Kits url={villageKitsUrl(tier)} onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} /> : null}
+        {openInterior ? <Interiors focusId={openInterior} frameMode="in" /> : null}
+      </Suspense>
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
@@ -2768,7 +2806,7 @@ export default function CityMap({
           <meshBasicMaterial color="#101018" />
         </mesh>
       ) : null}
-      <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
+      <Station url={villageCoreUrl(tier)} onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
       <DrawProbe />
       <FrameAudit />
       {crowdOn ? (
