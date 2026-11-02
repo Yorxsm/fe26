@@ -1599,7 +1599,7 @@ function AgentMesh({
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     if (mode === "play" && !poster && !lineup && !(focusId && frameMode === "in")) {
       const pad = padStand(index);
-      pose = { x: pad.x, y: pad.y, z: pad.z, rot: pad.rot };
+      pose = { x: pad.x, y: pad.y, z: pad.z + 5.2, rot: pad.rot };
     }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
@@ -1669,7 +1669,7 @@ function AgentMesh({
     const bodyBox = cover.canvas ? agentOnScreen(pose.x, pose.z, state.camera, cover.canvas) : null;
     const underChip = Boolean(bodyBox && cover.bottom.some((rect) => rectsOverlap(bodyBox, rect)));
     if (group.current) {
-      group.current.visible = shown && !underChip && roomMove?.visible !== false && !gateHide;
+      group.current.visible = shown && roomMove?.visible !== false && !gateHide;
       poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
       group.current.scale.set(1, 1, 1);
@@ -1754,6 +1754,8 @@ function AgentMesh({
     }
   });
 
+  const outdoors = mode === "play" && !poster && !lineup && !(frameMode === "in" && focusId);
+  const bodyScale = outdoors ? bodyFit.scale * 2.4 : mode === "play" && !poster && !lineup ? bodyFit.scale * 0.9 : bodyFit.scale;
   return (
     <group ref={group} frustumCulled={false}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
@@ -1779,8 +1781,8 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
-        position={[0, -(mode === "play" && !poster && !lineup ? bodyFit.scale * 0.62 : bodyFit.scale) * bodyFit.foot, 0]}
-        scale={mode === "play" && !poster && !lineup ? bodyFit.scale * 0.62 : bodyFit.scale}
+        position={[0, -bodyScale * bodyFit.foot, 0]}
+        scale={bodyScale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           showPick(agent.name, poseRef.current.x, poseRef.current.z);
@@ -1791,7 +1793,7 @@ function AgentMesh({
           onPeek?.(poseRef.current);
         }}
       />
-      <group ref={tag} position={[0, mode === "play" && !poster && !lineup ? AGENT_SCALE * 0.62 + 0.22 : AGENT_SCALE + 0.35, 0]}>
+      <group ref={tag} position={[0, bodyScale * bodyFit.height + 0.28, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
           <div className="name-stack">
           {line ? <div className="say-bubble">{line}</div> : null}
