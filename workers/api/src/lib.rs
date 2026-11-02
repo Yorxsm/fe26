@@ -2,6 +2,7 @@
 
 mod agents;
 mod indexer;
+mod limits;
 mod live;
 #[cfg(target_arch = "wasm32")]
 mod live_edge;
@@ -56,6 +57,9 @@ mod edge {
         async fn fetch(&self, mut req: Request) -> Result<Response> {
             if req.method() == Method::Options {
                 return with_cors(Response::empty()?.with_status(204), "text/plain");
+            }
+            if let Some(response) = self.enforce_rate_limit(&req).await? {
+                return Ok(response);
             }
             let path = req.path();
             if req.method() == Method::Post && (path == "/v1/index" || path.ends_with("/v1/index"))
@@ -972,11 +976,142 @@ mod edge {
         with_cors(response, "application/json")
     }
 
+    impl SpectatorFeed {
+        async fn enforce_rate_limit(&self, req: &Request) -> Result<Option<Response>> {
+            let method = match req.method() {
+                Method::Get => "GET",
+                Method::Post => "POST",
+                Method::Delete => "DELETE",
+                Method::Put => "PUT",
+                Method::Patch => "PATCH",
+                Method::Options => return Ok(None),
+                _ => "OTHER",
+            };
+            let authorization = req.headers().get("authorization")?;
+            let ip = req.headers().get("cf-connecting-ip")?.unwrap_or_default();
+            match crate::limits::classify(method, &req.path(), authorization.as_deref(), &ip) {
+                crate::limits::LimitPlan::Exempt => Ok(None),
+                crate::limits::LimitPlan::Register { ip } => self.limit_register(&ip).await,
+                crate::limits::LimitPlan::Binding {
+                    name,
+                    key,
+                    retry_after,
+                } => self.limit_binding(name, &key, retry_after).await,
+            }
+        }
+
+        async fn limit_register(&self, ip: &str) -> Result<Option<Response>> {
+            let now = worker::Date::now().as_millis() / 1000;
+            let open = {
+                let sql = self.state.storage().sql();
+                ensure_rate_sql(&sql)?;
+                register_slot_open(&sql, ip, now)?
+            };
+            if !open {
+                return Ok(Some(rate_limited(crate::limits::register_retry_after(
+                    now,
+                ))?));
+            }
+            if let Some(response) = self
+                .limit_binding(
+                    crate::limits::REGISTER_BINDING,
+                    ip,
+                    crate::limits::REGISTER_BURST_PERIOD_SECS,
+                )
+                .await?
+            {
+                return Ok(Some(response));
+            }
+            let sql = self.state.storage().sql();
+            note_register(&sql, ip, now)?;
+            Ok(None)
+        }
+
+        async fn limit_binding(
+            &self,
+            name: &str,
+            key: &str,
+            retry_after: u64,
+        ) -> Result<Option<Response>> {
+            let known = crate::limits::BINDINGS
+                .iter()
+                .any(|row| row.0 == name && row.1 > 0 && row.2 == retry_after);
+            if !known {
+                return limiter_unavailable();
+            }
+            let limiter = match self.env.rate_limiter(name) {
+                Ok(limiter) => limiter,
+                Err(_) => return limiter_unavailable(),
+            };
+            match limiter.limit(key.to_string()).await {
+                Ok(outcome) if outcome.success => Ok(None),
+                Ok(_) => Ok(Some(rate_limited(retry_after)?)),
+                Err(_) => limiter_unavailable(),
+            }
+        }
+    }
+
+    fn rate_limited(retry_after: u64) -> Result<Response> {
+        let mut response =
+            Response::ok(r#"{"error":"rate_limited","message":"Too many requests."}"#)?
+                .with_status(429);
+        response
+            .headers_mut()
+            .set("Retry-After", &retry_after.to_string())?;
+        with_cors(response, "application/json")
+    }
+
+    fn limiter_unavailable() -> Result<Option<Response>> {
+        let response = Response::ok(
+            r#"{"error":"unavailable","message":"The rate limiter is not available."}"#,
+        )?
+        .with_status(503);
+        Ok(Some(with_cors(response, "application/json")?))
+    }
+
+    fn ensure_rate_sql(sql: &worker::SqlStorage) -> Result<()> {
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS rate_register (ip TEXT NOT NULL, bucket INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (ip, bucket))",
+            None::<Vec<worker::SqlStorageValue>>,
+        )?;
+        Ok(())
+    }
+
+    fn register_slot_open(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<bool> {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            n: i64,
+        }
+        let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        sql.exec(
+            "DELETE FROM rate_register WHERE bucket < ?",
+            Some(vec![(bucket - 1).into()]),
+        )?;
+        let rows = sql
+            .exec(
+                "SELECT n FROM rate_register WHERE ip = ? AND bucket = ?",
+                Some(vec![ip.to_string().into(), bucket.into()]),
+            )?
+            .to_array::<Row>()?;
+        let n = rows.first().map(|row| row.n).unwrap_or(0);
+        Ok(n < crate::limits::REGISTER_PER_HOUR as i64)
+    }
+
+    fn note_register(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<()> {
+        let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        sql.exec(
+            "INSERT INTO rate_register (ip, bucket, n) VALUES (?, ?, 1) ON CONFLICT(ip, bucket) DO UPDATE SET n = n + 1",
+            Some(vec![ip.to_string().into(), bucket.into()]),
+        )?;
+        Ok(())
+    }
+
     fn with_cors(mut response: Response, content_type: &str) -> Result<Response> {
         let headers = response.headers_mut();
         headers.set("content-type", content_type)?;
         headers.set("access-control-allow-origin", "*")?;
-        headers.set("access-control-allow-methods", "GET, POST, OPTIONS")?;
+        headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")?;
+        headers.set("access-control-expose-headers", "Retry-After")?;
         headers.set(
             "access-control-allow-headers",
             "content-type, authorization",

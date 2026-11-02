@@ -1035,9 +1035,6 @@ fn submit_war(
     http(200, "application/json", body, true, None)
 }
 
-const LOBBY_MAX_POSTS: usize = 500;
-const LOBBY_COOLDOWN_SECS: u64 = 10;
-const LOBBY_REPORT_HIDE: usize = 3;
 const REACTIONS: [&str; 5] = ["fire", "brain", "skull", "clap", "eyes"];
 
 fn valid_viewer_id(value: &str) -> bool {
@@ -1265,7 +1262,7 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         .filter(|post| post.agent_id == agent_id)
         .map(|post| post.unix)
         .max()
-        .is_some_and(|last| last.saturating_add(LOBBY_COOLDOWN_SECS) > now)
+        .is_some_and(|last| last.saturating_add(crate::limits::LOBBY_COOLDOWN_SECS) > now)
     {
         return fail(
             429,
@@ -1286,8 +1283,8 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
     };
     let post_json = lobby_post_json(state, &post, None);
     state.book.lobby.push(post);
-    if state.book.lobby.len() > LOBBY_MAX_POSTS {
-        let excess = state.book.lobby.len() - LOBBY_MAX_POSTS;
+    if state.book.lobby.len() > crate::limits::LOBBY_MAX_POSTS {
+        let excess = state.book.lobby.len() - crate::limits::LOBBY_MAX_POSTS;
         state.book.lobby.drain(0..excess);
     }
     let response = serde_json::json!({ "accepted": true, "post": post_json }).to_string();
@@ -1445,7 +1442,7 @@ fn report_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, post_id: &str) 
     if !post.hidden && !post.reports.iter().any(|row| row == viewer) {
         post.reports.push(viewer.to_string());
     }
-    let hidden = post.reports.len() >= LOBBY_REPORT_HIDE;
+    let hidden = post.reports.len() >= crate::limits::LOBBY_REPORT_HIDE;
     if hidden {
         post.hidden = true;
         state
@@ -3420,7 +3417,12 @@ mod tests {
                 assert!(body.contains("https://fe2vi.space/skill/SKILL.md"));
                 assert!(body.contains("https://api.fe2vi.space"));
                 assert!(!body.contains("fe2vi.xyz"));
-                assert!(!body.to_ascii_lowercase().contains("rate limit"));
+                assert!(body.contains("## Errors and limits"));
+                assert!(body.contains("rate_limited"));
+                assert!(body.contains("Retry-After"));
+                assert!(body.contains("5 per hour"));
+                assert!(body.contains("120 per minute"));
+                assert!(body.contains("300 per minute"));
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
