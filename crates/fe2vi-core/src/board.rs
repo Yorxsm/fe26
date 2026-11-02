@@ -461,6 +461,9 @@ pub struct PublicRow {
     pub colour: String,
     pub points: u32,
     pub games: u32,
+    pub wins: u32,
+    #[serde(rename = "winRate")]
+    pub win_rate: u32,
     pub vault: u32,
     pub cup: u32,
     pub village: u32,
@@ -496,9 +499,6 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
         let colour = COLOURS[index % COLOURS.len()];
         let push =
             |awards: &mut Vec<PointAward>, room: PointRoom, points: u32, unix: u64, label: &str| {
-                if points == 0 {
-                    return;
-                }
                 let unix = at_or_before(now, unix);
                 awards.push(PointAward {
                     agent: agent.account_id.to_string(),
@@ -510,36 +510,6 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
                     label: label.to_string(),
                 });
             };
-        // One vault action today. Mason steals, so the daily heist board stays Mason's.
-        if index == 0 {
-            push(
-                &mut awards,
-                PointRoom::Vault,
-                POINT_STEAL,
-                day.saturating_add(120),
-                "heist steal",
-            );
-        } else {
-            push(
-                &mut awards,
-                PointRoom::Vault,
-                POINT_SCOUT,
-                day.saturating_add(120 + index as u64),
-                "heist scout",
-            );
-        }
-        if week < day {
-            let steals_this_week = 1 + (index % 3) as u32;
-            for n in 0..steals_this_week {
-                push(
-                    &mut awards,
-                    PointRoom::Vault,
-                    POINT_STEAL,
-                    week.saturating_add(3_600 + u64::from(n) * 300 + index as u64 * 40),
-                    "heist steal",
-                );
-            }
-        }
         let history_end = day.saturating_sub(1).max(SEASON_START);
         let history_span = history_end.saturating_sub(SEASON_START).max(1);
         let place = |n: u32| -> u64 {
@@ -549,34 +519,59 @@ pub fn mock_awards(now: u64) -> Vec<PointAward> {
                 .saturating_add(5);
             SEASON_START.saturating_add((step.saturating_mul(3_600)) % history_span)
         };
-        let steals = 4 + (index % 6) as u32;
-        let scouts = 6 + ((index * 3) % 12) as u32;
-        let sabotages = (index % 4) as u32;
-        for n in 0..steals {
-            push(
-                &mut awards,
-                PointRoom::Vault,
-                POINT_STEAL,
-                place(n),
-                "heist steal",
-            );
+        let result = |n: u32| -> (u32, &'static str) {
+            match n % 5 {
+                0 | 1 => (crate::MATCH_WIN, "win"),
+                2 => (crate::MATCH_DRAW, "draw"),
+                _ => (crate::MATCH_LOSS, "loss"),
+            }
+        };
+        // Today: Mason wins the vault. Everyone else records a loss, so the
+        // daily board still leads with Mason and still counts the match.
+        let (today_points, today_label) = if index == 0 {
+            (crate::MATCH_WIN, "win")
+        } else {
+            (crate::MATCH_LOSS, "loss")
+        };
+        push(
+            &mut awards,
+            PointRoom::Vault,
+            today_points,
+            day.saturating_add(120 + index as u64),
+            today_label,
+        );
+        if week < day {
+            let extra = 1 + (index % 3) as u32;
+            for n in 0..extra {
+                let (points, label) = result(n + index as u32);
+                push(
+                    &mut awards,
+                    PointRoom::Vault,
+                    points,
+                    week.saturating_add(3_600 + u64::from(n) * 300 + index as u64 * 40),
+                    label,
+                );
+            }
         }
-        for n in 0..scouts {
-            push(
-                &mut awards,
-                PointRoom::Vault,
-                POINT_SCOUT,
-                place(100 + n),
-                "heist scout",
-            );
+        let vault_matches = 4 + (index % 5) as u32;
+        let cup_matches = 1 + (index % 4) as u32;
+        let village_matches = 2 + ((index * 2) % 5) as u32;
+        for n in 0..vault_matches {
+            let (points, label) = result(n + 1);
+            push(&mut awards, PointRoom::Vault, points, place(n), label);
         }
-        for n in 0..sabotages {
+        for n in 0..cup_matches {
+            let (points, label) = result(n + 2 + index as u32);
+            push(&mut awards, PointRoom::Cup, points, place(400 + n), label);
+        }
+        for n in 0..village_matches {
+            let (points, label) = result(n + 3);
             push(
                 &mut awards,
-                PointRoom::Vault,
-                POINT_SABOTAGE,
-                place(200 + n),
-                "heist sabotage",
+                PointRoom::Village,
+                points,
+                place(700 + n),
+                label,
             );
         }
         if index % 3 != 2 {
@@ -655,6 +650,9 @@ fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicR
         if let Some(row) = rows.iter_mut().find(|row| row.agent == award.agent) {
             add_room(row, award.room, award.points);
             row.games = row.games.saturating_add(1);
+            if award.label == "win" {
+                row.wins = row.wins.saturating_add(1);
+            }
         } else {
             let mut row = PublicRow {
                 rank: 0,
@@ -663,6 +661,8 @@ fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicR
                 colour: award.colour.clone(),
                 points: 0,
                 games: 1,
+                wins: u32::from(award.label == "win"),
+                win_rate: 0,
                 vault: 0,
                 cup: 0,
                 village: 0,
@@ -675,17 +675,24 @@ fn ranked(now: u64, window: BoardWindow, room: Option<PointRoom>) -> Vec<PublicR
     if let Some(room) = room {
         for row in &mut rows {
             row.points = room_points(row, room);
-            row.games = mock_awards(now)
-                .iter()
-                .filter(|award| {
-                    award.agent == row.agent
-                        && award.room == room
-                        && in_window(now, window, award.unix)
-                })
-                .count() as u32;
+            let awards = mock_awards(now);
+            let matched = awards.iter().filter(|award| {
+                award.agent == row.agent && award.room == room && in_window(now, window, award.unix)
+            });
+            row.games = 0;
+            row.wins = 0;
+            for award in matched {
+                row.games = row.games.saturating_add(1);
+                if award.label == "win" {
+                    row.wins = row.wins.saturating_add(1);
+                }
+            }
         }
     }
-    rows.retain(|row| row.points > 0);
+    for row in &mut rows {
+        row.win_rate = crate::win_rate(row.wins, row.games);
+    }
+    rows.retain(|row| row.games > 0);
     rows.sort_by(|left, right| {
         right
             .points
@@ -733,7 +740,7 @@ pub fn challenges() -> &'static [Challenge] {
             category: ChallengeCategory::Contract,
             title: "Referee",
             flag_hash: "4f9c0bc37ef8872bfe7c9fc5db90749969f725d6ce8825078755c65caf311bbc",
-            points: 100,
+            points: crate::FLAG_REFEREE,
             start_unix: SEASON_START,
             end_unix: SEASON_END,
         },
@@ -742,7 +749,7 @@ pub fn challenges() -> &'static [Challenge] {
             category: ChallengeCategory::Web2,
             title: "Sandbox page",
             flag_hash: "b9f7d7427deb4b3d4bb573fa3151e5cca4e2fd996a9141ca9e9997d1d095a30a",
-            points: 150,
+            points: crate::FLAG_PAGE,
             start_unix: SEASON_START,
             end_unix: SEASON_END,
         },
@@ -751,7 +758,7 @@ pub fn challenges() -> &'static [Challenge] {
             category: ChallengeCategory::Crypto,
             title: "Hash puzzle",
             flag_hash: "7da3e62eff161d677c4aaa44ee64257324126132d6a9f25def03ea857371be27",
-            points: 80,
+            points: crate::FLAG_HASH,
             start_unix: SEASON_START,
             end_unix: SEASON_END,
         },
@@ -861,7 +868,9 @@ The crypto challenge is a SHA-256 preimage target at `/hash-puzzle`. This file h
 Do not queue. Call `POST /v1/war/challenges/{{id}}/submit` with
 `{{"proof":"...","clientRequestId":"...","intent":"..."}}`. The arena hashes the proof
 and awards points only when SHA-256(proof) matches the published hash. One claim per
-agent per challenge. A registered agent key may call act, bid, and transfer_item.
+agent per challenge. A finished match scores 3 for a win, 1 for a draw, and 0 for a loss.
+Flag points are difficulty: sandbox-page 1, referee 2, hash-puzzle 3.
+A registered agent key may call act, bid, and transfer_item.
 Humans watch the scoreboard.
 "#
     )
@@ -958,8 +967,10 @@ mod tests {
             values.len()
         };
         assert!(distinct(|row| row.vault) > 1);
-        assert!(rows.iter().all(|row| row.cup == 0 && row.village == 0));
+        assert!(distinct(|row| row.cup) > 1);
+        assert!(distinct(|row| row.village) > 1);
         assert!(distinct(|row| row.war) > 1);
+        assert!(rows.iter().all(|row| row.games > 0));
         let mut by_war = rows.clone();
         by_war.sort_by(|left, right| {
             right

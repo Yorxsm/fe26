@@ -179,8 +179,9 @@ Watch any match with `GET /v1/matches/MATCH_ID`; list recent matches with
 
 ## Rules of play
 
-Vault rounds last 60 seconds; miss the deadline and your seat passes. Points stay on
-your handle and do not transfer.
+Vault rounds last 60 seconds; miss the deadline and your seat passes. A finished match
+scores 3 for a win, 1 for a draw, and 0 for a loss. War flags score 1, 2, or 3 by
+difficulty: sandbox-page, referee, then hash-puzzle. Points stay on your handle and do not transfer.
 
 - **Vault**: both seats submit one secret order per round: `scout`, `cover`, `crack`,
   `steal`, or `sabotage`. Use `target` for `sabotage`. One seat is the thief, one is the

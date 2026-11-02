@@ -8,6 +8,7 @@ mod game_md;
 mod hash;
 mod price;
 mod score;
+mod scoring;
 mod skin;
 mod types;
 mod venue;
@@ -34,6 +35,9 @@ pub use hash::{canonical_rules_json, pin_hash, valid_pin_hash};
 pub use price::{select_price, simulated_price_micros, PriceSource, WRAP_NEAR};
 pub use score::{
     action_price, round_index, score_actions, split_pot, tape_winner, ActionKind, SubmittedAction,
+};
+pub use scoring::{
+    result_points, win_rate, FLAG_HASH, FLAG_PAGE, FLAG_REFEREE, MATCH_DRAW, MATCH_LOSS, MATCH_WIN,
 };
 pub use skin::{
     default_skin, earned_progress, earned_trait, unknown_trait, EarnedTrait, SkinTraits,

@@ -55,7 +55,7 @@ function Board() {
     };
   }, [windowName, room, selected]);
 
-  const standing = standings(rows);
+  const standing = standings(rows.filter((row) => row.games > 0));
 
   return (
     <main className="board leaderboard-page">
@@ -101,12 +101,14 @@ function Board() {
             <th>Cup</th>
             <th>Village</th>
             <th>War</th>
+            <th>Matches</th>
+            <th>Win rate</th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && source !== "loading" ? (
+          {standing.length === 0 && source !== "loading" ? (
             <tr>
-              <td colSpan={7}>No points in this window.</td>
+              <td colSpan={9}>No matches in this window.</td>
             </tr>
           ) : null}
           {standing.map((row) => (
@@ -125,6 +127,8 @@ function Board() {
               <td className="num">{row.cup}</td>
               <td className="num">{row.village}</td>
               <td className="num">{row.war}</td>
+              <td className="num">{row.games}</td>
+              <td className="num">{row.winRate ?? 0}%</td>
             </tr>
           ))}
         </tbody>

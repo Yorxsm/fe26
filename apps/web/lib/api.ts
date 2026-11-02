@@ -54,6 +54,8 @@ export type PublicRow = {
   colour: string;
   points: number;
   games: number;
+  wins?: number;
+  winRate?: number;
   vault: number;
   cup: number;
   village: number;

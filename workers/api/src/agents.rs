@@ -315,27 +315,34 @@ pub fn registered_rows(
         .book
         .players
         .iter()
-        .map(|player| {
+        .filter_map(|player| {
             let scores = room_scores(state, &player.agent_id, now, window);
-            let points = match room {
-                Some(PointRoom::Vault) => scores.vault,
-                Some(PointRoom::Cup) => scores.cup,
-                Some(PointRoom::Village) => scores.village,
-                Some(PointRoom::War) => scores.war,
-                None => scores.total,
+            let (points, games, wins) = match room {
+                Some(PointRoom::Vault) => (scores.vault, scores.vault_games, scores.vault_wins),
+                Some(PointRoom::Cup) => (scores.cup, scores.cup_games, scores.cup_wins),
+                Some(PointRoom::Village) => {
+                    (scores.village, scores.village_games, scores.village_wins)
+                }
+                Some(PointRoom::War) => (scores.war, scores.war_games, scores.war_wins),
+                None => (scores.total, scores.games, scores.wins),
             };
-            PublicRow {
+            if games == 0 {
+                return None;
+            }
+            Some(PublicRow {
                 rank: 0,
                 agent: player.handle.clone(),
                 name: player.name.clone(),
                 colour: "#d4d2cc".to_string(),
                 points,
-                games: scores.games,
+                games,
+                wins,
+                win_rate: fe2vi_core::win_rate(wins, games),
                 vault: scores.vault,
                 cup: scores.cup,
                 village: scores.village,
                 war: scores.war,
-            }
+            })
         })
         .collect()
 }
@@ -395,83 +402,133 @@ pub fn registered_recent(
 struct Scores {
     total: u32,
     games: u32,
+    wins: u32,
     vault: u32,
     cup: u32,
     village: u32,
     war: u32,
+    vault_games: u32,
+    cup_games: u32,
+    village_games: u32,
+    war_games: u32,
+    vault_wins: u32,
+    cup_wins: u32,
+    village_wins: u32,
+    war_wins: u32,
+}
+
+fn add_result(scores: &mut Scores, room: &str, points: u32) {
+    let win = points == fe2vi_core::MATCH_WIN && room != "war";
+    scores.games = scores.games.saturating_add(1);
+    scores.total = scores.total.saturating_add(points);
+    if win {
+        scores.wins = scores.wins.saturating_add(1);
+    }
+    match room {
+        "cup" => {
+            scores.cup = scores.cup.saturating_add(points);
+            scores.cup_games = scores.cup_games.saturating_add(1);
+            if win {
+                scores.cup_wins = scores.cup_wins.saturating_add(1);
+            }
+        }
+        "village" => {
+            scores.village = scores.village.saturating_add(points);
+            scores.village_games = scores.village_games.saturating_add(1);
+            if win {
+                scores.village_wins = scores.village_wins.saturating_add(1);
+            }
+        }
+        "war" => {
+            scores.war = scores.war.saturating_add(points);
+            scores.war_games = scores.war_games.saturating_add(1);
+        }
+        _ => {
+            scores.vault = scores.vault.saturating_add(points);
+            scores.vault_games = scores.vault_games.saturating_add(1);
+            if win {
+                scores.vault_wins = scores.vault_wins.saturating_add(1);
+            }
+        }
+    }
+}
+
+fn seat_total(play: &PlayMatch, agent_id: &str) -> i32 {
+    if let Some(vault) = &play.vault {
+        return vault.score(agent_id);
+    }
+    play.actions
+        .iter()
+        .filter(|action| action.agent_id == agent_id)
+        .map(|action| action.points as i32)
+        .sum()
 }
 
 fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow) -> Scores {
     let mut scores = Scores {
         total: 0,
         games: 0,
+        wins: 0,
         vault: 0,
         cup: 0,
         village: 0,
         war: 0,
+        vault_games: 0,
+        cup_games: 0,
+        village_games: 0,
+        war_games: 0,
+        vault_wins: 0,
+        cup_wins: 0,
+        village_wins: 0,
+        war_wins: 0,
     };
     for play in &state.book.matches {
-        if let Some(vault) = &play.vault {
-            if !vault.seats.iter().any(|seat| seat.agent_id == agent_id) {
-                continue;
-            }
-            let at = play
-                .actions
-                .last()
-                .map(|action| action.unix)
-                .unwrap_or(play.created_unix);
-            if !award_in_window(now, window, at) {
-                continue;
-            }
-            let points = if vault.ended {
-                vault.score(agent_id).max(0) as u32
-            } else {
-                play.actions
-                    .iter()
-                    .filter(|action| action.agent_id == agent_id)
-                    .map(|action| action.points)
-                    .sum()
-            };
-            scores.games = scores.games.saturating_add(1);
-            scores.total = scores.total.saturating_add(points);
-            scores.vault = scores.vault.saturating_add(points);
+        let seated = play.seats.iter().any(|seat| seat == agent_id)
+            || play
+                .vault
+                .as_ref()
+                .is_some_and(|vault| vault.seats.iter().any(|seat| seat.agent_id == agent_id));
+        if !seated {
             continue;
         }
-        for action in &play.actions {
-            if action.agent_id != agent_id || !award_in_window(now, window, action.unix) {
-                continue;
-            }
-            scores.games = scores.games.saturating_add(1);
-            scores.total = scores.total.saturating_add(action.points);
-            match play.arena_id.as_str() {
-                "cup" => scores.cup = scores.cup.saturating_add(action.points),
-                "village" => scores.village = scores.village.saturating_add(action.points),
-                "war" => scores.war = scores.war.saturating_add(action.points),
-                _ => {}
-            }
+        let finished =
+            play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+        if !finished {
+            continue;
         }
+        let at = play
+            .actions
+            .last()
+            .map(|action| action.unix)
+            .unwrap_or(play.created_unix);
+        if !award_in_window(now, window, at) {
+            continue;
+        }
+        let mine = seat_total(play, agent_id);
+        let best_other = play
+            .seats
+            .iter()
+            .filter(|seat| seat.as_str() != agent_id)
+            .map(|seat| seat_total(play, seat))
+            .max()
+            .unwrap_or(i32::MIN);
+        add_result(
+            &mut scores,
+            &play.arena_id,
+            fe2vi_core::result_points(mine, best_other),
+        );
     }
     for claim in &state.book.war_claims {
         if claim.agent_id != agent_id || !award_in_window(now, window, claim.unix) {
             continue;
         }
-        scores.games = scores.games.saturating_add(1);
-        scores.total = scores.total.saturating_add(claim.points);
-        scores.war = scores.war.saturating_add(claim.points);
+        add_result(&mut scores, "war", claim.points);
     }
     for award in &state.live.awards {
         if award.agent_id != agent_id || !award_in_window(now, window, award.unix) {
             continue;
         }
-        scores.games = scores.games.saturating_add(1);
-        scores.total = scores.total.saturating_add(award.points);
-        match award.room.as_str() {
-            "vault" => scores.vault = scores.vault.saturating_add(award.points),
-            "cup" => scores.cup = scores.cup.saturating_add(award.points),
-            "village" => scores.village = scores.village.saturating_add(award.points),
-            "war" => scores.war = scores.war.saturating_add(award.points),
-            _ => {}
-        }
+        add_result(&mut scores, &award.room, award.points);
     }
     scores
 }
@@ -2896,25 +2953,27 @@ mod tests {
         assert_eq!(err["error"], "skin_locked");
 
         let agent_id = state.book.players[0].agent_id.clone();
-        state.book.matches.push(PlayMatch {
-            match_id: "mt_skin".into(),
-            arena_id: "vault".into(),
-            status: "over".into(),
-            turn: 3,
-            deadline_unix: NOW,
-            seats: vec![agent_id.clone(), "other".into()],
-            actions: vec![Played {
-                agent_id: agent_id.clone(),
-                turn: 1,
-                action_type: "steal".into(),
-                points: 600,
-                unix: NOW,
-                intent: None,
-                outcome: Some("+600".into()),
-            }],
-            created_unix: NOW,
-            vault: None,
-        });
+        for n in 0..167 {
+            state.book.matches.push(PlayMatch {
+                match_id: format!("mt_skin_{n}"),
+                arena_id: "vault".into(),
+                status: "over".into(),
+                turn: 3,
+                deadline_unix: NOW,
+                seats: vec![agent_id.clone(), "other".into()],
+                actions: vec![Played {
+                    agent_id: agent_id.clone(),
+                    turn: 1,
+                    action_type: "steal".into(),
+                    points: 1,
+                    unix: NOW,
+                    intent: None,
+                    outcome: Some("won".into()),
+                }],
+                created_unix: NOW,
+                vault: None,
+            });
+        }
 
         let (ok, json) = call(
             &mut state,
@@ -3000,7 +3059,7 @@ mod tests {
             Some(&alpha),
         );
         assert_eq!(referee.0, 200, "{}", referee.1);
-        assert_eq!(referee.1["points"], 100);
+        assert_eq!(referee.1["points"], fe2vi_core::FLAG_REFEREE);
         let hash = call(
             &mut state,
             "POST",
@@ -3009,7 +3068,7 @@ mod tests {
             Some(&alpha),
         );
         assert_eq!(hash.0, 200, "{}", hash.1);
-        assert_eq!(hash.1["points"], 80);
+        assert_eq!(hash.1["points"], fe2vi_core::FLAG_HASH);
         let good = call(
             &mut state,
             "POST",
@@ -3019,7 +3078,7 @@ mod tests {
         );
         assert_eq!(good.0, 200, "{}", good.1);
         assert_eq!(good.1["accepted"], true);
-        assert_eq!(good.1["points"], 150);
+        assert_eq!(good.1["points"], fe2vi_core::FLAG_PAGE);
         assert_eq!(state.book.war_claims.len(), 3);
         let duplicate = call(
             &mut state,
@@ -3353,11 +3412,12 @@ mod tests {
         );
         assert_eq!(board.0, 200);
         let rows = board.1["rows"].as_array().unwrap();
-        let alpha_row = rows.iter().find(|row| row["agent"] == "alpha").unwrap();
-        let bravo_row = rows.iter().find(|row| row["agent"] == "bravo").unwrap();
-        assert_eq!(alpha_row["points"], 2);
-        assert_eq!(bravo_row["points"], 1);
-        assert_eq!(alpha_row["vault"], 2);
+        assert!(rows
+            .iter()
+            .all(|row| row["agent"] != "alpha" && row["agent"] != "bravo"));
+        assert!(rows
+            .iter()
+            .all(|row| row["games"].as_u64().unwrap_or(0) > 0));
         assert!(rows.iter().any(|row| row["name"] == "Mason"));
 
         let (hall_status, hall) = call(
@@ -3372,7 +3432,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["agent"] == "alpha"));
+            .all(|row| row["agent"] != "alpha"));
         assert_eq!(hall["rooms"].as_array().unwrap().len(), 4);
 
         let profile = call(
@@ -3383,7 +3443,7 @@ mod tests {
             None,
         );
         assert_eq!(profile.0, 200);
-        assert_eq!(profile.1["points"], 2);
+        assert_eq!(profile.1["points"], 0);
         assert!(profile.1.get("apiToken").is_none());
 
         let spec = call(&mut state, "GET", "/openapi.json", "", None);
