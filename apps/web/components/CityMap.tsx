@@ -2057,13 +2057,11 @@ function CameraDriver({
         widenOrbit(controls);
         rig.target.copy(overviewAim);
         if (far) camera.position.copy(overviewEye);
+        camera.lookAt(rig.target);
+        controls?.update();
         vantageReady.current = true;
       }
       rig.enabled = true;
-      const held = cameraHeld() || pointer.current.down || reduce.current;
-      applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-      if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
-      camera.lookAt(rig.target);
       dampFov(camera, fovTarget.current, delta, reduce.current);
       return;
     }
@@ -2083,8 +2081,10 @@ function CameraDriver({
       if (camera.position.distanceTo(overviewEye) < 0.6) {
         camera.position.copy(overviewEye);
         rig.target.copy(overviewAim);
+        camera.lookAt(overviewAim);
         controls?.update();
         homing.current = false;
+        overviewLatched.current = true;
       }
       return;
     }
@@ -2250,7 +2250,7 @@ function CameraDriver({
       if (mode === "play" && !lineup && !street && !poster && followIndex === null && !focusId) {
         fovTarget.current = overviewFov;
         const far = camera.position.distanceTo(overviewEye) > 2.6 || rig.target.distanceTo(overviewAim) > 3;
-        if (far && !overviewLatched.current) {
+        if (!overviewLatched.current && far) {
           rig.enabled = false;
           const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 6);
           rig.target.lerp(overviewAim, blend);
@@ -2259,12 +2259,14 @@ function CameraDriver({
           dampFov(camera, fovTarget.current, delta, reduce.current);
           return;
         }
-        overviewLatched.current = true;
+        if (!overviewLatched.current) {
+          camera.position.copy(overviewEye);
+          rig.target.copy(overviewAim);
+          camera.lookAt(overviewAim);
+          controls?.update();
+          overviewLatched.current = true;
+        }
         rig.enabled = true;
-        const held = cameraHeld() || pointer.current.down || reduce.current;
-        applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-        if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
-        if (!held) camera.lookAt(rig.target);
       }
       dampFov(camera, fovTarget.current, delta, reduce.current);
       return;

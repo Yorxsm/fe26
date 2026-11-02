@@ -402,7 +402,6 @@ if (dragFrom) {
       }));
       fire("pointerdown", startX, startY, 1);
       for (let step = 1; step <= 6; step += 1) fire("pointermove", startX - step * 50, startY, 1);
-      fire("pointerup", startX - 300, startY, 0);
       return { w: rect.width, h: rect.height };
     })()`,
     returnByValue: true,
@@ -411,15 +410,26 @@ if (dragFrom) {
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
   for (let step = 1; step <= 6; step += 1) {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x - step * 50, y, button: "left", buttons: 1 });
+    await delay(30);
   }
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 300, y, button: "left", buttons: 0, clickCount: 1 });
-  await delay(700);
+  await delay(250);
   const afterDrawn = await send("Runtime.evaluate", { expression: `window.__fe2viRoom?.drawn ?? null`, returnByValue: true });
   const a = beforeDrawn.result?.value;
   const b = afterDrawn.result?.value;
   if (a && b) console.log("drag-camera", JSON.stringify({ before: a, after: b }));
   const dragged = await grab("drag");
   if (dragged) dragFraction = changedFraction(before.data, dragged.data);
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const canvas = document.querySelector("canvas");
+      const target = canvas?.parentElement || canvas;
+      if (!target) return;
+      target.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true, cancelable: true, clientX: ${x - 300}, clientY: ${y}, button: 0, buttons: 0, pointerId: 1, pointerType: "mouse", isPrimary: true,
+      }));
+    })()`,
+  });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 300, y, button: "left", buttons: 0, clickCount: 1 });
 }
 let clicked = null;
 for (let attempt = 0; attempt < 24; attempt += 1) {
