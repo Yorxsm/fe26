@@ -32,7 +32,7 @@ export function LoadingState({ hero = false, progress = null, label }: { label?:
           <Logo variant="hero" />
         </div>
         <div className="loading-copy">
-          <p className="loading-title">{label ?? "the map"}</p>
+          <p className="loading-title">{label ?? "fe2VI"}</p>
           <p className="loading-stage">{stageFor(pct)}</p>
         </div>
         <div className="load-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Progress">

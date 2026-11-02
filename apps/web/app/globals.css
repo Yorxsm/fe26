@@ -1353,6 +1353,9 @@ body, p, li, label, .lede, .meta, .subtitle, .caption-detail, td, .num, .ribbon 
 @keyframes bar-sheen {
   to { transform: translateX(360%); }
 }
+.loading-screen.load-failed {
+  pointer-events: auto;
+}
 .loading-screen {
   position: fixed;
   inset: 0;

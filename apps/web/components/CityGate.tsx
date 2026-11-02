@@ -93,6 +93,7 @@ function webglAvailable() {
 }
 
 const ROOM_DEPTH = "fe2vi.roomDepth";
+const LOAD_GIVE_UP_MS = 20_000;
 
 function roomDepth() {
   return Number(sessionStorage.getItem(ROOM_DEPTH) || "0") || 0;
@@ -148,6 +149,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [mapProgress, setMapProgress] = useState<number | null>(null);
   const [shownProgress, setShownProgress] = useState(3);
   const [mapReady, setMapReady] = useState(false);
+  const [mapHeard, setMapHeard] = useState(false);
+  const [mapStuck, setMapStuck] = useState(false);
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -267,6 +270,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       const detail = (event as CustomEvent<{ progress: number; active: boolean }>).detail;
       if (!detail) return;
       window.clearTimeout(readyTimer);
+      setMapHeard(true);
+      setMapStuck(false);
       setMapProgress(detail.progress);
       if (!detail.active && detail.progress >= 100) {
         readyTimer = window.setTimeout(() => setMapReady(true), 1200);
@@ -293,6 +298,12 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     }, 180);
     return () => window.clearInterval(id);
   }, [mapReady, mapProgress]);
+
+  useEffect(() => {
+    if (mapReady || !webgl || mapHeard) return;
+    const timer = window.setTimeout(() => setMapStuck(true), LOAD_GIVE_UP_MS);
+    return () => window.clearTimeout(timer);
+  }, [mapReady, webgl, mapHeard]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 800px)");
@@ -672,10 +683,31 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
-            {phase !== "boot" && !mapReady ? <LoadingState label="the city" hero progress={shownProgress} /> : null}
-            {phase === "boot" ? (
+            {mapStuck && !mapReady ? (
+              <div className="loading-screen load-failed" role="alert">
+                <div className="city-fallback-card">
+                  <Logo variant="hero" />
+                  <p className="label">City link</p>
+                  <h1>The village did not open.</h1>
+                  <p>The 3D view did not start. Reload to try again. The boards still work without it.</p>
+                  <div className="city-fallback-actions">
+                    <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+                      <RotateCw aria-hidden="true" strokeWidth={1.75} />
+                      Reload
+                    </button>
+                    <a className="btn btn-secondary" href="/leaderboard">
+                      <Trophy aria-hidden="true" strokeWidth={1.75} />
+                      Leaderboard
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ) : phase !== "boot" && !mapReady ? (
               <LoadingState label="the city" hero progress={shownProgress} />
-            ) : (
+            ) : null}
+            {phase === "boot" && !mapStuck ? (
+              <LoadingState label="the city" hero progress={shownProgress} />
+            ) : phase === "boot" ? null : (
               <CityMap
                 paused={paused}
                 mode={mode}
