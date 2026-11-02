@@ -108,6 +108,21 @@ pub struct Incoming<'a> {
     pub ingest_token: Option<&'a str>,
 }
 
+thread_local! {
+    static WAR_SECRET: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Set the worker secret for this request. `None` means it is unset.
+/// The value is not a default and is never filled from a public string.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn set_request_war_secret(secret: Option<String>) {
+    WAR_SECRET.with(|slot| *slot.borrow_mut() = secret);
+}
+
+pub(crate) fn request_war_secret() -> Option<String> {
+    WAR_SECRET.with(|slot| slot.borrow().clone())
+}
+
 pub struct Fanout {
     pub game_id: String,
     pub message: String,

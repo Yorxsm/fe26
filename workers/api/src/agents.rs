@@ -1058,8 +1058,16 @@ fn submit_war(
             "The proof is longer than 1024 characters.",
         );
     }
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let expected = war_proof_hash(&secret, fe2vi_core::SEASON_ID, challenge_id);
     let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
-    if !proof_hash.eq_ignore_ascii_case(challenge.flag_hash) {
+    if !proof_hash.eq_ignore_ascii_case(&expected) {
         return fail(
             403,
             "invalid_proof",
@@ -2520,6 +2528,38 @@ pub(crate) fn random_hex(bytes: usize) -> String {
     to_hex(&buf)
 }
 
+#[cfg(test)]
+const TEST_WAR_SECRET: &str = "test-war-secret";
+
+/// The string an agent submits. The server accepts it only when
+/// SHA-256 of this string equals SHA-256(`secret:season:challenge`).
+pub(crate) fn war_proof_preimage(secret: &str, season: &str, challenge: &str) -> String {
+    format!("{secret}:{season}:{challenge}")
+}
+
+pub(crate) fn war_proof_hash(secret: &str, season: &str, challenge: &str) -> String {
+    to_hex(&Sha256::digest(
+        war_proof_preimage(secret, season, challenge).as_bytes(),
+    ))
+}
+
+fn configured_war_secret() -> Option<String> {
+    match crate::logic::request_war_secret() {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value),
+        None => {
+            #[cfg(test)]
+            {
+                Some(TEST_WAR_SECRET.to_string())
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        }
+    }
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -3066,7 +3106,10 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/referee/submit?now={NOW}"),
-            r#"{"proof":"iron-arena","clientRequestId":"war-referee"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-referee"}}"#,
+                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "referee")
+            ),
             Some(&alpha),
         );
         assert_eq!(referee.0, 200, "{}", referee.1);
@@ -3075,7 +3118,10 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/hash-puzzle/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_hash_2614}","clientRequestId":"war-hash"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-hash"}}"#,
+                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "hash-puzzle")
+            ),
             Some(&alpha),
         );
         assert_eq!(hash.0, 200, "{}", hash.1);
@@ -3084,7 +3130,10 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-2","intent":"read the page source"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-2","intent":"season flag"}}"#,
+                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "sandbox-page")
+            ),
             Some(&alpha),
         );
         assert_eq!(good.0, 200, "{}", good.1);
@@ -3095,11 +3144,44 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-3"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-3"}}"#,
+                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "sandbox-page")
+            ),
             Some(&alpha),
         );
         assert_eq!(duplicate.0, 409);
         assert_eq!(duplicate.1["error"], "already_claimed");
+        let later = NOW + 120;
+        for (old, request_id) in [
+            ("iron-arena", "old-referee"),
+            ("flag{fe2vi_hash_2614}", "old-hash"),
+            ("flag{fe2vi_sandbox_page_2026}", "old-page"),
+        ] {
+            let stale = call(
+                &mut state,
+                "POST",
+                &format!("/v1/war/challenges/referee/submit?now={later}"),
+                &format!(r#"{{"proof":"{old}","clientRequestId":"{request_id}"}}"#),
+                Some(&alpha),
+            );
+            assert_eq!(stale.0, 403, "{old} {}", stale.1);
+            assert_eq!(stale.1["error"], "invalid_proof");
+        }
+        crate::logic::set_request_war_secret(Some(String::new()));
+        let closed = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={}", NOW + 180),
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-closed"}}"#,
+                war_proof_preimage(TEST_WAR_SECRET, fe2vi_core::SEASON_ID, "referee")
+            ),
+            Some(&alpha),
+        );
+        crate::logic::set_request_war_secret(None);
+        assert_eq!(closed.0, 503, "{}", closed.1);
+        assert_eq!(closed.1["error"], "war_unconfigured");
     }
 
     #[test]

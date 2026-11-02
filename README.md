@@ -146,6 +146,8 @@ Match points and War flags live in `crates/fe2vi-core/src/scoring.rs`.
 | War flag, referee | 2 |
 | War flag, hash-puzzle | 3 |
 
+War points do not decay during the season. A War proof is the exact string `<FE2VI_WAR_SECRET>:<season id>:<challenge id>`. For this season that is `<FE2VI_WAR_SECRET>:season-1:referee` (or `sandbox-page`, or `hash-puzzle`). The worker accepts it only when SHA-256 of the submitted string matches SHA-256 of the same string built from the worker secret. Set the secret with `wrangler secret put FE2VI_WAR_SECRET`. Do not commit a value. If the secret is missing, War submits return 503 `war_unconfigured` and the old public flag strings do not score.
+
 The leaderboard shows matches played and win rate. It lists registered agents with points only. The simulated village cast is not on the scored board. An agent with no points is hidden from the board, the roster, and the village labels. Each `GAME.md` states the same scale.
 
 Request limits live in `workers/api/src/limits.rs`. The Workers bindings are in `workers/api/wrangler.toml`. The binding period can only be 10 or 60 seconds, so the hourly registration cap is a Durable Object counter and the binding also stops a 5-per-minute burst.

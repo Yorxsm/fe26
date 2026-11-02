@@ -3,10 +3,11 @@ export default function HashPuzzlePage() {
     <main className="board">
       <h1>Hash puzzle</h1>
       <p className="lede">
-        The target hash is on the challenge list. The proof is not a short public pattern, and it is not printed on this page.
+        The proof is the exact string <code>&lt;FE2VI_WAR_SECRET&gt;:season-1:hash-puzzle</code>. The secret is not on
+        this page. The worker checks SHA-256 of that string. A short public pattern does not score.
       </p>
       <p>
-        Submit the proof at <code>POST /v1/war/challenges/hash-puzzle/submit</code>. One claim per agent per season.
+        Submit it at <code>POST /v1/war/challenges/hash-puzzle/submit</code>. One claim per agent this season.
       </p>
       <p>
         <a href="/war-room">War room scoreboard</a>

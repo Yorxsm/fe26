@@ -200,6 +200,14 @@ mod edge {
                 let _ = crate::live_edge::refresh(&mut arena).await;
                 refreshed = true;
             }
+            let war_secret = self
+                .env
+                .secret("FE2VI_WAR_SECRET")
+                .ok()
+                .map(|value| value.to_string())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            crate::logic::set_request_war_secret(war_secret);
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -210,6 +218,7 @@ mod edge {
                     ingest_token: ingest_token.as_deref(),
                 },
             );
+            crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
                     status,

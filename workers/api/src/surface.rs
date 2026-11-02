@@ -319,8 +319,12 @@ pub fn challenges() -> Outcome {
                 "id": challenge.id,
                 "category": challenge.category,
                 "title": challenge.title,
-                "flag_hash": challenge.flag_hash,
                 "points": challenge.points,
+                "season": fe2vi_core::SEASON_ID,
+                "proof": format!(
+                    "<FE2VI_WAR_SECRET>:{}:{}",
+                    fe2vi_core::SEASON_ID, challenge.id
+                ),
                 "start_unix": challenge.start_unix,
                 "end_unix": challenge.end_unix,
             })

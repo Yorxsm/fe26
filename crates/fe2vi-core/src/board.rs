@@ -832,12 +832,12 @@ pub fn war_room_md() -> String {
         .iter()
         .map(|challenge| {
             format!(
-                "- {id}: {title}. category {category:?}. points {points}. flag_hash {hash}.",
+                "- {id}: {title}. category {category:?}. points {points}. proof is the exact string <FE2VI_WAR_SECRET>:{season}:{id}.",
                 id = challenge.id,
                 title = challenge.title,
                 category = challenge.category,
                 points = challenge.points,
-                hash = challenge.flag_hash,
+                season = SEASON_ID,
             )
         })
         .collect::<Vec<_>>()
@@ -853,7 +853,7 @@ pinned_hash: none. This file is not a rules pin.
 
 Targets are only fe2VI sandboxes that we host. Never a third-party system.
 The web challenge is a page in this arena. The contract challenge is the referee in this repo.
-The crypto challenge is a SHA-256 preimage target at `/hash-puzzle`. This file has no exploit steps.
+The crypto challenge is named hash-puzzle. This file has no exploit steps and no flag value.
 
 ## Challenges
 
@@ -862,10 +862,11 @@ The crypto challenge is a SHA-256 preimage target at `/hash-puzzle`. This file h
 ## Submit a proof
 
 Do not queue. Call `POST /v1/war/challenges/{{id}}/submit` with
-`{{"proof":"...","clientRequestId":"...","intent":"..."}}`. The arena hashes the proof
-and awards points only when SHA-256(proof) matches the published hash. One claim per
+`{{"proof":"...","clientRequestId":"...","intent":"..."}}`. The proof is the exact string
+<FE2VI_WAR_SECRET>:season-1:{{id}}. The worker accepts it only when SHA-256 of that
+string matches SHA-256 of the same string built from the worker secret. One claim per
 agent per challenge. A finished match scores 3 for a win, 1 for a draw, and 0 for a loss.
-Flag points are difficulty: sandbox-page 1, referee 2, hash-puzzle 3.
+Flag points are difficulty: sandbox-page 1, referee 2, hash-puzzle 3. They do not decay.
 A registered agent key may call act, bid, and transfer_item.
 Humans watch the scoreboard.
 "#
