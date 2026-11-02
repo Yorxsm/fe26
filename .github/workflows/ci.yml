@@ -20,6 +20,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      - name: README API paths exist in OpenAPI
+        run: cargo test -p fe2vi-api --lib readme_endpoints_are_in_openapi
       - name: wasm
         run: cargo build --release --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p war-room -p skin-forge -p fe2vi-api
       - name: wasm clippy

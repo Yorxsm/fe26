@@ -3674,4 +3674,105 @@ mod tests {
         assert!(!again.contains("deadbeefdeadbeef"));
         assert!(plan_writes(&state.book, &state.book).is_empty());
     }
+
+    fn openapi_templates() -> Vec<String> {
+        let doc: serde_json::Value = serde_json::from_str(&openapi()).unwrap();
+        doc["paths"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    fn path_char(ch: char, path: &str) -> bool {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '/' | '_' | '-' | '{' | '}')
+            || (ch == '.' && (path.starts_with("/openapi") || path.starts_with("/llms")))
+    }
+
+    fn mentioned_api_paths(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = text;
+        while let Some(offset) = ["/v1/", "/openapi.json", "/llms.txt"]
+            .iter()
+            .filter_map(|needle| rest.find(needle))
+            .min()
+        {
+            rest = &rest[offset..];
+            let mut path = String::new();
+            let mut end = 0;
+            for ch in rest.chars() {
+                if !path_char(ch, &path) {
+                    break;
+                }
+                path.push(ch);
+                end += ch.len_utf8();
+            }
+            while path.ends_with('.') && !path.ends_with(".json") && !path.ends_with(".txt") {
+                path.pop();
+            }
+            if path.starts_with("/v1/") || path == "/openapi.json" || path == "/llms.txt" {
+                found.push(path);
+            }
+            rest = &rest[end.max(1)..];
+        }
+        found.sort();
+        found.dedup();
+        found
+    }
+
+    fn same_shape(template: &str, path: &str) -> bool {
+        let left: Vec<&str> = template
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect();
+        let right: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter()
+            .zip(right.iter())
+            .all(|(template_part, path_part)| {
+                template_part == path_part
+                    || (template_part.starts_with('{') && template_part.ends_with('}'))
+                    || (path_part.starts_with('{') && path_part.ends_with('}'))
+            })
+    }
+
+    fn path_is_documented(path: &str, templates: &[String]) -> bool {
+        templates.iter().any(|template| same_shape(template, path))
+    }
+
+    #[test]
+    fn readme_endpoints_are_in_openapi() {
+        let readme = include_str!("../../../README.md");
+        let templates = openapi_templates();
+        let mentioned = mentioned_api_paths(readme);
+        assert!(
+            mentioned.iter().any(|path| path == "/v1/agents/register"),
+            "README scan found no register path: {mentioned:?}"
+        );
+        let missing: Vec<String> = mentioned
+            .into_iter()
+            .filter(|path| !path_is_documented(path, &templates))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "README names API paths that are not in /openapi.json: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn readme_path_check_rejects_an_unknown_route() {
+        let templates = openapi_templates();
+        assert!(path_is_documented("/v1/agents/register", &templates));
+        assert!(path_is_documented("/v1/arenas/vault/queue", &templates));
+        assert!(path_is_documented(
+            "/v1/matches/{matchId}/actions",
+            &templates
+        ));
+        assert!(path_is_documented("/openapi.json", &templates));
+        assert!(!path_is_documented("/v1/not-real", &templates));
+        assert!(!path_is_documented("/v1/agents/me/not-a-route", &templates));
+        let sample = "See GET /v1/nope and GET /v1/leaderboard.";
+        let mentioned = mentioned_api_paths(sample);
+        assert!(mentioned.contains(&"/v1/nope".to_string()));
+        assert!(mentioned.contains(&"/v1/leaderboard".to_string()));
+    }
 }
