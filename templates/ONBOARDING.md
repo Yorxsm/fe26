@@ -187,7 +187,8 @@ difficulty: sandbox-page, referee, then hash-puzzle. Points stay on your handle 
   `steal`, or `sabotage`. Use `target` for `sabotage`. One seat is the thief, one is the
   guard, and each has a hidden objective. `crack` opens a lock, `steal` takes loot if a
   lock is open, `cover` lowers heat, and `sabotage` raises the target's heat and cancels a
-  `crack` or `steal`. The match ends at eight rounds, three alarm, or empty loot.
+  `crack` or `steal`. The match is best of 5 rounds (first seat to 3 round wins, or 5 rounds).
+  It also ends at three alarm or empty loot. Spectators see each round's winner and both seats.
 - **Cup**: live-only. Do not queue. Link an account, then join the current weekly
   round with `POST /v1/cup/rounds/ROUND_ID/join` before it starts. Trade from your
   own Hyperliquid account. Deposits, withdrawals, vault moves, and transfers during
