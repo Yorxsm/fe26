@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
@@ -11,7 +11,7 @@ import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
 import { MarkdownDoc } from "@/components/MarkdownDoc";
-import { LobbySignList, RoomHud } from "@/components/RoomHud";
+import { LobbySignList, RoomHud, type RoomMatch } from "@/components/RoomHud";
 import {
   ArrowLeft,
   ArrowRight,
@@ -115,6 +115,7 @@ const ROOM_SLUG: Record<string, string> = {
   "trading-village": "village",
   "war-room": "war",
   "skin-forge": "lobby",
+  "oracle-plaza": "hall",
 };
 
 const HUD_LINKS = [
@@ -129,6 +130,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const path = usePathname();
   const [phase, setPhase] = useState<Phase>("boot");
   const [visitors, setVisitors] = useState<CityAgent[]>([]);
+  const [matches, setMatches] = useState<RoomMatch[] | null>(null);
+  const heard = useRef("");
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
   const [paused, setPaused] = useState(false);
@@ -238,6 +241,35 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       window.removeEventListener("popstate", onPop);
       window.removeEventListener("fe2vi-title", showTitle);
       window.removeEventListener("hashchange", onHash);
+    };
+  }, []);
+
+  useEffect(() => {
+    const base = apiBase();
+    let dead = false;
+    const pull = () => {
+      fetch(`${base}/v1/matches?limit=20`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { matches?: RoomMatch[] } | null) => {
+          if (dead || !body) return;
+          const next = Array.isArray(body.matches) ? body.matches : [];
+          const live = next.find((match) => match.status === "live" && match.last);
+          const token = live?.last ? `${live.matchId}:${live.last.handle}:${live.last.type}:${live.turn}` : "";
+          if (token && token !== heard.current) {
+            heard.current = token;
+            audio.click();
+          }
+          setMatches(next);
+        })
+        .catch(() => {
+          if (!dead) setMatches((current) => current ?? []);
+        });
+    };
+    pull();
+    const timer = window.setInterval(pull, 8000);
+    return () => {
+      dead = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -435,6 +467,18 @@ export function CityGate({ onboarding }: { onboarding: string }) {
 
   const mode = phase === "cutscene" ? "cutscene" : phase === "city" ? "play" : "orbit";
   const cast = visitors;
+  const lines = useMemo(() => {
+    const slug = focusId ? ROOM_SLUG[focusId] : "";
+    const broad = !slug || slug === "lobby" || slug === "hall";
+    const mine = !matches ? [] : broad ? matches : matches.filter((match) => match.arenaId === slug);
+    const live = mine.find((match) => match.status === "live" && match.last);
+    const last = live?.last;
+    if (!last) return {};
+    const out: Record<string, string> = { [last.handle]: last.type };
+    const agent = visitors.find((row) => row.accountId === last.handle || row.name === last.handle);
+    if (agent) out[agent.name] = last.type;
+    return out;
+  }, [matches, focusId, visitors]);
   const followed = followIndex === null ? null : cast[followIndex];
   const vantages = DISTRICTS.filter((district) => (VANTAGE_IDS as readonly string[]).includes(district.id));
 
@@ -680,7 +724,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
-              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} inside={visitors.slice(0, 3).map((agent) => agent.name)} />
+              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} inside={visitors.slice(0, 3).map((agent) => agent.name)} matches={matches} />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
             {mapStuck && !mapReady ? (
@@ -729,6 +773,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 shotLock={shotLock}
                 roomBusy={roomBusy}
                 visitors={visitors}
+                lines={lines}
               />
             )}
             {phase === "title" && (

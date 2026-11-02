@@ -67,11 +67,11 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   },
   {
     id: "oracle-plaza",
-    name: "Oracle Plaza",
-    summary: "Coming soon.",
-    status: "soon",
-    href: "",
-    station: "Oracle Plaza",
+    name: "Season Hall",
+    summary: "The season board and the matches the arena has played.",
+    status: "live",
+    href: "#season-hall",
+    station: "Season Hall",
     color: "#c4a36c",
   },
 ];
@@ -115,7 +115,7 @@ const ROOF_NAME: Record<string, string> = {
   "trading-village": "TRADING VILLAGE",
   "war-room": "WAR ROOM",
   "skin-forge": "LOBBY",
-  "oracle-plaza": "PLAZA",
+  "oracle-plaza": "HALL",
 };
 
 export function roofLabel(id: string) {
@@ -201,6 +201,7 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
   "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
+  "oracle-plaza": insideRoom(20, -10),
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -210,6 +211,7 @@ const CAMERA_PARK: Record<string, [number, number]> = {
   "war-room": [6, 56],
   "skin-forge": [-44, -8],
   "cup-stadium": [-14, -18],
+  "oracle-plaza": [14, 4],
 };
 
 /** Front lawn, close enough that the facade fills the frame. */
@@ -219,6 +221,7 @@ export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
   "war-room": { eye: [12, 6.5, 56], aim: [12, 3.2, 40], fov: 40 },
   "skin-forge": { eye: [-38, 6, -8], aim: [-38, 2.8, -22], fov: 42 },
   "cup-stadium": { eye: [-8, 7, -26], aim: [-8, 3, -40], fov: 40 },
+  "oracle-plaza": { eye: [20, 6.5, 8], aim: [20, 3.2, -8], fov: 42 },
 };
 
 /** Authored path for the opening. The first shot stays on the road, outside every shell. */
@@ -293,11 +296,33 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
     const t = along / 0.7;
     const a = world(from);
     const b = world(to);
-    return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, rot, clip: "walk" as const, visible: true };
+    return { x: a.x + (b.x - a.x) * t, y: 0, z: a.z + (b.z - a.z) * t, rot, clip: "walk" as const, visible: true };
+  }
+  const station = ROOM_STATIONS[roomId]?.[index % (ROOM_STATIONS[roomId]?.length || 1)];
+  if (station) {
+    return { x: ox + station[0], y: station[1], z: oz + station[2], rot, clip: "idle" as const, visible: true };
   }
   const stood = world(to);
-  return { x: stood.x, z: stood.z, rot, clip: "idle" as const, visible: true };
+  return { x: stood.x, y: 0, z: stood.z, rot, clip: "idle" as const, visible: true };
 }
+
+/**
+ * Local meters inside the room shell. Y is the surface an agent stands on.
+ * Stadium rows are the bench tiers. Village desks are floor stations beside the desk, not on top of it.
+ */
+export const ROOM_STATIONS: Record<string, Array<[number, number, number]>> = {
+  "cup-stadium": [
+    [-1.34, 0.53, -3.74],
+    [0.36, 0.53, -3.74],
+    [-2.19, 0.93, -4.59],
+  ],
+  "trading-village": [
+    [0.2, 0, -2.1],
+    [3.8, 0, -2.1],
+    [-2.0, 0, -4.0],
+  ],
+  "war-room": [[3.4, 0, 0.6]],
+};
 
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
@@ -326,6 +351,11 @@ export const INTERIOR_CAST: Record<string, CastPose[]> = {
     { index: 0, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
     { index: 1, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
     { index: 2, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
+  ],
+  "oracle-plaza": [
+    { index: 0, x: 18.6, z: -12.4, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: 20, z: -13.1, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 2, x: 21.4, z: -12.4, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
 };
 

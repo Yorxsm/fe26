@@ -5,7 +5,9 @@ import { Billboard, Html, OrbitControls, Text, useGLTF } from "@react-three/drei
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode } from "postprocessing";
-import { Interiors } from "@/components/Interiors";
+import dynamic from "next/dynamic";
+
+const Interiors = dynamic(() => import("@/components/Interiors").then((mod) => mod.Interiors), { ssr: false });
 import { Nature } from "@/components/Nature";
 import { Props } from "@/components/Props";
 import { World } from "@/components/World";
@@ -30,6 +32,7 @@ const ROOM_PREFIX: Record<string, string> = {
   market: "trading-village",
   war: "war-room",
   forge: "skin-forge",
+  oracle: "oracle-plaza",
 };
 
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
@@ -44,6 +47,39 @@ function showPick(name: string, x: number, z: number) {
   if (!node) return;
   node.hidden = false;
   node.textContent = name;
+}
+
+function BuildingVolumes() {
+  return (
+    <group>
+      {DISTRICTS.filter((district) => district.status === "live").map((district) => {
+        const { hx, hz, height } = district.footprint;
+        const bodyH = Math.min(height * 0.62, 9);
+        return (
+          <group key={district.id} position={[district.x, 0, district.z]}>
+            <mesh position={[0, bodyH / 2, 0]} castShadow receiveShadow>
+              <boxGeometry args={[hx * 1.35, bodyH, hz * 1.25]} />
+              <meshStandardMaterial color={district.color} roughness={0.84} metalness={0.04} />
+            </mesh>
+            <mesh position={[0, bodyH + 0.28, 0]} castShadow>
+              <boxGeometry args={[hx * 1.5, 0.5, hz * 1.4]} />
+              <meshStandardMaterial color="#1c1916" roughness={0.72} metalness={0.08} />
+            </mesh>
+            <mesh position={[0, 1.25, hz * 0.64]}>
+              <boxGeometry args={[1.5, 2.4, 0.28]} />
+              <meshStandardMaterial color="#141416" roughness={0.62} />
+            </mesh>
+            {[-1, 1].map((side) => (
+              <mesh key={side} position={[side * hx * 0.42, 3.1, hz * 0.64]}>
+                <boxGeometry args={[1.2, 0.9, 0.1]} />
+                <meshStandardMaterial color="#e7b07a" emissive="#c94a1a" emissiveIntensity={0.28} roughness={0.45} />
+              </mesh>
+            ))}
+          </group>
+        );
+      })}
+    </group>
+  );
 }
 
 function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
@@ -275,7 +311,7 @@ function detectQuality(): QualityTier {
 
 function dprForQuality(tier: QualityTier) {
   if (typeof window === "undefined") return 1;
-  const cap = tier === "high" ? 2 : tier === "medium" ? 1.5 : 1;
+  const cap = tier === "low" ? 1 : 1.5;
   return Math.min(window.devicePixelRatio || 1, cap);
 }
 
@@ -617,7 +653,7 @@ function Smoke({ position }: { position: [number, number, number] }) {
   );
 }
 
-const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"]);
+const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium", "oracle-plaza"]);
 
 const BUILDING_GRADE: Record<string, { tint: string; rough: number; metal: number }> = {
   vault: { tint: "#d4a05a", rough: 0.78, metal: 0.02 },
@@ -704,6 +740,9 @@ function Kits({
     const cloned = gltf.scene.clone(true);
     cloned.traverse((node) => {
       const label = sourceName(node);
+      if (/^kit\.(pier|club|oracle)(\.|$)/.test(label)) {
+        node.visible = false;
+      }
       const key = label.startsWith("kit.") ? label.split(".")[1] : "";
       if (key && ROOM_PREFIX[key]) node.userData.district = ROOM_PREFIX[key];
       const mesh = node as THREE.Mesh;
@@ -1363,6 +1402,7 @@ function AgentMesh({
   beat = 0,
   frameMode = "out",
   rim = true,
+  line = "",
 }: {
   agent: CityAgent;
   index: number;
@@ -1377,6 +1417,7 @@ function AgentMesh({
   beat?: number;
   frameMode?: "in" | "out";
   rim?: boolean;
+  line?: string;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
   const group = useRef<THREE.Group>(null);
@@ -1453,7 +1494,7 @@ function AgentMesh({
     if (crossing) {
       pose = { x: crossing.x, y: 0, z: crossing.z, rot: crossing.rot };
     } else if (roomMove) {
-      pose = { x: roomMove.x, y: 0, z: roomMove.z, rot: roomMove.rot };
+      pose = { x: roomMove.x, y: roomMove.y, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
@@ -1648,6 +1689,7 @@ function AgentMesh({
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
           </div>
+          {line ? <div className="say-bubble">{line}</div> : null}
         </Html>
       </group>
     </group>
@@ -2597,6 +2639,7 @@ export default function CityMap({
   shotLock = false,
   roomBusy = false,
   visitors = [],
+  lines = {},
 }: {
   paused: boolean;
   mode: "orbit" | "cutscene" | "play";
@@ -2615,6 +2658,7 @@ export default function CityMap({
   shotLock?: boolean;
   roomBusy?: boolean;
   visitors?: CityAgent[];
+  lines?: Record<string, string>;
 }) {
   const crew = visitors;
   const [lean, setLean] = useState(false);
@@ -2649,12 +2693,13 @@ export default function CityMap({
       dpr={dpr}
       shadows={quality !== "low"}
       camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
+      frameloop={paused && !openInterior ? "demand" : "always"}
       gl={{
         antialias: quality !== "low",
         alpha: false,
         powerPreference: "default",
         failIfMajorPerformanceCaveat: false,
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: false,
       }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.NoToneMapping;
@@ -2677,6 +2722,7 @@ export default function CityMap({
       <Nature />
       <Props />
       <InteriorBackdrop id={openInterior} />
+      <BuildingVolumes />
       <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
       <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
       <group position={[-42, 6.4, 33]}>
@@ -2747,7 +2793,7 @@ export default function CityMap({
           {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex])
             .filter((index) => crew[index])
             .map((index) => (
-            <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
+            <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} line={lines[crew[index].name] || lines[crew[index].accountId] || ""} />
           ))}
         </>
       )}

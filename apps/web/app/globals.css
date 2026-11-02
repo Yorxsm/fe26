@@ -1893,6 +1893,36 @@ button.pronounce:focus-visible {
 .room-board-points { font-family: var(--mono); color: var(--forge); }
 .room-board-hint { color: var(--ink-muted); font-size: var(--type-caption); }
 .room-board .room-link { margin-top: 2px; min-height: 36px; }
+.room-board.is-full {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(72vh, 680px);
+  z-index: 20;
+  overflow: auto;
+}
+.room-board.is-full .room-board-list { max-height: none; }
+.room-goal { margin: 0; color: var(--ink); }
+.room-activity {
+  background: #141416;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+.room-activity h2 { margin: 0; font-size: 0.95rem; }
+.room-activity p, .room-activity li { margin: 0; }
+.room-activity ul { margin: 0; padding-left: 1.1rem; }
+.say-bubble {
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #141416;
+  color: #f4efe6;
+  font-size: 12px;
+}
 @media (max-height: 620px) {
   .room-board { max-height: 38vh; }
   .room-board-list { max-height: 16vh; }

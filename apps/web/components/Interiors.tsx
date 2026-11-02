@@ -15,6 +15,7 @@ const ROOMS: Record<string, { url: string; position: [number, number, number] }>
   "war-room": { url: "/models/interior-war.glb", position: [12, 0, 40] },
   "skin-forge": { url: "/models/interior-forge.glb", position: [-38, 0, -24] },
   "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -42] },
+  "oracle-plaza": { url: "/models/interior-forge.glb", position: [20, 0, -10] },
 };
 
 /** Same rig as the Lobby. Diffuse walls need this much light under SwiftShader. */
@@ -30,6 +31,7 @@ const ROOM_LIGHTS: Record<string, Array<{ at: [number, number, number]; color: s
   "war-room": [...LOBBY_LIGHTS, { at: [0, 2.4, -0.4], color: "#3d9a62", intensity: 8, distance: 10 }],
   "skin-forge": LOBBY_LIGHTS,
   "cup-stadium": LOBBY_LIGHTS,
+  "oracle-plaza": LOBBY_LIGHTS,
 };
 
 /** Lobby walls are rough and barely metal. The other rooms ship dark or mirror-like, which SwiftShader paints black. */
@@ -66,7 +68,7 @@ function RoomMesh({ url }: { url: string }) {
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = true;
       const name = mesh.name.toLowerCase();
       if (name.includes("beam")) mesh.visible = false;
       const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map((material) =>
@@ -625,4 +627,3 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   );
 }
 
-for (const room of Object.values(ROOMS)) useGLTF.preload(room.url);
