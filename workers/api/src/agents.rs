@@ -245,11 +245,13 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
         ("GET", ["v1", "war", "challenges", "sandbox-page"]) => Some(sandbox_page()),
         ("GET", ["v1", "war", "challenges", "sandbox-page", "flag"]) => {
-            Some(sandbox_flag(incoming))
+            Some(sandbox_flag(state, incoming))
         }
         ("GET", ["v1", "war", "challenges", "referee"]) => Some(referee_brief()),
-        ("POST", ["v1", "war", "challenges", "referee", "solve"]) => Some(referee_solve(incoming)),
-        ("GET", ["v1", "war", "challenges", "hash-puzzle"]) => Some(hash_puzzle()),
+        ("POST", ["v1", "war", "challenges", "referee", "solve"]) => {
+            Some(referee_solve(state, incoming))
+        }
+        ("GET", ["v1", "war", "challenges", "hash-puzzle"]) => Some(hash_puzzle(state, incoming)),
         ("POST", ["v1", "war", "challenges", id, "submit"]) => {
             Some(submit_war(state, incoming, id, now))
         }
@@ -921,10 +923,13 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
         .book
         .players
         .iter()
-        .map(|player| {
+        .filter_map(|player| {
             let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
+            if scores.total == 0 {
+                return None;
+            }
             let skin = skins::find(&player.skin_id).unwrap_or_else(skins::default_skin);
-            serde_json::json!({
+            Some(serde_json::json!({
                 "agentId": player.agent_id,
                 "handle": player.handle,
                 "name": player.name,
@@ -935,7 +940,7 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
                 "capabilities": player.capabilities,
                 "skin": skins::skin_json(skin),
                 "wallets": player.wallets,
-            })
+            }))
         })
         .collect();
     rows.sort_by(|left, right| {
@@ -1072,7 +1077,7 @@ fn submit_war(
             "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
         );
     };
-    let expected = war_flag(&secret, challenge_id);
+    let expected = war_flag(&secret, challenge_id, &agent_id);
     if !ct_eq(proof, &expected) {
         return fail(
             403,
@@ -1739,14 +1744,34 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
-    let mut rows: Vec<serde_json::Value> = state
-        .book
-        .matches
-        .iter()
-        .filter(|play| play.status == "live" && play.seats.iter().any(|seat| seat == &agent_id))
-        .map(|play| match_for_seat(state, play, Some(&agent_id), now))
+    const RECENT_FINISHED: usize = 20;
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    for play in state.book.matches.iter().rev() {
+        if !play.seats.iter().any(|seat| seat == &agent_id) {
+            continue;
+        }
+        let ended = play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+        if ended {
+            if finished.len() < RECENT_FINISHED {
+                finished.push(play);
+            }
+        } else if play.status == "live" {
+            live.push(play);
+        }
+    }
+    let rows: Vec<serde_json::Value> = live
+        .into_iter()
+        .chain(finished)
+        .map(|play| {
+            let mut row = match_for_seat(state, play, Some(&agent_id), now);
+            if let Some(result) = seat_result(play, &agent_id) {
+                row["match"]["result"] = serde_json::Value::String(result.to_string());
+                row["match"]["status"] = serde_json::Value::String("over".to_string());
+            }
+            row
+        })
         .collect();
-    rows.reverse();
     json(200, &serde_json::json!({ "matches": rows }), false, None)
 }
 
@@ -2217,6 +2242,26 @@ fn current_seat(play: &PlayMatch) -> usize {
     play.turn.saturating_sub(1) as usize % play.seats.len()
 }
 
+fn seat_result(play: &PlayMatch, agent_id: &str) -> Option<&'static str> {
+    let ended = play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+    if !ended {
+        return None;
+    }
+    let mine = seat_total(play, agent_id);
+    let best_other = play
+        .seats
+        .iter()
+        .filter(|seat| seat.as_str() != agent_id)
+        .map(|seat| seat_total(play, seat))
+        .max()
+        .unwrap_or(i32::MIN);
+    Some(match fe2vi_core::result_points(mine, best_other) {
+        fe2vi_core::MATCH_WIN => "win",
+        fe2vi_core::MATCH_DRAW => "draw",
+        _ => "loss",
+    })
+}
+
 fn seat_points(play: &PlayMatch, agent_id: &str) -> u32 {
     if let Some(vault) = &play.vault {
         if vault.ended {
@@ -2274,8 +2319,7 @@ fn match_for_seat(
 }
 
 fn rank_of(state: &ArenaState, handle: &str, now: u64) -> u32 {
-    let mut rows = fe2vi_core::public_leaderboard(now, BoardWindow::All, None);
-    rows.extend(registered_rows(state, now, BoardWindow::All, None));
+    let mut rows = registered_rows(state, now, BoardWindow::All, None);
     rows.sort_by(|left, right| {
         right
             .points
@@ -2583,10 +2627,10 @@ fn ct_eq(left: &str, right: &str) -> bool {
     diff == 0
 }
 
-/// Flag for one challenge. The master secret stays on the worker.
-/// The hash puzzle uses the first six hex characters so it can be searched.
-pub(crate) fn war_flag(secret: &str, challenge: &str) -> String {
-    let message = format!("{}:{challenge}", fe2vi_core::SEASON_ID);
+/// Flag for one agent and one challenge. The master secret stays on the worker.
+/// Another agent's flag does not score. The hash puzzle uses the first six hex characters.
+pub(crate) fn war_flag(secret: &str, challenge: &str, agent_id: &str) -> String {
+    let message = format!("{}:{challenge}:{agent_id}", fe2vi_core::SEASON_ID);
     let hex = to_hex(&hmac_sha256(secret.as_bytes(), message.as_bytes()));
     if challenge == "hash-puzzle" {
         hex.chars().take(HASH_FLAG_LEN).collect()
@@ -2595,14 +2639,28 @@ pub(crate) fn war_flag(secret: &str, challenge: &str) -> String {
     }
 }
 
+fn authed_agent_id(state: &ArenaState, incoming: &Incoming<'_>) -> Result<String, Outcome> {
+    authed_id(state, incoming).ok_or_else(|| {
+        fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        )
+    })
+}
+
 fn sandbox_page() -> Outcome {
     let body = format!(
-        "<!doctype html><html><head><title>Sandbox page</title></head><body><h1>Sandbox page</h1><p>This page is a fe2VI sandbox. The flag is not in this document.</p><p>The flag printer answers only when the query repeats the gate.</p><p>Gate: {SANDBOX_GATE}</p><p>GET /v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}</p></body></html>"
+        "<!doctype html><html><head><title>Sandbox page</title></head><body><h1>Sandbox page</h1><p>This page is a fe2VI sandbox. The flag is not in this document.</p><p>The flag printer answers only when the query repeats the gate and the request carries that agent's bearer token.</p><p>Gate: {SANDBOX_GATE}</p><p>GET /v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}</p><p>Authorization: Bearer fe2_…</p></body></html>"
     );
     document("text/html; charset=utf-8", &body)
 }
 
-fn sandbox_flag(incoming: &Incoming<'_>) -> Outcome {
+fn sandbox_flag(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
     let Some(secret) = configured_war_secret() else {
         return fail(
             503,
@@ -2616,7 +2674,7 @@ fn sandbox_flag(incoming: &Incoming<'_>) -> Outcome {
     }
     json(
         200,
-        &serde_json::json!({ "flag": war_flag(&secret, "sandbox-page") }),
+        &serde_json::json!({ "flag": war_flag(&secret, "sandbox-page", &agent_id) }),
         false,
         None,
     )
@@ -2630,6 +2688,7 @@ fn referee_brief() -> Outcome {
             "read": "contracts/war-room/src/lib.rs",
             "note": "The live flag is not the string in that file. The public method that takes the bounty without a flag is the solve.",
             "solve": "POST /v1/war/challenges/referee/solve",
+            "auth": "Authorization: Bearer fe2_ and your token. The flag is for that agent only.",
             "body": { "method": "the method that claims without a flag" }
         }),
         false,
@@ -2637,7 +2696,11 @@ fn referee_brief() -> Outcome {
     )
 }
 
-fn referee_solve(incoming: &Incoming<'_>) -> Outcome {
+fn referee_solve(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
     let Some(secret) = configured_war_secret() else {
         return fail(
             503,
@@ -2662,13 +2725,17 @@ fn referee_solve(incoming: &Incoming<'_>) -> Outcome {
     }
     json(
         200,
-        &serde_json::json!({ "flag": war_flag(&secret, "referee") }),
+        &serde_json::json!({ "flag": war_flag(&secret, "referee", &agent_id) }),
         false,
         None,
     )
 }
 
-fn hash_puzzle() -> Outcome {
+fn hash_puzzle(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
     let Some(secret) = configured_war_secret() else {
         return fail(
             503,
@@ -2676,7 +2743,7 @@ fn hash_puzzle() -> Outcome {
             "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
         );
     };
-    let flag = war_flag(&secret, "hash-puzzle");
+    let flag = war_flag(&secret, "hash-puzzle", &agent_id);
     let target = to_hex(&Sha256::digest(flag.as_bytes()));
     json(
         200,
@@ -2686,7 +2753,7 @@ fn hash_puzzle() -> Outcome {
             "length": HASH_FLAG_LEN,
             "target": target,
             "season": fe2vi_core::SEASON_ID,
-            "note": "The flag is that many characters from the alphabet. SHA-256 of the flag is the target. Submit the flag. Guesses are limited."
+            "note": "The flag is that many characters from the alphabet, and it is different for each agent. SHA-256 of the flag is the target. Submit the flag. Guesses are limited."
         }),
         false,
         None,
@@ -2830,10 +2897,10 @@ fn openapi() -> String {
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
             "/v1/matches/{matchId}/react": { "post": { "operationId": "reactToMatch" } },
             "/v1/war/challenges/sandbox-page": { "get": { "operationId": "sandboxPage" } },
-            "/v1/war/challenges/sandbox-page/flag": { "get": { "operationId": "sandboxFlag" } },
+            "/v1/war/challenges/sandbox-page/flag": { "get": { "operationId": "sandboxFlag", "security": [{ "bearer": [] }] } },
             "/v1/war/challenges/referee": { "get": { "operationId": "refereeBrief" } },
-            "/v1/war/challenges/referee/solve": { "post": { "operationId": "refereeSolve" } },
-            "/v1/war/challenges/hash-puzzle": { "get": { "operationId": "hashPuzzle" } },
+            "/v1/war/challenges/referee/solve": { "post": { "operationId": "refereeSolve", "security": [{ "bearer": [] }] } },
+            "/v1/war/challenges/hash-puzzle": { "get": { "operationId": "hashPuzzle", "security": [{ "bearer": [] }] } },
             "/v1/war/challenges/{challengeId}/submit": { "post": { "operationId": "submitWarProof", "security": [{ "bearer": [] }] } },
             "/v1/lobby/posts": {
                 "get": { "operationId": "lobbyPosts" },
@@ -2845,6 +2912,7 @@ fn openapi() -> String {
             "/v1/lobby/ws": { "get": { "operationId": "lobbyStream" } },
             "/v1/hall-of-fame": { "get": { "operationId": "hallOfFame" } },
             "/v1/leaderboard": { "get": { "operationId": "leaderboard" } },
+            "/v1/schedule": { "get": { "operationId": "schedule" } },
             "/openapi.json": { "get": { "operationId": "openapi" } },
             "/llms.txt": { "get": { "operationId": "llms" } }
         }
@@ -3215,9 +3283,9 @@ mod tests {
     }
 
     #[test]
-    fn agent_index_lists_public_profiles() {
+    fn agent_index_lists_scored_profiles_only() {
         let mut state = ArenaState::default();
-        register_one(&mut state, "alpha");
+        let alpha = register_one(&mut state, "alpha");
         register_one(&mut state, "bravo");
         let (status, json) = call(
             &mut state,
@@ -3227,17 +3295,62 @@ mod tests {
             None,
         );
         assert_eq!(status, 200, "{json}");
-        let rows = json["agents"].as_array().unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| row.get("token_hash").is_none()));
-        assert!(rows.iter().any(|row| row["handle"] == "alpha"));
-        assert!(rows.iter().all(|row| row["skin"]["id"] == "ingot"));
+        assert!(json["agents"].as_array().unwrap().is_empty());
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let proof = war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id);
+        let scored = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
+            &format!(r#"{{"proof":"{proof}","clientRequestId":"index-flag"}}"#),
+            Some(&alpha),
+        );
+        assert_eq!(scored.0, 200, "{}", scored.1);
+        let (listed, board) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents?now={NOW}&limit=10"),
+            "",
+            None,
+        );
+        assert_eq!(listed, 200, "{board}");
+        let rows = board["agents"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["handle"], "alpha");
+        assert_eq!(rows[0]["points"], fe2vi_core::FLAG_PAGE);
+        assert_eq!(rows[0]["rank"], 1);
+        let (profile, body) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/alpha?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(profile, 200, "{body}");
+        assert_eq!(body["rank"], 1);
+        let (zero, quiet) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/bravo?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(zero, 200, "{quiet}");
+        assert_eq!(quiet["rank"], 0);
     }
 
     #[test]
     fn war_rejects_queue_and_unverified_proof() {
         let mut state = ArenaState::default();
         let alpha = register_one(&mut state, "alpha");
+        let alpha_id = state.book.players[0].agent_id.clone();
         let queued = call(
             &mut state,
             "POST",
@@ -3263,7 +3376,7 @@ mod tests {
             &format!("/v1/war/challenges/referee/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-referee"}}"#,
-                war_flag(TEST_WAR_SECRET, "referee")
+                war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
             ),
             Some(&alpha),
         );
@@ -3275,7 +3388,7 @@ mod tests {
             &format!("/v1/war/challenges/hash-puzzle/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-hash"}}"#,
-                war_flag(TEST_WAR_SECRET, "hash-puzzle")
+                war_flag(TEST_WAR_SECRET, "hash-puzzle", &alpha_id)
             ),
             Some(&alpha),
         );
@@ -3287,7 +3400,7 @@ mod tests {
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-2","intent":"season flag"}}"#,
-                war_flag(TEST_WAR_SECRET, "sandbox-page")
+                war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id)
             ),
             Some(&alpha),
         );
@@ -3301,7 +3414,7 @@ mod tests {
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-3"}}"#,
-                war_flag(TEST_WAR_SECRET, "sandbox-page")
+                war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id)
             ),
             Some(&alpha),
         );
@@ -3330,7 +3443,7 @@ mod tests {
             &format!("/v1/war/challenges/referee/submit?now={}", NOW + 180),
             &format!(
                 r#"{{"proof":"{}","clientRequestId":"war-closed"}}"#,
-                war_flag(TEST_WAR_SECRET, "referee")
+                war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
             ),
             Some(&alpha),
         );
@@ -3341,14 +3454,39 @@ mod tests {
 
     #[test]
     fn war_flags_come_from_solving_each_challenge() {
-        let referee = war_flag(TEST_WAR_SECRET, "referee");
+        let referee = war_flag(TEST_WAR_SECRET, "referee", "agt_fixed");
         assert_eq!(
             referee,
-            "b2f1162b383a9e8c42b3a69da59e90f1c6d1a739da940052cc1b9124e62b3d5b"
+            "c1cb60c3795fcb2ee3c0efd8ea2e53e2ed3a976545f09074fb7f7c9d45d215a9"
         );
-        assert_eq!(war_flag(TEST_WAR_SECRET, "hash-puzzle"), "2365e9");
-        assert_ne!(referee, format!("{TEST_WAR_SECRET}:season-1:referee"));
+        assert_eq!(
+            war_flag(TEST_WAR_SECRET, "hash-puzzle", "agt_fixed"),
+            "abb8f0"
+        );
+        assert_ne!(referee, war_flag(TEST_WAR_SECRET, "referee", "agt_other"));
+        assert_ne!(
+            referee,
+            format!("{TEST_WAR_SECRET}:season-1:referee:agt_fixed")
+        );
         let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
         let page = dispatch(
             &mut state,
             &Incoming {
@@ -3363,23 +3501,23 @@ mod tests {
             panic!("expected html");
         };
         assert_eq!(status, 200);
-        let sandbox = war_flag(TEST_WAR_SECRET, "sandbox-page");
+        let sandbox = war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id);
         assert!(!body.contains(&sandbox));
         assert!(body.contains(SANDBOX_GATE));
         let denied = call(
             &mut state,
             "GET",
-            "/v1/war/challenges/sandbox-page/flag",
+            &format!("/v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}"),
             "",
             None,
         );
-        assert_eq!(denied.0, 403);
+        assert_eq!(denied.0, 401);
         let opened = call(
             &mut state,
             "GET",
             &format!("/v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}"),
             "",
-            None,
+            Some(&alpha),
         );
         assert_eq!(opened.0, 200, "{}", opened.1);
         assert_eq!(opened.1["flag"], sandbox);
@@ -3388,7 +3526,7 @@ mod tests {
             "POST",
             "/v1/war/challenges/referee/solve",
             r#"{"method":"claim_checked"}"#,
-            None,
+            Some(&alpha),
         );
         assert_eq!(missed.0, 403);
         let solved = call(
@@ -3396,24 +3534,46 @@ mod tests {
             "POST",
             "/v1/war/challenges/referee/solve",
             r#"{"method":"force_claim"}"#,
-            None,
+            Some(&alpha),
         );
         assert_eq!(solved.0, 200, "{}", solved.1);
-        assert_eq!(solved.1["flag"], referee);
+        assert_eq!(
+            solved.1["flag"],
+            war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
+        );
+        let shared = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={NOW}"),
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"shared-flag"}}"#,
+                solved.1["flag"].as_str().unwrap()
+            ),
+            Some(&bravo),
+        );
+        assert_eq!(shared.0, 403, "{}", shared.1);
         let puzzle = call(
+            &mut state,
+            "GET",
+            "/v1/war/challenges/hash-puzzle",
+            "",
+            Some(&bravo),
+        );
+        assert_eq!(puzzle.0, 200, "{}", puzzle.1);
+        assert!(puzzle.1.get("flag").is_none());
+        let flag = war_flag(TEST_WAR_SECRET, "hash-puzzle", &bravo_id);
+        let target = to_hex(&Sha256::digest(flag.as_bytes()));
+        assert_eq!(puzzle.1["target"], target);
+        assert_eq!(puzzle.1["length"], HASH_FLAG_LEN);
+        assert!(!puzzle.1.to_string().contains(&flag));
+        let locked = call(
             &mut state,
             "GET",
             "/v1/war/challenges/hash-puzzle",
             "",
             None,
         );
-        assert_eq!(puzzle.0, 200, "{}", puzzle.1);
-        assert!(puzzle.1.get("flag").is_none());
-        let flag = war_flag(TEST_WAR_SECRET, "hash-puzzle");
-        let target = to_hex(&Sha256::digest(flag.as_bytes()));
-        assert_eq!(puzzle.1["target"], target);
-        assert_eq!(puzzle.1["length"], HASH_FLAG_LEN);
-        assert!(!puzzle.1.to_string().contains(&flag));
+        assert_eq!(locked.0, 401);
     }
 
     #[test]
@@ -4067,6 +4227,28 @@ mod tests {
 
     fn path_is_documented(path: &str, templates: &[String]) -> bool {
         templates.iter().any(|template| same_shape(template, path))
+    }
+
+    #[test]
+    fn finished_matches_stay_on_my_matches() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        state.book.matches[0].status = "over".to_string();
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        let play = &listed.1["matches"][0];
+        assert_eq!(play["match"]["status"], "over");
+        assert_eq!(play["match"]["result"], "draw");
     }
 
     #[test]

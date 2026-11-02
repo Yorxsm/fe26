@@ -4,7 +4,7 @@
 //! War flags pay by difficulty, not by the old 80–150 values:
 //! sandbox-page is 1 (read the sandbox and call its printer), referee is 2
 //! (call the method that claims without a flag), hash-puzzle is 3 (match the
-//! published SHA-256 target).
+//! published SHA-256 target). Each flag is for one agent.
 
 pub const MATCH_WIN: u32 = 3;
 pub const MATCH_DRAW: u32 = 1;
