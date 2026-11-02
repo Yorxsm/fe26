@@ -159,6 +159,20 @@ function AgentTargets({
   );
 }
 
+/** Paint the black header artwork #d4d2cc. The SVG file itself stays untouched. */
+function lightArtwork(image: HTMLImageElement) {
+  const scratch = document.createElement("canvas");
+  scratch.width = image.naturalWidth || image.width;
+  scratch.height = image.naturalHeight || image.height;
+  const ctx = scratch.getContext("2d");
+  if (!ctx) return image;
+  ctx.drawImage(image, 0, 0, scratch.width, scratch.height);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = "#d4d2cc";
+  ctx.fillRect(0, 0, scratch.width, scratch.height);
+  return scratch;
+}
+
 function VillageMural() {
   const [map, setMap] = useState<THREE.CanvasTexture | null>(null);
   useEffect(() => {
@@ -167,55 +181,61 @@ function VillageMural() {
     const word = new Image();
     mark.src = "/brand/near-mark.svg";
     word.src = "/brand/near-wordmark.svg";
-    Promise.all([
-      mark.decode(),
-      word.decode(),
-      document.fonts.load('700 72px "Chakra Petch"').catch(() => undefined),
-    ]).then(() => {
-      if (dead) return;
+    const display = getComputedStyle(document.documentElement).getPropertyValue("--font-display").split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || "sans-serif";
+    const paint = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
+      canvas.width = 1600;
+      canvas.height = 900;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.fillStyle = "#141416";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      const markH = 112;
-      const gap = 28;
-      const wordScale = 96 / 86;
-      const wordW = 345 * wordScale;
-      const wordH = 86 * wordScale;
+      ctx.strokeStyle = "#d4d2cc";
+      ctx.lineWidth = 28;
+      ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+      const markH = 340;
+      const gap = 48;
+      const wordH = 210;
+      const wordW = 345 * (wordH / 86);
       const lockW = markH + gap + wordW;
-      const lockH = Math.max(markH, wordH);
-      const pad = markH;
-      const plateW = lockW + pad * 2;
-      const plateH = lockH + pad * 2;
-      const plateX = (canvas.width - plateW) / 2;
-      const plateY = 72;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(plateX, plateY, plateW, plateH);
-      ctx.drawImage(mark, plateX + pad, plateY + pad + (lockH - markH) / 2, markH, markH);
-      ctx.drawImage(word, plateX + pad + markH + gap, plateY + pad + (lockH - wordH) / 2, wordW, wordH);
+      const lockX = (canvas.width - lockW) / 2;
+      const lockY = 150;
+      const ink = lightArtwork(mark);
+      const letters = lightArtwork(word);
+      ctx.drawImage(ink, lockX, lockY, markH, markH);
+      ctx.drawImage(letters, lockX + markH + gap, lockY + (markH - wordH) / 2, wordW, wordH);
       ctx.fillStyle = "#d4d2cc";
-      ctx.font = '700 68px "Chakra Petch", sans-serif';
+      ctx.font = `700 108px "${display}", sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("THE FUTURE IS NEAR", canvas.width / 2, plateY + plateH + 78);
+      ctx.fillText("THE FUTURE IS NEAR", canvas.width / 2, 680);
       ctx.fillStyle = "#c94a1a";
-      ctx.fillRect(plateX, plateY + plateH + 118, plateW, 10);
+      ctx.fillRect(lockX, 760, lockW, 16);
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
       texture.needsUpdate = true;
       setMap(texture);
-    }).catch(() => undefined);
+    };
+    Promise.all([mark.decode(), word.decode()])
+      .then(() => {
+        if (dead) return;
+        paint();
+      })
+      .catch(() => undefined);
+    const fonts = document.fonts.load(`700 84px "${display}"`).catch(() => undefined);
+    const raced = Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 400))]);
+    raced.then(() => {
+      if (!dead && mark.complete && word.complete) paint();
+    });
     return () => {
       dead = true;
     };
   }, []);
   return (
-    <mesh position={[24, 3.2, 16]} rotation={[0, 0.9, 0]}>
-      <planeGeometry args={[9, 5]} />
-      {map ? <meshBasicMaterial map={map} toneMapped={false} /> : <meshStandardMaterial color="#141416" roughness={0.6} />}
+    <mesh position={[0, 4.8, 8]} rotation={[0, -0.57, 0]} raycast={() => undefined}>
+      <planeGeometry args={[11, 6.2]} />
+      {map ? <meshBasicMaterial key="painted" map={map} toneMapped={false} side={THREE.DoubleSide} /> : <meshBasicMaterial key="plain" color="#141416" toneMapped={false} side={THREE.DoubleSide} />}
     </mesh>
   );
 }
@@ -1439,16 +1459,17 @@ function AgentMesh({
     cloned.traverse((node) => {
       const mesh = node as THREE.Mesh;
       if (mesh.isMesh) {
-        mesh.frustumCulled = true;
+        mesh.frustumCulled = false;
         mesh.raycast = () => undefined;
       }
     });
     return cloned;
   }, [gltf.scene, skin]);
-  const bodyScale = useMemo(() => {
+  const bodyFit = useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene);
     const height = box.max.y - box.min.y;
-    return height > 0.05 ? AGENT_SCALE / height : AGENT_SCALE;
+    const scale = height > 0.05 ? AGENT_SCALE / height : AGENT_SCALE;
+    return { scale, foot: box.min.y };
   }, [scene]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
   const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
@@ -1679,7 +1700,8 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
-        scale={mode === "play" && !poster && !lineup ? bodyScale * 0.62 : bodyScale}
+        position={[0, -(mode === "play" && !poster && !lineup ? bodyFit.scale * 0.62 : bodyFit.scale) * bodyFit.foot, 0]}
+        scale={mode === "play" && !poster && !lineup ? bodyFit.scale * 0.62 : bodyFit.scale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           showPick(agent.name, poseRef.current.x, poseRef.current.z);
@@ -1692,11 +1714,13 @@ function AgentMesh({
       />
       <group ref={tag} position={[0, mode === "play" && !poster && !lineup ? AGENT_SCALE * 0.62 + 0.22 : AGENT_SCALE + 0.35, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+          <div className="name-stack">
+          {line ? <div className="say-bubble">{line}</div> : null}
           <div ref={tagEl} className="name-tag" data-agent={agent.name}>
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
           </div>
-          {line ? <div className="say-bubble">{line}</div> : null}
+          </div>
         </Html>
       </group>
     </group>
@@ -2121,52 +2145,42 @@ function CameraDriver({
         return;
       }
       depart.current = null;
-      if (room) {
-        const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
-        const inside = frameMode === "in" && !shotLock;
+      if (room && frameMode === "in" && !shotLock) {
+        const shot = INTERIOR_SHOTS[room.id];
         if (shot) {
-          const framed = inside ? fitInterior(camera, shot) : shot;
+          const framed = fitInterior(camera, shot);
           eye.set(framed.eye[0], framed.eye[1], framed.eye[2]);
           aim.set(framed.aim[0], framed.aim[1], framed.aim[2]);
-          fovTarget.current = framed.fov ?? shot.fov ?? 32;
+          fovTarget.current = framed.fov ?? shot.fov ?? 50;
         } else {
-          eye.set(room.x, 2.6, room.z + 8);
-          aim.set(room.x, 1.8, room.z);
+          eye.set(room.x, 2.2, room.z + 4.2);
+          aim.set(room.x, 1.7, room.z - 2);
+          fovTarget.current = 50;
+        }
+        const blend = snapInside.current || reduce.current ? 1 : 1 - Math.exp(-delta * 8);
+        if (snapInside.current) snapInside.current = false;
+        rig.target.lerp(aim, blend);
+        camera.position.lerp(eye, blend);
+        if (camera.position.distanceTo(eye) < 0.35) {
+          camera.position.copy(eye);
+          rig.target.copy(aim);
+          latched.current = focusId;
+        }
+        camera.lookAt(rig.target);
+        dampFov(camera, fovTarget.current, delta, reduce.current);
+        const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+        probe.focusId = focusId;
+        probe.camera = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+        return;
+      }
+      if (room) {
+        const shot = EXTERIOR_SHOTS[room.id];
+        if (shot) {
+          eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
+          aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+          fovTarget.current = shot.fov ?? 42;
         }
         ignoreId = room.id;
-        if (frameMode === "out" || latched.current !== focusId && camera.position.distanceTo(eye) > 0.55) {
-          latched.current = null;
-        }
-        const settled = inside && (latched.current === focusId || camera.position.distanceTo(eye) < 0.55);
-        if (controls && inside && !settled) controls.enabled = false;
-        if (controls && frameMode === "out") {
-          controls.enabled = true;
-          controls.minDistance = 8;
-          controls.maxDistance = 360;
-        }
-        if (settled && controls) {
-          latched.current = focusId;
-          controls.enabled = true;
-          controls.enableDamping = true;
-          controls.dampingFactor = 0.075;
-          controls.minDistance = 1.4;
-          controls.maxDistance = INTERIOR_MAX_DISTANCE;
-          controls.enablePan = false;
-          controls.minPolarAngle = 0.55;
-          controls.maxPolarAngle = 1.55;
-          controls.target.set(peek ? peek.x : aim.x, peek ? peek.y : aim.y, peek ? peek.z : aim.z);
-          clampInteriorCamera(camera.position, room);
-          interiorOffset.current.copy(camera.position).sub(controls.target);
-          const span = interiorOffset.current.length();
-          if (span > INTERIOR_MAX_DISTANCE && span > 0.001) {
-            interiorOffset.current.setLength(INTERIOR_MAX_DISTANCE);
-            camera.position.copy(controls.target).add(interiorOffset.current);
-            clampInteriorCamera(camera.position, room);
-          }
-          controls.update();
-          dampFov(camera, fovTarget.current, delta, reduce.current);
-          return;
-        }
         drive = true;
       }
     }
@@ -2719,13 +2733,21 @@ export default function CityMap({
   useEffect(() => {
     const coreArrived = () => performance.getEntriesByType("resource").some((entry) => entry.name.includes("station-core"));
     const ready = (step: { active?: boolean; total?: number }) => step.active === false && (step.total ?? 0) > 0 && coreArrived();
-    if (pendingLoadSteps().some(ready)) setDetail(true);
+    let timer = 0;
+    const arm = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => setDetail(true), 1600);
+    };
+    if (pendingLoadSteps().some(ready)) arm();
     const onLoad = (event: Event) => {
       const step = (event as CustomEvent<{ active?: boolean; total?: number }>).detail;
-      if (step && ready(step)) setDetail(true);
+      if (step && ready(step)) arm();
     };
     window.addEventListener("fe2vi-load", onLoad);
-    return () => window.removeEventListener("fe2vi-load", onLoad);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("fe2vi-load", onLoad);
+    };
   }, []);
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
@@ -2765,15 +2787,17 @@ export default function CityMap({
       <InteriorBackdrop id={openInterior} />
       <BuildingVolumes hideId={openInterior} />
       <PerfProbe />
+      {openInterior ? (
+        <Suspense fallback={null}>
+          <InteriorBoundary onLeave={() => onClearFocus?.()}>
+            <Interiors focusId={openInterior} frameMode="in" />
+          </InteriorBoundary>
+        </Suspense>
+      ) : null}
       <Suspense fallback={null}>
         {detail ? <Nature /> : null}
         {detail ? <Props /> : null}
         {detail ? <Kits url={villageKitsUrl(tier)} onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} /> : null}
-        {detail && openInterior ? (
-          <InteriorBoundary onLeave={() => onClearFocus?.()}>
-            <Interiors focusId={openInterior} frameMode="in" />
-          </InteriorBoundary>
-        ) : null}
       </Suspense>
       <group position={[-42, 6.4, 33]}>
         <mesh>
@@ -2856,7 +2880,7 @@ export default function CityMap({
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} quality={quality} />
       <OrbitControls
         makeDefault
-        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}
+        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street && !(frameMode === "in" && Boolean(focusId))}
         enablePan
         enableZoom
         enableRotate
@@ -2864,7 +2888,6 @@ export default function CityMap({
         dampingFactor={0.08}
         autoRotate={false}
         touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
-        target={[overviewAim.x, overviewAim.y, overviewAim.z]}
         minPolarAngle={0.35}
         maxPolarAngle={1.5}
         minDistance={lean ? 6 : 8}

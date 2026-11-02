@@ -323,7 +323,7 @@ export function LobbyBoards() {
               <li key={row.name}>
                 <span className="num">{index + 1}</span>
                 <span>{row.name}</span>
-                <span className="num">{row.points} points</span>
+                <span className="num">{row.points} {row.points === 1 ? "point" : "points"}</span>
               </li>
             ))
           )}

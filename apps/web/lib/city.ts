@@ -413,7 +413,7 @@ export function padStand(index: number) {
   return {
     x: door[0] + side,
     y: 0.02,
-    z: origin[1] + footprint.hz * 0.625 + 0.75,
+    z: origin[1] + footprint.hz * 0.625 + 2.2,
     rot: Math.PI,
   };
 }

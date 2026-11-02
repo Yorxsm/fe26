@@ -52,7 +52,7 @@ function matchLobbyMaterial(material: THREE.Material, meshName: string) {
   return copy;
 }
 
-function RoomMesh({ url }: { url: string }) {
+function RoomMesh({ url, roomId }: { url: string; roomId: string }) {
   const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
@@ -78,6 +78,16 @@ function RoomMesh({ url }: { url: string }) {
     });
     return cloned;
   }, [gltf.scene]);
+  useLayoutEffect(() => {
+    let meshes = 0;
+    scene.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh && mesh.visible) meshes += 1;
+    });
+    const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+    probe.meshes = meshes;
+    probe.roomId = roomId;
+  }, [roomId, scene]);
   return <primitive object={scene} />;
 }
 
@@ -617,7 +627,7 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
       <group position={room.position}>
         <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.15 : 2.6} />
         <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.85 : 1.85} />
-        <RoomMesh key={room.url} url={room.url} />
+        <RoomMesh key={`${focusId}-${room.url}`} url={room.url} roomId={focusId} />
         {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
           <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />
         ))}

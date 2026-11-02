@@ -41,6 +41,13 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run build
+      - name: Chrome
+        uses: browser-actions/setup-chrome@v1
+      - name: Room interior is not empty
+        run: |
+          npx next start -p 3210 &
+          for i in $(seq 1 40); do curl -sf -o /dev/null http://127.0.0.1:3210/ && break; sleep 1; done
+          node scripts/check-room.mjs http://127.0.0.1:3210
 
   secrets:
     runs-on: ubuntu-latest

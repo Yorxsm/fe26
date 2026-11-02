@@ -327,7 +327,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const drain = () => {
       if (queue.length) {
         const next = queue.shift() ?? 0;
-        setShownProgress(Math.round(next));
+        setShownProgress((current) => Math.max(current, Math.round(next)));
         frame = window.requestAnimationFrame(drain);
         return;
       }
@@ -737,7 +737,15 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
-              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} matches={matches} queues={queues} claims={claims} />
+              <RoomHud
+                roomId={focusId}
+                tip={hotspot}
+                onLeave={leaveRoom}
+                matches={matches}
+                queues={queues}
+                claims={claims}
+                names={Object.fromEntries(visitors.map((visitor) => [visitor.accountId, visitor.name]))}
+              />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
             {mapStuck && !mapReady ? (

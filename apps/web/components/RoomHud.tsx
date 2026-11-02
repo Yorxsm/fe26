@@ -138,11 +138,21 @@ function liveDeadline(matches: RoomMatch[] | null, slug: string) {
 
 export type WarClaimRow = { handle: string; points: number; challenge: string };
 
-function peopleHere(matches: RoomMatch[] | null, queues: Record<string, string[]>, slug: string) {
+function displayName(handle: string, names: Record<string, string>) {
+  const known = names[handle];
+  if (known) return known;
+  return handle
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function peopleHere(matches: RoomMatch[] | null, queues: Record<string, string[]>, slug: string, names: Record<string, string>) {
   if (!matches || slug === "all") return [];
   const seated = matches.filter((match) => match.status === "live" && match.arenaId === slug).flatMap((match) => match.seats);
   const waiting = queues[slug] ?? [];
-  return [...new Set([...seated, ...waiting].filter(Boolean))];
+  return [...new Set([...seated, ...waiting].filter(Boolean).map((handle) => displayName(handle, names)))];
 }
 
 function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: string) {
@@ -181,6 +191,7 @@ export function RoomHud({
   matches,
   queues,
   claims,
+  names,
   onLeave,
 }: {
   roomId: string;
@@ -188,6 +199,7 @@ export function RoomHud({
   matches: RoomMatch[] | null;
   queues: Record<string, string[]>;
   claims: WarClaimRow[];
+  names: Record<string, string>;
   onLeave: () => void;
 }) {
   const about = ABOUT[roomId];
@@ -209,7 +221,7 @@ export function RoomHud({
   const slug = about?.slug ?? "all";
   const slot = clocks[slug];
   const activity = roomActivity(matches, claims, slug);
-  const here = peopleHere(matches, queues, slug);
+  const here = peopleHere(matches, queues, slug, names);
 
   useEffect(() => {
     const base = apiBase();

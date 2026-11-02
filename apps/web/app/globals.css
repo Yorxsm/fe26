@@ -1849,7 +1849,8 @@ button.pronounce:focus-visible {
     overflow: visible;
     background: transparent;
   }
-  .room-hud.is-sheet > :not(.room-sheet-toggle) { display: none; }
+  .room-hud.is-sheet > :not(.room-sheet-toggle):not(.room-leave) { display: none; }
+  .room-hud.is-sheet .room-leave,
   .room-sheet-toggle { width: 100%; }
 }
 .room-panel {
@@ -1944,13 +1945,17 @@ button.pronounce:focus-visible {
 .room-activity h2 { margin: 0; font-size: var(--type-body); font-weight: 700; }
 .room-activity p, .room-activity li { margin: 0; }
 .room-activity ul { margin: 0; padding-left: 1.1rem; }
+.name-stack { display: grid; justify-items: center; gap: 4px; }
 .say-bubble {
-  margin-top: 4px;
-  padding: 2px 6px;
+  margin: 0 0 4px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: #141416;
   color: #f4efe6;
+  font-family: var(--body);
+  font-weight: 500;
   font-size: var(--type-caption);
+  line-height: 16px;
 }
 @media (max-height: 620px) {
   .room-board { max-height: 38vh; }

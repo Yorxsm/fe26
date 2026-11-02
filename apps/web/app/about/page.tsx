@@ -8,7 +8,7 @@ export default function AboutPage() {
       <section className="card">
         <h2>NEAR Protocol</h2>
         <p className="meta">
-          The village mural uses the header symbol and wordmark from https://near.org/ on 28 Oct 2026. The path data is unchanged. The fill is #000000, the colour that header uses. Clear space around the lockup is one symbol-height.
+          The village mural uses the header symbol and wordmark from https://near.org/ on 28 Oct 2026. The path data is unchanged. The file fill is #000000. The plaza panel paints that artwork #d4d2cc on #141416. Clear space around the lockup is one symbol-height.
         </p>
       </section>
       <section className="card">

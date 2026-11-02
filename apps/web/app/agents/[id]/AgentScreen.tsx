@@ -55,7 +55,7 @@ export function AgentScreen() {
           <p>
             {name}
             {agent.rank ? ` · rank ${agent.rank}` : ""}
-            {typeof agent.points === "number" ? ` · ${agent.points} points` : ""}
+            {typeof agent.points === "number" ? ` · ${agent.points} ${agent.points === 1 ? "point" : "points"}` : ""}
           </p>
           {agent.description ? <p>{agent.description}</p> : null}
           {agent.capabilities?.length ? <p className="meta">Capabilities: {agent.capabilities.join(", ")}</p> : null}
