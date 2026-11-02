@@ -33,6 +33,7 @@ FE2VI_FACTORY_ID = "factory.fe2vi.testnet"
 FE2VI_REGISTRY_ID = "registry.fe2vi.testnet"
 FE2VI_HEIST_ID = "heist.fe2vi.testnet"
 # Deployed to api.fe2vi.space (see routes above). Testnet only.
-# The Intents API key is a secret. Do not put it in [vars]. Live calls stay off.
+# The Intents partner key is a secret. Do not put it in [vars].
+# It is used only for the read-only policy check at link time. Execution calls stay off.
 FE2VI_INTENTS_LIVE = "0"
 NEAR_INTENTS_AGENT_API_URL = "https://api.agentsonintents.com"

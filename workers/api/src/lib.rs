@@ -185,6 +185,40 @@ mod edge {
                     arena.book = book;
                 }
             }
+            let route_path = route.split('?').next().unwrap_or(route.as_str());
+            let policy_check = if method == "POST" && route_path == "/v1/agents/me/hyperliquid-link"
+            {
+                let authorized = crate::agents::authed_id(
+                    &arena,
+                    &Incoming {
+                        method,
+                        path: &route,
+                        body: &body,
+                        authorization: authorization.as_deref(),
+                        ingest_token: ingest_token.as_deref(),
+                        policy_check: None,
+                    },
+                )
+                .is_some();
+                let agent_id = serde_json::from_str::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("nearIntentsAgentId")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| crate::live::valid_near_intents_agent_id(value))
+                            .map(str::to_string)
+                    });
+                match (authorized, agent_id) {
+                    (true, Some(agent_id)) => {
+                        Some(crate::live_edge::policy_check(&self.env, &agent_id).await)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let live_read = method == "GET"
                 && (route.starts_with("/v1/village/")
                     || route.starts_with("/v1/cup/")
@@ -206,6 +240,7 @@ mod edge {
                     body: &body,
                     authorization: authorization.as_deref(),
                     ingest_token: ingest_token.as_deref(),
+                    policy_check: policy_check.as_ref(),
                 },
             );
             match outcome {

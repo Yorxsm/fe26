@@ -4,7 +4,8 @@
 
 FE2VI_NETWORK=testnet
 FE2VI_INGEST_TOKEN=
-# Intents key is a Wrangler secret, not a var. Leave empty here.
+# Intents partner key is a Wrangler secret, not a var. The Worker uses it only to read policy status.
+# Leave empty here to disable live linking.
 NEAR_INTENTS_AGENT_API_KEY=
 NEAR_INTENTS_AGENT_API_URL=https://api.agentsonintents.com
 FE2VI_INTENTS_LIVE=0

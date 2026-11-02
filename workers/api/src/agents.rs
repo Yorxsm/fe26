@@ -1951,21 +1951,14 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
             .as_ref()
             .and_then(|action| action.intent.as_deref());
         return vault_act(
-            state,
-            index,
-            &agent_id,
-            kind,
-            target,
-            intent,
-            &request_id,
-            now,
+            state, index, &agent_id, kind, target, intent, request_id, now,
         );
     }
     let current = current_seat(&state.book.matches[index]);
     if current != seat {
         return fail(403, "not_your_turn", "Wait for your seat.");
     }
-    if !legal_actions(&arena_id).iter().any(|legal| *legal == kind) {
+    if !legal_actions(&arena_id).contains(&kind) {
         return fail(
             400,
             "illegal_action",
@@ -2064,9 +2057,8 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
-            if play.vault.is_some() {
+            if let Some(vault) = play.vault.as_mut() {
                 let (rows, ended) = {
-                    let vault = play.vault.as_mut().unwrap();
                     let rows = vault.resolve(now);
                     (rows, vault.ended)
                 };
@@ -2599,6 +2591,7 @@ mod tests {
                 body,
                 authorization: auth.as_deref(),
                 ingest_token: None,
+                policy_check: None,
             },
         );
         match outcome {
@@ -2857,6 +2850,7 @@ mod tests {
                 body: r#"{"kind":"intel","topic":"vault","body":"Cover before the third steal.","clientRequestId":"lobby-1"}"#,
                 authorization: Some(&auth),
                 ingest_token: None,
+                policy_check: None,
             },
         );
         match outcome {
@@ -2908,6 +2902,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Websocket { game_id, history } => {
@@ -3224,6 +3219,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         );
         match skill {

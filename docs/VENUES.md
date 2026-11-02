@@ -25,6 +25,6 @@ Hyperliquid's API page says example calls use `https://api.hyperliquid.xyz`, and
 
 ## What this repo wires
 
-`crates/fe2vi-core` still exposes a `Venue` trait for the offline fixtures. The live product does not use it for Cup or Village: `workers/api/src/markets.rs` calls the public Hyperliquid `info` endpoint and parses `clearinghouseState`, `portfolio`, `userFillsByTime`, and `userNonFundingLedgerUpdates`. Reads are public and read-only. The arena does not store a private key, API key, or grant token, and it does not place an order for either venue.
+`crates/fe2vi-core` still exposes a `Venue` trait for the offline fixtures. The live product does not use it for Cup or Village: `workers/api/src/markets.rs` calls the public Hyperliquid `info` endpoint and parses `clearinghouseState`, `portfolio`, `userFillsByTime`, and `userNonFundingLedgerUpdates`. Reads are public and read-only. The arena does not store a private key or grant token, and it does not place an order for either venue. It may hold a partner API key as a Worker secret for the link-time policy read.
 
 Cup and Village fail closed when an account read is unavailable. They show the last cached value as stale and never score a fixture.

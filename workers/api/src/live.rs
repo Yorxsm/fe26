@@ -20,6 +20,63 @@ const CHALLENGE_SECS: u64 = 600;
 const SNAPSHOT_LIMIT: usize = 500;
 const FILL_LIMIT: usize = 400;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicySnapshot {
+    pub agent_id: String,
+    pub status: String,
+    pub provider_policy_synced: bool,
+    pub revision: Option<u64>,
+    pub policy_hash: Option<String>,
+    pub wallet_id: Option<String>,
+    pub wallet_near_account: Option<String>,
+    pub checked_unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PolicyCheck {
+    Active(PolicySnapshot),
+    Inactive(String),
+    Unavailable(String),
+}
+
+impl PolicyCheck {
+    pub fn active(snapshot: PolicySnapshot) -> Self {
+        if snapshot.status == "APPLIED" && snapshot.provider_policy_synced {
+            Self::Active(snapshot)
+        } else {
+            Self::Inactive(format!(
+                "NEAR Intents policy is {} with provider_policy_synced={}.",
+                snapshot.status, snapshot.provider_policy_synced
+            ))
+        }
+    }
+}
+
+pub fn valid_near_intents_agent_id(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn policy_snapshot_from_view(
+    agent_id: &str,
+    view: &serde_json::Value,
+    checked_unix: u64,
+) -> PolicySnapshot {
+    PolicySnapshot {
+        agent_id: agent_id.to_string(),
+        status: view["status"]
+            .as_str()
+            .unwrap_or("NONE")
+            .to_ascii_uppercase(),
+        provider_policy_synced: view["provider_policy_synced"].as_bool().unwrap_or(false),
+        revision: view["revision"].as_u64(),
+        policy_hash: view["policy_hash"].as_str().map(str::to_string),
+        wallet_id: view["wallet_id"].as_str().map(str::to_string),
+        wallet_near_account: None,
+        checked_unix,
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveBook {
@@ -47,6 +104,18 @@ pub struct LiveLink {
     pub near_account: String,
     pub derivation_path: String,
     pub hyperliquid_account: String,
+    #[serde(default)]
+    pub near_intents_agent_id: String,
+    #[serde(default)]
+    pub policy_status: String,
+    #[serde(default)]
+    pub provider_policy_synced: bool,
+    #[serde(default)]
+    pub policy_revision: Option<u64>,
+    #[serde(default)]
+    pub policy_hash: Option<String>,
+    #[serde(default)]
+    pub policy_checked_unix: u64,
     pub verified: bool,
     pub linked_unix: u64,
     pub last_sync_unix: u64,
@@ -69,6 +138,8 @@ pub struct LinkChallenge {
     pub near_account: String,
     pub derivation_path: String,
     pub hyperliquid_account: String,
+    #[serde(default)]
+    pub near_intents_agent_id: String,
     pub message: String,
     pub expires_unix: u64,
 }
@@ -168,6 +239,12 @@ pub struct LinkUpdate {
     pub ledger: Vec<LedgerUpdate>,
 }
 
+impl LiveLink {
+    pub fn policy_active(&self) -> bool {
+        self.policy_status == "APPLIED" && self.provider_policy_synced
+    }
+}
+
 impl LiveBook {
     pub fn link(&self, agent_id: &str) -> Option<&LiveLink> {
         self.links.iter().find(|link| link.agent_id == agent_id)
@@ -245,6 +322,8 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
         derivation_path: Option<String>,
         #[serde(rename = "hyperliquidAccount")]
         hyperliquid_account: Option<String>,
+        #[serde(rename = "nearIntentsAgentId")]
+        near_intents_agent_id: Option<String>,
     }
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(
@@ -259,7 +338,7 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
             return fail(
                 400,
                 "validation_error",
-                "Send nearAccount, derivationPath, and hyperliquidAccount.",
+                "Send nearAccount, derivationPath, hyperliquidAccount, and nearIntentsAgentId.",
             )
         }
     };
@@ -306,6 +385,21 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
         Ok(value) => value,
         Err(message) => return fail(400, "validation_error", message),
     };
+    let Some(near_intents_agent_id) = body
+        .near_intents_agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return fail(400, "validation_error", "nearIntentsAgentId is required.");
+    };
+    if !valid_near_intents_agent_id(near_intents_agent_id) {
+        return fail(
+            400,
+            "validation_error",
+            "nearIntentsAgentId is 64 hex characters.",
+        );
+    }
     if state
         .live
         .links
@@ -321,7 +415,15 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
     let handle = handle_of(state, &agent_id);
     let nonce = random_hex(16);
     let expires_unix = now.saturating_add(CHALLENGE_SECS);
-    let message = link_message(&handle, &near_account, path, &address, &nonce, expires_unix);
+    let message = link_message(
+        &handle,
+        &near_account,
+        path,
+        &address,
+        near_intents_agent_id,
+        &nonce,
+        expires_unix,
+    );
     state.live.challenges.retain(|row| row.agent_id != agent_id);
     state.live.challenges.push(LinkChallenge {
         nonce: nonce.clone(),
@@ -330,6 +432,7 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
         near_account,
         derivation_path: path.to_string(),
         hyperliquid_account: address,
+        near_intents_agent_id: near_intents_agent_id.to_string(),
         message: message.clone(),
         expires_unix,
     });
@@ -357,6 +460,8 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         derivation_path: Option<String>,
         #[serde(rename = "hyperliquidAccount")]
         hyperliquid_account: Option<String>,
+        #[serde(rename = "nearIntentsAgentId")]
+        near_intents_agent_id: Option<String>,
     }
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(
@@ -371,7 +476,7 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             return fail(
                 400,
                 "validation_error",
-                "Send nonce, nearAccount, derivationPath, hyperliquidAccount, and signature.",
+                "Send nonce, nearAccount, derivationPath, hyperliquidAccount, nearIntentsAgentId, and signature.",
             )
         }
     };
@@ -403,6 +508,8 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             != Some(challenge.derivation_path.as_str())
         || body.hyperliquid_account.as_deref().map(str::trim)
             != Some(challenge.hyperliquid_account.as_str())
+        || body.near_intents_agent_id.as_deref().map(str::trim)
+            != Some(challenge.near_intents_agent_id.as_str())
     {
         return fail(
             400,
@@ -430,6 +537,56 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             "That Hyperliquid account is already linked to another agent.",
         );
     }
+    let policy = match incoming.policy_check {
+        Some(PolicyCheck::Active(snapshot))
+            if snapshot.agent_id != challenge.near_intents_agent_id =>
+        {
+            return fail(
+                403,
+                "policy_mismatch",
+                "The NEAR Intents policy check did not match nearIntentsAgentId.",
+            )
+        }
+        Some(PolicyCheck::Active(snapshot))
+            if snapshot.status != "APPLIED" || !snapshot.provider_policy_synced =>
+        {
+            return fail(
+                403,
+                "policy_not_ready",
+                "The NEAR Intents policy is not APPLIED and synced.",
+            )
+        }
+        Some(PolicyCheck::Active(snapshot))
+            if snapshot.wallet_near_account.as_deref() != Some(challenge.near_account.as_str()) =>
+        {
+            if snapshot.wallet_near_account.is_none() {
+                return fail(
+                    503,
+                    "policy_verification_unavailable",
+                    "The NEAR Intents provider did not return the agent wallet's near_account_id.",
+                );
+            }
+            return fail(
+                403,
+                "policy_account_mismatch",
+                "nearAccount does not match the NEAR Intents agent wallet.",
+            );
+        }
+        Some(PolicyCheck::Active(snapshot)) => snapshot.clone(),
+        Some(PolicyCheck::Inactive(message)) => {
+            return fail(403, "policy_not_ready", message.as_str())
+        }
+        Some(PolicyCheck::Unavailable(message)) => {
+            return fail(503, "policy_verification_unavailable", message.as_str())
+        }
+        None => {
+            return fail(
+                503,
+                "policy_verification_unavailable",
+                "Live linking needs a NEAR Intents policy check from the API edge.",
+            )
+        }
+    };
     state.live.challenges.remove(index);
     let handle = challenge.handle.clone();
     let link = LiveLink {
@@ -438,6 +595,12 @@ fn link(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         near_account: challenge.near_account.clone(),
         derivation_path: challenge.derivation_path.clone(),
         hyperliquid_account: challenge.hyperliquid_account.clone(),
+        near_intents_agent_id: policy.agent_id.clone(),
+        policy_status: policy.status.clone(),
+        provider_policy_synced: policy.provider_policy_synced,
+        policy_revision: policy.revision,
+        policy_hash: policy.policy_hash.clone(),
+        policy_checked_unix: policy.checked_unix,
         verified: true,
         linked_unix: now,
         last_sync_unix: 0,
@@ -571,6 +734,13 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
             403,
             "link_unverified",
             "The Hyperliquid link is not verified.",
+        );
+    }
+    if !link.policy_active() {
+        return fail(
+            403,
+            "policy_not_verified",
+            "Relink after the NEAR Intents policy reports APPLIED and provider_policy_synced.",
         );
     }
     let round = ensure_round(state, now);
@@ -729,6 +899,7 @@ fn status(state: &ArenaState, now: u64) -> Outcome {
             "lastTickAt": if state.live.last_tick_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(state.live.last_tick_unix)) },
             "links": state.live.links.len(),
             "verifiedLinks": state.live.links.iter().filter(|link| link.verified).count(),
+            "policyVerifiedLinks": state.live.links.iter().filter(|link| link.policy_active()).count(),
             "rounds": state.live.rounds.len(),
             "fills": state.live.fills.len(),
             "mode": "live-only",
@@ -745,6 +916,12 @@ fn link_json(link: &LiveLink) -> serde_json::Value {
         "nearAccount": link.near_account,
         "derivationPath": link.derivation_path,
         "hyperliquidAccount": link.hyperliquid_account,
+        "nearIntentsAgentId": link.near_intents_agent_id,
+        "policyStatus": link.policy_status,
+        "providerPolicySynced": link.provider_policy_synced,
+        "policyRevision": link.policy_revision,
+        "policyHash": link.policy_hash,
+        "policyCheckedAt": if link.policy_checked_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(link.policy_checked_unix)) },
         "verified": link.verified,
         "linkedAt": if link.linked_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(link.linked_unix)) },
         "lastSyncAt": if link.last_sync_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(crate::agents::rfc3339(link.last_sync_unix)) },
@@ -868,7 +1045,7 @@ fn village_rows(state: &ArenaState, window: &str) -> Option<Vec<serde_json::Valu
     Some(out)
 }
 
-fn ensure_round<'a>(state: &'a mut ArenaState, now: u64) -> &'a mut CupRound {
+fn ensure_round(state: &mut ArenaState, now: u64) -> &mut CupRound {
     let slot = fe2vi_core::weekly_slot(now);
     let round_id = format!("cup_{}", slot.start_unix);
     if let Some(index) = state
@@ -1190,11 +1367,12 @@ fn link_message(
     near_account: &str,
     derivation_path: &str,
     hyperliquid_account: &str,
+    near_intents_agent_id: &str,
     nonce: &str,
     expires_unix: u64,
 ) -> String {
     format!(
-        "fe2VI link v1\nhandle: {handle}\nnear: {near_account}\npath: {derivation_path}\nhyperliquid: {hyperliquid_account}\nnonce: {nonce}\nexpires: {expires_unix}"
+        "fe2VI link v1\nhandle: {handle}\nnear: {near_account}\npath: {derivation_path}\nhyperliquid: {hyperliquid_account}\nnearIntents: {near_intents_agent_id}\nnonce: {nonce}\nexpires: {expires_unix}"
     )
 }
 
@@ -1237,7 +1415,7 @@ pub fn verify_personal_signature(address: &str, message: &str, signature: &str) 
 
 fn hex_bytes(value: &str) -> Option<Vec<u8>> {
     let value = value.trim().strip_prefix("0x").unwrap_or(value.trim());
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(value.len() / 2);
@@ -1387,6 +1565,7 @@ mod tests {
                 body: r#"{"handle":"linker","name":"Linker","description":"trades"}"#,
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         );
         let token = match registered {
@@ -1400,6 +1579,7 @@ mod tests {
             Outcome::Websocket { .. } => panic!("expected http"),
         };
         let auth = format!("Bearer {token}");
+        let near_intents_agent_id = "a".repeat(64);
         let challenge = dispatch(
             &mut state,
             &crate::logic::Incoming {
@@ -1409,10 +1589,12 @@ mod tests {
                     "nearAccount": "linker.near",
                     "derivationPath": "fe2vi/hyperliquid/linker",
                     "hyperliquidAccount": address,
+                    "nearIntentsAgentId": near_intents_agent_id,
                 })
                 .to_string(),
                 authorization: Some(&auth),
                 ingest_token: None,
+                policy_check: None,
             },
         );
         let (nonce, message) = match challenge {
@@ -1434,21 +1616,99 @@ mod tests {
         let mut signature_bytes = signature.to_bytes().to_vec();
         signature_bytes.push(recovery.to_byte());
         let signature = format!("0x{}", to_hex(&signature_bytes));
+        let link_body = serde_json::json!({
+            "nonce": nonce,
+            "nearAccount": "linker.near",
+            "derivationPath": "fe2vi/hyperliquid/linker",
+            "hyperliquidAccount": address,
+            "nearIntentsAgentId": near_intents_agent_id,
+            "signature": signature,
+        })
+        .to_string();
+        let missing = dispatch(
+            &mut state,
+            &crate::logic::Incoming {
+                method: "POST",
+                path: &format!("/v1/agents/me/hyperliquid-link?now={now}"),
+                body: &link_body,
+                authorization: Some(&auth),
+                ingest_token: None,
+                policy_check: None,
+            },
+        );
+        match missing {
+            Outcome::Http { status, body, .. } => {
+                assert_eq!(status, 503, "{body}");
+                assert!(body.contains("policy_verification_unavailable"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let inactive = PolicyCheck::Inactive("policy is SIGNED".into());
+        let rejected = dispatch(
+            &mut state,
+            &crate::logic::Incoming {
+                method: "POST",
+                path: &format!("/v1/agents/me/hyperliquid-link?now={now}"),
+                body: &link_body,
+                authorization: Some(&auth),
+                ingest_token: None,
+                policy_check: Some(&inactive),
+            },
+        );
+        match rejected {
+            Outcome::Http { status, body, .. } => {
+                assert_eq!(status, 403, "{body}");
+                assert!(body.contains("policy_not_ready"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let mismatched_account = PolicyCheck::Active(PolicySnapshot {
+            agent_id: near_intents_agent_id.clone(),
+            status: "APPLIED".into(),
+            provider_policy_synced: true,
+            revision: Some(4),
+            policy_hash: Some("hash".into()),
+            wallet_id: Some("wallet".into()),
+            wallet_near_account: Some("other.near".into()),
+            checked_unix: now,
+        });
+        let rejected_account = dispatch(
+            &mut state,
+            &crate::logic::Incoming {
+                method: "POST",
+                path: &format!("/v1/agents/me/hyperliquid-link?now={now}"),
+                body: &link_body,
+                authorization: Some(&auth),
+                ingest_token: None,
+                policy_check: Some(&mismatched_account),
+            },
+        );
+        match rejected_account {
+            Outcome::Http { status, body, .. } => {
+                assert_eq!(status, 403, "{body}");
+                assert!(body.contains("policy_account_mismatch"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let policy = PolicyCheck::Active(PolicySnapshot {
+            agent_id: near_intents_agent_id.clone(),
+            status: "APPLIED".into(),
+            provider_policy_synced: true,
+            revision: Some(4),
+            policy_hash: Some("hash".into()),
+            wallet_id: Some("wallet".into()),
+            wallet_near_account: Some("linker.near".into()),
+            checked_unix: now,
+        });
         let linked = dispatch(
             &mut state,
             &crate::logic::Incoming {
                 method: "POST",
                 path: &format!("/v1/agents/me/hyperliquid-link?now={now}"),
-                body: &serde_json::json!({
-                    "nonce": nonce,
-                    "nearAccount": "linker.near",
-                    "derivationPath": "fe2vi/hyperliquid/linker",
-                    "hyperliquidAccount": address,
-                    "signature": signature,
-                })
-                .to_string(),
+                body: &link_body,
                 authorization: Some(&auth),
                 ingest_token: None,
+                policy_check: Some(&policy),
             },
         );
         match linked {
@@ -1457,14 +1717,49 @@ mod tests {
                 let value: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(value["verified"], true);
                 assert_eq!(value["hyperliquidAccount"], address);
+                assert_eq!(value["policyStatus"], "APPLIED");
+                assert_eq!(value["providerPolicySynced"], true);
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
         assert!(state.live.links[0].verified);
+        assert!(state.live.links[0].policy_active());
         assert_eq!(
             state.book.players[0].wallets.hyperliquid_account,
             Some(address)
         );
+    }
+
+    #[test]
+    fn policy_view_requires_applied_and_synced() {
+        assert!(valid_near_intents_agent_id(&"a".repeat(64)));
+        assert!(!valid_near_intents_agent_id("abc"));
+        let view = serde_json::json!({
+            "status": "APPLIED",
+            "provider_policy_synced": true,
+            "revision": 7,
+            "policy_hash": "0xhash",
+            "wallet_id": "wallet",
+        });
+        let snapshot = policy_snapshot_from_view(&"a".repeat(64), &view, 42);
+        assert_eq!(snapshot.status, "APPLIED");
+        assert_eq!(snapshot.revision, Some(7));
+        assert_eq!(snapshot.policy_hash.as_deref(), Some("0xhash"));
+        assert_eq!(snapshot.wallet_id.as_deref(), Some("wallet"));
+        assert!(snapshot.wallet_near_account.is_none());
+        assert!(matches!(
+            PolicyCheck::active(snapshot),
+            PolicyCheck::Active(_)
+        ));
+        let unsigned = policy_snapshot_from_view(
+            &"a".repeat(64),
+            &serde_json::json!({ "status": "SIGNED", "provider_policy_synced": false }),
+            42,
+        );
+        assert!(matches!(
+            PolicyCheck::active(unsigned),
+            PolicyCheck::Inactive(_)
+        ));
     }
 
     #[test]
@@ -1476,6 +1771,12 @@ mod tests {
             near_account: "tape.near".into(),
             derivation_path: "fe2vi/hyperliquid/tape".into(),
             hyperliquid_account: "0x1111111111111111111111111111111111111111".into(),
+            near_intents_agent_id: "b".repeat(64),
+            policy_status: "APPLIED".into(),
+            provider_policy_synced: true,
+            policy_revision: Some(3),
+            policy_hash: Some("hash".into()),
+            policy_checked_unix: 1,
             verified: true,
             linked_unix: 1,
             last_sync_unix: 0,

@@ -599,6 +599,7 @@ mod tests {
                 body,
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         )
     }

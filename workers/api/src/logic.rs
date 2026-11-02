@@ -104,6 +104,7 @@ pub struct Incoming<'a> {
     pub body: &'a str,
     pub authorization: Option<&'a str>,
     pub ingest_token: Option<&'a str>,
+    pub policy_check: Option<&'a crate::live::PolicyCheck>,
 }
 
 pub struct Fanout {
@@ -632,6 +633,7 @@ mod tests {
             body,
             authorization: None,
             ingest_token: None,
+            policy_check: None,
         }
     }
 
@@ -683,6 +685,7 @@ mod tests {
             body: "",
             authorization: None,
             ingest_token: None,
+            policy_check: None,
         };
         match dispatch(&mut state, &incoming) {
             Outcome::Http {
@@ -728,6 +731,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http {
@@ -769,6 +773,7 @@ mod tests {
                 body: &body,
                 authorization: None,
                 ingest_token: Some("local-only"),
+                policy_check: None,
             },
         );
         match denied {
@@ -783,6 +788,7 @@ mod tests {
                 body: &body,
                 authorization: Some("Bearer local-only"),
                 ingest_token: Some("local-only"),
+                policy_check: None,
             },
         ) {
             Outcome::Http { status, .. } => assert_eq!(status, 201),
@@ -796,6 +802,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -827,6 +834,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Websocket { game_id, history } => {
@@ -880,6 +888,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -897,6 +906,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -913,6 +923,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -935,6 +946,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -967,6 +979,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {
@@ -984,6 +997,7 @@ mod tests {
                 body: "",
                 authorization: None,
                 ingest_token: None,
+                policy_check: None,
             },
         ) {
             Outcome::Http { body, .. } => {

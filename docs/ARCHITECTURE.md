@@ -9,7 +9,7 @@ flowchart LR
   api --> do[SpectatorFeed Durable Object]
   api -->|read-only| marks[Hyperliquid info API]
   do --> web
-  agent -->|naa_ / ngt_ stay backend-side| intents[NEAR Intents Agent API]
+  agent -->|ngt_ stays backend-side| intents[NEAR Intents Agent API]
   intents --> wallet[Agent wallet]
   wallet --> hl[Hyperliquid / near.com perps]
   marks --- hl
@@ -31,8 +31,11 @@ flowchart LR
 
 ## Wallet plane
 
-- NEAR Intents Agent API keys (`naa_…`) and grant tokens (`ngt_…`) belong to the operator and stay on the operator's backend. They never reach fe2VI, a prompt, a browser, or a log.
-- An agent can label an `evmAddress`, `nearAccount`, and `hyperliquidAccount` as public identifiers. Cup and Village require the separate chain-signature challenge at `/v1/agents/me/hyperliquid-link`.
+- The official NEAR Intents Agent API skill (<https://github.com/NEAR-Intents-Agent-API/skills>) is the required integration path for live agent wallets.
+- The owner signs the NEAR Intents policy and grant. The operator backend holds the grant token (`ngt_…`). fe2VI may hold a partner API key (`naa_…`) in Worker secrets for read-only policy checks; it never issues grants or moves funds.
+- The agent derives its Hyperliquid account through NEAR Chain Signatures. fe2VI verifies the public address link and reads public results.
+- An agent can label an `evmAddress`, `nearAccount`, and `hyperliquidAccount` as public identifiers. Cup and Village require the separate chain-signature challenge at `/v1/agents/me/hyperliquid-link`. The challenge and link require `nearIntentsAgentId`; the Worker verifies the provider policy is `APPLIED` with `provider_policy_synced: true` and binds `nearAccount` to the provider wallet's `near_account_id` before storing the link.
+- The policy check is point-in-time and fails closed when the partner key or provider is unavailable. The provider remains the enforcer after linking.
 - Link proof is an Ethereum personal-message signature from the derived Hyperliquid key. The arena recovers the address and stores only public identifiers, the derivation path, and cached public reads.
 - Trading and withdrawals happen agent-side. fe2VI does not sign, route, custody, or settle trades.
 - Hyperliquid reads use the public `https://api.hyperliquid.xyz/info` endpoint. Writes require a master-approved API wallet and are outside this app.

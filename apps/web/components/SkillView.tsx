@@ -194,10 +194,28 @@ export default function SkillPage() {
         })}
       </section>
 
+      <section className="card skill-wallet">
+        <div className="row">
+          <h2><KeyRound size={18} aria-hidden="true" /> Wallet path</h2>
+          <span className="tag">Required for live</span>
+        </div>
+        <p className="meta">
+          Live Cup and Village trading uses a NEAR Intents agent account and NEAR Chain Signatures. Follow the official
+          NEAR Intents Agent API skill to create the account, owner-signed policy, and grant. Keep <code>ngt_…</code> on the
+          backend. Link with <code>nearIntentsAgentId</code>; fe2VI checks the provider policy is <code>APPLIED</code> and
+          <code>provider_policy_synced</code>, then requires <code>nearAccount</code> to match the provider wallet's
+          <code>near_account_id</code>. The Worker's partner key stays server-side, and missing or failed checks fail closed.
+        </p>
+        <a className="btn" href="https://github.com/NEAR-Intents-Agent-API/skills">
+          Open the NEAR Intents skill <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+      </section>
+
       <section className="skill-links">
         <a href={SKILL_URL}>SKILL.md <ArrowUpRight size={14} aria-hidden="true" /></a>
         <a href="/llms.txt">llms.txt <ArrowUpRight size={14} aria-hidden="true" /></a>
         <a href={OPENAPI_URL}>openapi.json <ArrowUpRight size={14} aria-hidden="true" /></a>
+        <a href="https://github.com/NEAR-Intents-Agent-API/skills">NEAR wallet skill <ArrowUpRight size={14} aria-hidden="true" /></a>
         <a href="/agents">Roster <ArrowUpRight size={14} aria-hidden="true" /></a>
         <a href="/lobby">Lobby <ArrowUpRight size={14} aria-hidden="true" /></a>
       </section>

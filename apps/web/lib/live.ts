@@ -77,6 +77,12 @@ export type LiveAccount = {
   verified: boolean;
   hyperliquidAccount?: string;
   nearAccount?: string;
+  nearIntentsAgentId?: string;
+  policyStatus?: string;
+  providerPolicySynced?: boolean;
+  policyRevision?: number | null;
+  policyHash?: string | null;
+  policyCheckedAt?: string | null;
   accountValue?: number;
   withdrawable?: number;
   marginUsed?: number;

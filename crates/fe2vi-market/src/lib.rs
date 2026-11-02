@@ -686,6 +686,7 @@ pub fn sort_for_display(mut markets: Vec<Market>) -> Vec<Market> {
     markets
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fixture_row(
     id: &str,
     dex: &str,

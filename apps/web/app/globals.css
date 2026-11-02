@@ -2379,3 +2379,7 @@ button.pronounce:focus-visible {
   font-family: var(--mono);
   font-size: var(--type-caption);
 }
+
+.skill-wallet { gap: var(--space-md); }
+.skill-wallet p { max-width: 78ch; }
+.skill-wallet .btn { justify-self: start; }
