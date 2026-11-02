@@ -38,5 +38,9 @@ export const FRAME_BOARDS: Record<string, FrameBoard[]> = {
   "oracle-plaza": [
     { name: "HALL", at: [-0.7, 2.95, -5.78], size: [2.4, 0.9] },
     { name: "SEASON", at: [1.9, 2.95, -5.78], size: [2.4, 0.9] },
+    { name: "VAULT", at: [-1.95, 2.05, -5.72], size: [1.22, 0.76], sign: "vault" },
+    { name: "CUP", at: [-0.65, 2.05, -5.72], size: [1.22, 0.76], sign: "cup" },
+    { name: "FLOOR", at: [0.65, 2.05, -5.72], size: [1.22, 0.76], sign: "floor" },
+    { name: "WAR", at: [1.95, 2.05, -5.72], size: [1.22, 0.76], sign: "war" },
   ],
 };

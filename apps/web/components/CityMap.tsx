@@ -81,6 +81,24 @@ function BuildingVolumes({ hideId }: { hideId: string | null }) {
   );
 }
 
+function DoorMarks() {
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const point = useRef(new THREE.Vector3());
+  useFrame(() => {
+    const doors = DISTRICTS.map((district) => {
+      point.current.set(district.x, 4, district.z).project(camera);
+      return {
+        id: district.id,
+        x: (point.current.x * 0.5 + 0.5) * size.width,
+        y: (1 - (point.current.y * 0.5 + 0.5)) * size.height,
+      };
+    });
+    (window as unknown as { __fe2viDoors?: unknown }).__fe2viDoors = doors;
+  });
+  return null;
+}
+
 function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
   return (
     <group>
@@ -233,8 +251,8 @@ function VillageMural() {
     };
   }, []);
   return (
-    <mesh position={[-18, 4.0, 16]} rotation={[0, -0.85, 0]} raycast={() => undefined}>
-      <planeGeometry args={[9, 5.1]} />
+    <mesh position={[-10, 6.2, 22]} rotation={[0, 0.35, 0]} raycast={() => undefined}>
+      <planeGeometry args={[10, 5.6]} />
       {map ? <meshBasicMaterial key="painted" map={map} toneMapped={false} side={THREE.DoubleSide} /> : <meshBasicMaterial key="plain" color="#141416" toneMapped={false} side={THREE.DoubleSide} />}
     </mesh>
   );
@@ -1153,12 +1171,14 @@ function Station({
   focusId,
   beatPrefix,
   concealed,
+  showLabels,
 }: {
   url: string;
   onPick: (district: District) => void;
   focusId: string | null;
   beatPrefix: string | null;
   concealed: boolean;
+  showLabels: boolean;
 }) {
   const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
@@ -1229,6 +1249,19 @@ function Station({
             }
             node = node.parent;
           }
+          const point = event.point;
+          let best: District | null = null;
+          let bestDistance = 16;
+          for (const district of DISTRICTS) {
+            const distance = Math.hypot(point.x - district.x, point.z - district.z);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              best = district;
+            }
+          }
+          if (!best) return;
+          event.stopPropagation();
+          onPick(best);
         }}
       />
       {DISTRICTS.map((district) => {
@@ -1250,9 +1283,11 @@ function Station({
                 <planeGeometry args={[plate, 0.12]} />
                 <meshStandardMaterial color="#c94a1a" />
               </mesh>
-              <Text font={DISPLAY_FONT} fontSize={0.72} color="#d4d2cc" anchorX="center" anchorY="middle" maxWidth={plate - 0.8}>
-                {label}
-              </Text>
+              {showLabels ? (
+                <Text font={DISPLAY_FONT} fontSize={0.72} color="#d4d2cc" anchorX="center" anchorY="middle" maxWidth={plate - 0.8}>
+                  {label}
+                </Text>
+              ) : null}
             </Billboard>
             {door ? (
               <group
@@ -2808,9 +2843,11 @@ export default function CityMap({
           <boxGeometry args={[7.2, 1.35, 0.16]} />
           <meshStandardMaterial color="#e2b340" metalness={0.35} roughness={0.48} emissive="#ffc14a" emissiveIntensity={0.32} />
         </mesh>
-        <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
-          VAULT
-        </Text>
+        {detail ? (
+          <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
+            VAULT
+          </Text>
+        ) : null}
       </group>
       <Smoke position={[-34, 13.4, -26]} />
       <WindowGlow />
@@ -2828,6 +2865,7 @@ export default function CityMap({
       </mesh>
       <VillageMural />
       <BuildingHits onPick={onPick} />
+      <DoorMarks />
       <PickRing />
       {lean ? (
         <pointLight position={[0, 8, 12]} intensity={18} color="#ffb070" distance={80} decay={2} />
@@ -2846,7 +2884,7 @@ export default function CityMap({
           <meshBasicMaterial color="#101018" />
         </mesh>
       ) : null}
-      <Station url={villageCoreUrl(tier)} onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
+      <Station url={villageCoreUrl(tier)} onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} showLabels={detail} />
       <DrawProbe />
       <FrameAudit />
       {crowdOn ? (

@@ -80,6 +80,7 @@ function send(method, params = {}) {
 await send("Page.enable");
 await send("Runtime.enable");
 await send("Page.bringToFront");
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 await send("Page.navigate", { url: `${origin}/?room=lobby` });
 
 const expr = `window.__fe2viRoom ?? null`;
@@ -94,46 +95,70 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
 }
 const direct = sample;
 await send("Page.navigate", { url: `${origin}/` });
-await delay(1500);
-await send("Runtime.evaluate", {
-  expression: `[...document.querySelectorAll('button')].find((button) => /Enter as spectator/i.test(button.textContent))?.click()`,
-});
-await delay(400);
-await send("Runtime.evaluate", {
-  expression: `[...document.querySelectorAll('button')].find((button) => /Skip/i.test(button.textContent))?.click()`,
-});
-await delay(400);
-await send("Runtime.evaluate", {
-  expression: `[...document.querySelectorAll('button')].find((button) => /Stay on the overview/i.test(button.textContent))?.click()`,
-});
-await delay(3500);
-const box = await send("Runtime.evaluate", {
-  expression: `(() => { const canvas = document.querySelector('canvas'); const rect = canvas.getBoundingClientRect(); return { x: rect.x, y: rect.y, w: rect.width, h: rect.height }; })()`,
-  returnByValue: true,
-});
-const canvas = box.result?.value ?? { x: 0, y: 0, w: 1440, h: 900 };
-const spots = [
-  [0.7, 0.42],
-  [0.62, 0.46],
-  [0.5, 0.5],
-  [0.35, 0.48],
-];
+const clickText = async (pattern) =>
+  send("Runtime.evaluate", {
+    expression: `[...document.querySelectorAll('button')].find((button) => ${pattern}.test(button.textContent))?.click()`,
+  });
+let overview = false;
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  await delay(500);
+  const ready = await send("Runtime.evaluate", {
+    expression: `document.querySelector('nav.room-focus') ? 'city' : [...document.querySelectorAll('button')].some((button) => /Enter as spectator/i.test(button.textContent)) ? 'title' : ''`,
+    returnByValue: true,
+  });
+  const screen = ready.result?.value;
+  if (screen === "city") {
+    overview = true;
+    break;
+  }
+  if (screen === "title") {
+    await clickText("/Enter as spectator/i");
+    await delay(300);
+    await clickText("/Skip/i");
+    await delay(300);
+    await clickText("/Stay on the overview/i");
+  }
+}
+if (!overview) {
+  stop();
+  console.error("The overview never opened");
+  process.exit(1);
+}
+await delay(1200);
 let clicked = null;
-for (const [px, py] of spots) {
-  const x = canvas.x + canvas.w * px;
-  const y = canvas.y + canvas.h * py;
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+for (let attempt = 0; attempt < 24; attempt += 1) {
+  const mark = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const doors = window.__fe2viDoors || [];
+      const canvas = document.querySelector('canvas');
+      const order = ['oracle-plaza', 'war-room', 'cup-stadium', 'vault-quarter', 'trading-village', 'skin-forge'];
+      for (const id of order) {
+        const door = doors.find((entry) => entry.id === id);
+        if (!door) continue;
+        const el = document.elementFromPoint(door.x, door.y);
+        if (el === canvas) return { id, x: door.x, y: door.y };
+      }
+      return null;
+    })()`,
+    returnByValue: true,
+  });
+  const hall = mark.result?.value;
+  if (!hall || !Number.isFinite(hall.x) || !Number.isFinite(hall.y)) {
+    await delay(300);
+    continue;
+  }
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: hall.x, y: hall.y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: hall.x, y: hall.y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: hall.x, y: hall.y, button: "left", clickCount: 1 });
+  for (let wait = 0; wait < 10; wait += 1) {
     await delay(400);
     const result = await send("Runtime.evaluate", { expression: expr, returnByValue: true });
     clicked = result.result?.value ?? null;
     const meshes = Number(clicked?.meshes ?? 0);
     const camera = clicked?.camera;
-    if (meshes > 0 && camera && camera.y > 0.8 && camera.y < 6) break;
+    if (meshes > 0 && camera && camera.y > 0.8 && camera.y < 6 && clicked?.focusId) break;
   }
-  if (Number(clicked?.meshes ?? 0) > 0 && clicked?.camera && clicked.camera.y > 0.8 && clicked.camera.y < 6) break;
+  if (Number(clicked?.meshes ?? 0) > 0 && clicked?.focusId) break;
 }
 ws.close();
 stop();

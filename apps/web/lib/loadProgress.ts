@@ -15,6 +15,15 @@ const steps: LoadStep[] = [];
 let lastTotal = 0;
 let maxProgress = 0;
 let coreDone = false;
+let shownFloor = 0;
+
+export function loadShownFloor() {
+  return shownFloor;
+}
+
+export function rememberLoadFloor(value: number) {
+  if (value > shownFloor) shownFloor = value;
+}
 
 function publish(loaded: number, total: number, active: boolean) {
   if (coreDone) return;
@@ -46,7 +55,12 @@ DefaultLoadingManager.onStart = (item, loaded, total) => {
 };
 
 DefaultLoadingManager.onProgress = (item, loaded, total) => {
-  publish(loaded, total, true);
+  const url = typeof item === "string" ? item : "";
+  if (!coreDone && url.includes("station-core") && url.includes(".glb")) {
+    publish(1, 1, false);
+  } else {
+    publish(loaded, total, true);
+  }
   priorProgress?.(item, loaded, total);
 };
 

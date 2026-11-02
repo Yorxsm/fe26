@@ -318,6 +318,7 @@ const BOARD_ROOM: Record<string, string> = {
   "trading-village": "village",
   "war-room": "war",
   "skin-forge": "all",
+  "oracle-plaza": "all",
 };
 
 function useSeasonBoard(id: string) {
@@ -358,6 +359,12 @@ function RoomBoards({ id }: { id: string }) {
     tone: clock?.live ? "green" : "orange",
   };
   const rankRows = useSeasonBoard(id);
+  const seasonRows = rankRows.some((row) => row.value)
+    ? rankRows
+    : [
+        { label: "SEASON", value: "1", tone: "orange" as const },
+        { label: "FORMAT", value: "BEST OF 5" },
+      ];
   const quotes = mockQuotes(now ?? 0);
   const screen = (name: string, rows: BoardRow[]) => {
     const board = placed(id, name);
@@ -368,7 +375,7 @@ function RoomBoards({ id }: { id: string }) {
     return (
       <>
         {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }])}
-        {screen("SEASON", rankRows)}
+        {screen("SEASON", seasonRows)}
       </>
     );
   }
@@ -414,7 +421,7 @@ function RoomBoards({ id }: { id: string }) {
     return (
       <>
         {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
-        {screen("SEASON", rankRows)}
+        {screen("SEASON", seasonRows)}
         {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => {
           const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
           const status = !slot
@@ -438,10 +445,30 @@ function RoomBoards({ id }: { id: string }) {
     );
   }
   if (id === "oracle-plaza") {
+    const signRoom: Record<string, string> = { vault: "vault", cup: "cup", floor: "village", war: "war" };
     return (
       <>
         {screen("HALL", [clockRow, { label: "SEASON", value: "BOARD" }, { label: "MATCHES", value: "LIVE" }])}
-        {screen("SEASON", rankRows)}
+        {screen("SEASON", seasonRows)}
+        {FRAME_BOARDS["oracle-plaza"].filter((board) => board.sign).map((board) => {
+          const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
+          const status = !slot
+            ? "…"
+            : slot.live && slot.kind === "season"
+              ? "Open all season"
+              : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
+          return (
+            <Screen
+              key={board.name}
+              position={board.at}
+              size={board.size}
+              title={board.name}
+              sign={board.sign}
+              status={status}
+              tone={slot?.live ? "green" : "orange"}
+            />
+          );
+        })}
       </>
     );
   }

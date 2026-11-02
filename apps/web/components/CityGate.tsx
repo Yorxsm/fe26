@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
 import { DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
-import { pendingLoadSteps } from "@/lib/loadProgress";
+import { loadShownFloor, pendingLoadSteps, rememberLoadFloor } from "@/lib/loadProgress";
 import { fetchAgents } from "@/lib/agents";
 import { apiBase } from "@/lib/protocol";
 import { defaultSkin } from "@/lib/skin";
@@ -153,7 +153,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [hintsOpen, setHintsOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
-  const [shownProgress, setShownProgress] = useState<number | null>(null);
+  const [shownProgress, setShownProgress] = useState<number | null>(loadShownFloor() || null);
   const [mapReady, setMapReady] = useState(false);
   const [mapHeard, setMapHeard] = useState(false);
   const [mapStuck, setMapStuck] = useState(false);
@@ -193,9 +193,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const slug = new URLSearchParams(window.location.search).get("room");
     const fromSlug = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
     if (fromSlug) {
-      setFocusId(fromSlug);
-      setFrameMode("in");
-      setPhase("city");
+      selectRoom(fromSlug);
       return;
     }
     if (window.location.hash === "#title") {
@@ -228,9 +226,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       const slug = new URLSearchParams(window.location.search).get("room");
       const id = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
       if (id) {
-        setFocusId(id);
-        setFrameMode("in");
-        setPhase("city");
+        selectRoom(id);
       } else {
         setFrameMode("out");
         window.setTimeout(() => setFocusId(null), 700);
@@ -347,8 +343,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       if (queue.length) {
         const next = queue.shift() ?? 0;
         setShownProgress((current) => {
-          const nextValue = Math.max(current ?? 0, Math.round(next));
-          return nextValue === 0 ? current : nextValue;
+          const nextValue = Math.max(loadShownFloor(), current ?? 0, Math.round(next));
+          if (nextValue > 0) rememberLoadFloor(nextValue);
+          return nextValue > 0 ? nextValue : current;
         });
         frame = window.requestAnimationFrame(drain);
         return;
@@ -429,6 +426,13 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     saveSpectator(next);
   }
 
+  function selectRoom(id: string) {
+    setPhase("city");
+    setFrameMode("in");
+    setFocusId(id);
+    setFollowIndex(null);
+  }
+
   function enterCity(nextFocus: string | null) {
     const next = { ...save, entered: true };
     commit(next);
@@ -464,10 +468,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       setNote(`${district.name} is not open.`);
       return;
     }
-    setPhase("city");
-    setFrameMode("in");
-    setFocusId(district.id);
-    setFollowIndex(null);
+    selectRoom(district.id);
     setHotspot(null);
     const quests = { ...save.quests };
     if (district.id === "vault-quarter") {
