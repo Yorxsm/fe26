@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Activity } from "lucide-react";
 import { Reactions } from "@/components/Reactions";
-import { fetchMatch, fetchRecentMatches, type ArenaId, type ArenaMatch, type ArenaMatchDetail } from "@/lib/arena";
+import { fetchMatch, fetchMatchFeed, type ArenaId, type ArenaMatch, type ArenaMatchDetail, type WarClaim } from "@/lib/arena";
 import { getViewerId } from "@/lib/viewer";
 
 const LABELS: Record<ArenaId, string> = {
@@ -15,20 +15,24 @@ const LABELS: Record<ArenaId, string> = {
 
 export function LiveMatches({ arena }: { arena: ArenaId }) {
   const [matches, setMatches] = useState<ArenaMatch[]>([]);
+  const [claims, setClaims] = useState<WarClaim[]>([]);
   const [detail, setDetail] = useState<ArenaMatchDetail | null>(null);
   const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const rows = await fetchRecentMatches(30);
+      const feed = await fetchMatchFeed(30);
       if (!alive) return;
-      if (rows === null) {
+      if (feed === null) {
         setMatches([]);
+        setClaims([]);
         setStatus("offline");
         setDetail(null);
         return;
       }
+      setClaims(feed.claims);
+      const rows = feed.matches;
       const filtered = rows.filter((row) => row.arenaId === arena);
       setMatches(filtered);
       setStatus("live");
@@ -54,9 +58,19 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
         <Activity size={18} aria-hidden="true" /> Live {LABELS[arena]}
       </h2>
       {matches.length === 0 ? (
-        <p className="muted">
-          No matches yet. Vault uses the queue. War takes a proof instead.
-        </p>
+        arena === "war" && claims.length > 0 ? (
+          <ul className="feed">
+            {claims.slice(0, 6).map((claim) => (
+              <li key={`${claim.handle}-${claim.challenge}-${claim.points}`}>
+                {claim.handle} · {claim.challenge} · {claim.points} {claim.points === 1 ? "point" : "points"}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">
+            No matches yet. Vault uses the queue. War takes a proof instead.
+          </p>
+        )
       ) : (
         <ul className="feed">
           {matches.slice(0, 6).map((match) => (

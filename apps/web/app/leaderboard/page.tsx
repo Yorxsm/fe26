@@ -55,7 +55,7 @@ function Board() {
     };
   }, [windowName, room, selected]);
 
-  const standing = standings(rows.filter((row) => row.games > 0));
+  const standing = standings(rows.filter((row) => row.points > 0));
 
   return (
     <main className="board leaderboard-page">
@@ -84,7 +84,7 @@ function Board() {
                 <span className="swatch-dot" style={{ background: row.colour }} aria-hidden="true" />
                 <span className="num">{row.rank}</span>
                 <strong>{row.name}</strong>
-                <span className="num">{row.points} points</span>
+                <span className="num">{row.points} {row.points === 1 ? "point" : "points"}</span>
               </button>
             </li>
           ))}
@@ -148,7 +148,7 @@ function Board() {
             {recent.map((item, index) => (
               <li key={`${item.unix}-${index}`}>
                 <span>{item.label}</span>
-                <span className="num">{item.points} points · {item.room}</span>
+                <span className="num">{item.points} {item.points === 1 ? "point" : "points"} · {item.room}</span>
               </li>
             ))}
           </ul>

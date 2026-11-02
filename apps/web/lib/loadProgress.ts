@@ -13,10 +13,20 @@ export type LoadStep = {
 
 const steps: LoadStep[] = [];
 let lastTotal = 0;
+let maxProgress = 0;
+let coreDone = false;
 
 function publish(loaded: number, total: number, active: boolean) {
-  const progress = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
-  const step: LoadStep = { loaded, total, active, progress };
+  if (coreDone) return;
+  let progress = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+  progress = Math.max(maxProgress, progress);
+  maxProgress = progress;
+  if (!active && total > 0 && loaded >= total) {
+    progress = 100;
+    maxProgress = 100;
+    coreDone = true;
+  }
+  const step: LoadStep = { loaded, total, active: coreDone ? false : active, progress };
   const prev = steps[steps.length - 1];
   if (prev && prev.loaded === loaded && prev.total === total && prev.active === active) return;
   lastTotal = total;

@@ -35,4 +35,8 @@ export const FRAME_BOARDS: Record<string, FrameBoard[]> = {
     { name: "WAR", at: [1.95, 2.05, -5.72], size: [1.22, 0.76], sign: "war" },
   ],
   "cup-stadium": [{ name: "CUP", at: [0, 2.15, -1.2], size: [4.4, 1.15] }],
+  "oracle-plaza": [
+    { name: "HALL", at: [-0.7, 2.95, -5.78], size: [2.4, 0.9] },
+    { name: "SEASON", at: [1.9, 2.95, -5.78], size: [2.4, 0.9] },
+  ],
 };

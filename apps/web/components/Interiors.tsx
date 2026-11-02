@@ -40,20 +40,13 @@ function matchLobbyMaterial(material: THREE.Material, meshName: string) {
   if (!standard.isMeshStandardMaterial) return material;
   const copy = standard.clone();
   const name = `${copy.name} ${meshName}`.toLowerCase();
-  if (name.includes("laser") || name.includes("glow")) return copy;
-  const structural = name.includes("wall") || name.includes("floor") || name.includes("trim");
-  if (structural) {
-    copy.metalness = Math.min(copy.metalness, name.includes("trim") ? 0.2 : 0.06);
-    copy.roughness = Math.max(copy.roughness, 0.58);
-    const luma = (copy.color.r + copy.color.g + copy.color.b) / 3;
-    if (luma > 0.001 && luma < 0.34) {
-      const target = name.includes("floor") ? 0.28 : name.includes("trim") ? 0.52 : 0.46;
-      copy.color.multiplyScalar(Math.min(target / luma, 8));
-    }
-  } else if (copy.metalness > 0.7) {
-    copy.metalness = 0.35;
-    copy.roughness = Math.max(copy.roughness, 0.42);
-  }
+      if (name.includes("laser") || name.includes("glow")) return copy;
+      const luma = (copy.color.r + copy.color.g + copy.color.b) / 3;
+      if (luma > 0.001 && luma < 0.42) {
+        copy.color.multiplyScalar(Math.min(0.5 / luma, 8));
+      }
+      copy.metalness = Math.min(copy.metalness, name.includes("trim") ? 0.2 : 0.12);
+      copy.roughness = Math.max(copy.roughness, 0.55);
   copy.envMapIntensity = 0.15;
   copy.fog = false;
   return copy;
@@ -305,10 +298,8 @@ function Screen({
   );
 }
 
-function placed(id: string, name: string): FrameBoard {
-  const board = FRAME_BOARDS[id]?.find((entry) => entry.name === name);
-  if (!board) throw new Error(`${id} ${name}`);
-  return board;
+function placed(id: string, name: string): FrameBoard | null {
+  return FRAME_BOARDS[id]?.find((entry) => entry.name === name) ?? null;
 }
 
 const BOARD_ROOM: Record<string, string> = {
@@ -360,6 +351,7 @@ function RoomBoards({ id }: { id: string }) {
   const quotes = mockQuotes(now ?? 0);
   const screen = (name: string, rows: BoardRow[]) => {
     const board = placed(id, name);
+    if (!board) return null;
     return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} />;
   };
   if (id === "vault-quarter") {
@@ -435,7 +427,16 @@ function RoomBoards({ id }: { id: string }) {
       </>
     );
   }
+  if (id === "oracle-plaza") {
+    return (
+      <>
+        {screen("HALL", [clockRow, { label: "SEASON", value: "BOARD" }, { label: "MATCHES", value: "LIVE" }])}
+        {screen("SEASON", rankRows)}
+      </>
+    );
+  }
   const cup = placed(id, "CUP");
+  if (!cup) return null;
   return (
     <>
       <Screen
@@ -614,8 +615,8 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   return (
     <Suspense fallback={null}>
       <group position={room.position}>
-        <ambientLight color="#d4d2cc" intensity={1.15} />
-        <hemisphereLight color="#f4efe6" groundColor="#4a4036" intensity={0.85} />
+        <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.15 : 2.6} />
+        <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.85 : 1.85} />
         <RoomMesh key={room.url} url={room.url} />
         {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
           <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />

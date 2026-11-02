@@ -11,7 +11,7 @@ import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
 import { MarkdownDoc } from "@/components/MarkdownDoc";
-import { LobbySignList, RoomHud, type RoomMatch } from "@/components/RoomHud";
+import { LobbySignList, RoomHud, type RoomMatch, type WarClaimRow } from "@/components/RoomHud";
 import {
   ArrowLeft,
   ArrowRight,
@@ -131,6 +131,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [phase, setPhase] = useState<Phase>("boot");
   const [visitors, setVisitors] = useState<CityAgent[]>([]);
   const [matches, setMatches] = useState<RoomMatch[] | null>(null);
+  const [queues, setQueues] = useState<Record<string, string[]>>({});
+  const [claims, setClaims] = useState<WarClaimRow[]>([]);
   const heard = useRef("");
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
@@ -250,9 +252,11 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const pull = () => {
       fetch(`${base}/v1/matches?limit=20`, { cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
-        .then((body: { matches?: RoomMatch[] } | null) => {
+        .then((body: { matches?: RoomMatch[]; queues?: Record<string, string[]>; claims?: WarClaimRow[] } | null) => {
           if (dead || !body) return;
           const next = Array.isArray(body.matches) ? body.matches : [];
+          setQueues(body.queues && typeof body.queues === "object" ? body.queues : {});
+          setClaims(Array.isArray(body.claims) ? body.claims : []);
           const live = next.find((match) => match.status === "live" && match.last);
           const token = live?.last ? `${live.matchId}:${live.last.handle}:${live.last.type}:${live.turn}` : "";
           if (token && token !== heard.current) {
@@ -294,15 +298,24 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   useEffect(() => {
     const queue: number[] = [];
     let finished = false;
+    let locked = false;
+    let maxSeen = 0;
     let readyTimer = 0;
     const push = (detail: { loaded?: number; total?: number; active?: boolean; progress?: number }) => {
+      if (locked) return;
       const total = typeof detail.total === "number" ? detail.total : 0;
       const loaded = typeof detail.loaded === "number" ? detail.loaded : 0;
-      const pct = total > 0 ? (loaded / total) * 100 : typeof detail.progress === "number" ? detail.progress : 0;
+      let pct = total > 0 ? (loaded / total) * 100 : typeof detail.progress === "number" ? detail.progress : 0;
+      pct = Math.max(maxSeen, pct);
+      maxSeen = pct;
       queue.push(pct);
       setMapHeard(true);
       setMapStuck(false);
-      if (detail.active === false && total > 0 && loaded >= total) finished = true;
+      if (detail.active === false && total > 0 && loaded >= total) {
+        locked = true;
+        finished = true;
+        queue.push(100);
+      }
     };
     pendingLoadSteps().forEach(push);
     const onLoad = (event: Event) => {
@@ -524,7 +537,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               </div>
             )}
             {(phase === "vantage" || phase === "city") && (
-            <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
+            <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium", "oracle-plaza"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
               <div className="hud-tl ui-in">
                 <a
                   className="hud-brand"
@@ -543,7 +556,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 </nav>
               </div>
               <div className="hud-tr ui-in">
-                <CountdownChip compact={frameMode === "in" && Boolean(focusId)} />
+                {frameMode === "in" && focusId ? null : <CountdownChip compact={false} />}
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
                   <div className={narrow && !questOpen ? "hud-aside is-collapsed" : "hud-aside"}>
@@ -724,7 +737,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
-              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} inside={visitors.slice(0, 3).map((agent) => agent.name)} matches={matches} />
+              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} matches={matches} queues={queues} claims={claims} />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
             {mapStuck && !mapReady ? (

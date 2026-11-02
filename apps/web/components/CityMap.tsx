@@ -7,6 +7,7 @@ import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMa
 import dynamic from "next/dynamic";
 
 const Interiors = dynamic(() => import("@/components/Interiors").then((mod) => mod.Interiors), { ssr: false });
+import { InteriorBoundary } from "@/components/InteriorBoundary";
 import { Nature } from "@/components/Nature";
 import { Props } from "@/components/Props";
 import { World } from "@/components/World";
@@ -18,7 +19,7 @@ import { audio } from "@/lib/audio";
 import { pendingLoadSteps } from "@/lib/loadProgress";
 import { villageCoreUrl, villageKitsUrl, villageTier, type VillageTier } from "@/lib/village";
 import { FRAME_BOARDS } from "@/lib/boards";
-import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, padStand, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
@@ -1498,6 +1499,10 @@ function AgentMesh({
     } else if (roomMove) {
       pose = { x: roomMove.x, y: roomMove.y, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
+    if (mode === "play" && !poster && !lineup && !(focusId && frameMode === "in")) {
+      const pad = padStand(index);
+      pose = { x: pad.x, y: pad.y, z: pad.z, rot: pad.rot };
+    }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
@@ -1674,7 +1679,7 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
-        scale={frameMode === "in" && focusId ? bodyScale * 0.62 : bodyScale}
+        scale={mode === "play" && !poster && !lineup ? bodyScale * 0.62 : bodyScale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
           showPick(agent.name, poseRef.current.x, poseRef.current.z);
@@ -1685,7 +1690,7 @@ function AgentMesh({
           onPeek?.(poseRef.current);
         }}
       />
-      <group ref={tag} position={[0, 5.2, 0]}>
+      <group ref={tag} position={[0, mode === "play" && !poster && !lineup ? AGENT_SCALE * 0.62 + 0.22 : AGENT_SCALE + 0.35, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
           <div ref={tagEl} className="name-tag" data-agent={agent.name}>
             <span className="live-dot" aria-hidden="true" />
@@ -1747,7 +1752,7 @@ function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; qual
   );
 
   useFrame((_, delta) => {
-    gl.toneMappingExposure = shotKind.current === "interior" ? 0.95 : 1;
+    gl.toneMappingExposure = shotKind.current === "interior" ? 1.55 : 1;
     grade.composer.render(delta);
   }, 1);
 
@@ -1886,6 +1891,7 @@ function CameraDriver({
   const tripUp = useRef(new THREE.Vector3());
   const tripDown = useRef(new THREE.Vector3());
   const interiorOffset = useRef(new THREE.Vector3());
+  const snapInside = useRef(false);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -1920,6 +1926,7 @@ function CameraDriver({
       lastFocus.current = focusId;
       latched.current = null;
       depart.current = null;
+      snapInside.current = Boolean(focusId);
       if (focusId) homing.current = false;
     }
     const vantage = mode === "orbit" && !lobby && !poster && !lineup && !street;
@@ -2142,12 +2149,12 @@ function CameraDriver({
           controls.enabled = true;
           controls.enableDamping = true;
           controls.dampingFactor = 0.075;
-          controls.minDistance = INTERIOR_MIN_DISTANCE;
+          controls.minDistance = 1.4;
           controls.maxDistance = INTERIOR_MAX_DISTANCE;
           controls.enablePan = false;
-          controls.minPolarAngle = 0.7;
-          controls.maxPolarAngle = 1.4;
-          controls.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
+          controls.minPolarAngle = 0.55;
+          controls.maxPolarAngle = 1.55;
+          controls.target.set(peek ? peek.x : aim.x, peek ? peek.y : aim.y, peek ? peek.z : aim.z);
           clampInteriorCamera(camera.position, room);
           interiorOffset.current.copy(camera.position).sub(controls.target);
           const span = interiorOffset.current.length();
@@ -2174,7 +2181,8 @@ function CameraDriver({
       return;
     }
     if (collide) collideCamera(eye, aim, ignoreId);
-    const blend = reduce.current ? 1 : 1 - Math.exp(-delta * (camera.position.distanceTo(eye) > 18 ? 3.6 : 6));
+    const blend = snapInside.current || reduce.current ? 1 : 1 - Math.exp(-delta * (camera.position.distanceTo(eye) > 18 ? 3.6 : 6));
+    if (snapInside.current) snapInside.current = false;
     rig.target.lerp(aim, blend);
     camera.position.lerp(eye, blend);
     if (collide) collideCamera(camera.position, rig.target, ignoreId);
@@ -2761,7 +2769,11 @@ export default function CityMap({
         {detail ? <Nature /> : null}
         {detail ? <Props /> : null}
         {detail ? <Kits url={villageKitsUrl(tier)} onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} /> : null}
-        {openInterior ? <Interiors focusId={openInterior} frameMode="in" /> : null}
+        {detail && openInterior ? (
+          <InteriorBoundary onLeave={() => onClearFocus?.()}>
+            <Interiors focusId={openInterior} frameMode="in" />
+          </InteriorBoundary>
+        ) : null}
       </Suspense>
       <group position={[-42, 6.4, 33]}>
         <mesh>
@@ -2815,26 +2827,28 @@ export default function CityMap({
         (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
           <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
-      ) : (
+      ) : detail ? (
         <>
-          <ImpostorCrowd
-            count={crew.length}
-            hide={(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]).filter((index) => index < crew.length)}
-            paused={paused}
-          />
-          <AgentTargets
-            agents={crew}
-            hide={(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : []).filter((index) => index < crew.length)}
-            paused={paused}
-            onFollow={onFollow}
-          />
-          {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex])
-            .filter((index) => crew[index])
-            .map((index) => (
-            <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} line={lines[crew[index].name] || lines[crew[index].accountId] || ""} />
+          {crew.map((agent, index) => (
+            <AgentMesh
+              key={agent.accountId}
+              agent={agent}
+              index={index}
+              paused={paused}
+              focusId={focusId}
+              lineup={false}
+              poster={null}
+              onFollow={onFollow}
+              onPeek={setPeek}
+              roomBusy={roomBusy}
+              mode={mode}
+              beat={beat}
+              frameMode={frameMode}
+              line={lines[agent.name] || lines[agent.accountId] || ""}
+            />
           ))}
         </>
-      )}
+      ) : null}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />

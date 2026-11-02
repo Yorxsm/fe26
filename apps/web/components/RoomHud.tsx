@@ -123,20 +123,43 @@ export function LobbySignList() {
 
 type RoomRow = { rank: number; name: string; points: number };
 
+function localWhen(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function liveDeadline(matches: RoomMatch[] | null, slug: string) {
   if (!matches) return "";
   const mine = slug === "all" ? matches : matches.filter((match) => match.arenaId === slug);
   const live = mine.find((match) => match.status === "live" && match.deadlineAt);
-  return live?.deadlineAt ? ` Deadline ${live.deadlineAt}.` : "";
+  return live?.deadlineAt ? ` Deadline ${localWhen(live.deadlineAt)}.` : "";
 }
 
-function roomActivity(matches: RoomMatch[] | null, slug: string) {
+export type WarClaimRow = { handle: string; points: number; challenge: string };
+
+function peopleHere(matches: RoomMatch[] | null, queues: Record<string, string[]>, slug: string) {
+  if (!matches || slug === "all") return [];
+  const seated = matches.filter((match) => match.status === "live" && match.arenaId === slug).flatMap((match) => match.seats);
+  const waiting = queues[slug] ?? [];
+  return [...new Set([...seated, ...waiting].filter(Boolean))];
+}
+
+function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: string) {
   if (matches === null) return { summary: "Reading the arena…", rows: [] as string[] };
   const mine = slug === "all" ? matches : matches.filter((match) => match.arenaId === slug);
   const live = mine.find((match) => match.status === "live");
   const done = mine.find((match) => match.status !== "live");
   const focus = live ?? done;
-  if (!focus) return { summary: "No one yet", rows: [] as string[] };
+  if (!focus) {
+    if (slug === "war" && claims.length) {
+      return {
+        summary: "Recent solves.",
+        rows: claims.slice(0, 5).map((claim) => `${claim.handle} ${claim.challenge} · ${claim.points}`),
+      };
+    }
+    return { summary: "No one yet", rows: [] as string[] };
+  }
   const seats = focus.seats.filter(Boolean).join(" · ") || "Open seats";
   const vault = focus.vault;
   const summary = live
@@ -155,26 +178,38 @@ function roomActivity(matches: RoomMatch[] | null, slug: string) {
 export function RoomHud({
   roomId,
   tip,
-  inside,
   matches,
+  queues,
+  claims,
   onLeave,
 }: {
   roomId: string;
   tip: string | null;
-  inside: string[];
   matches: RoomMatch[] | null;
+  queues: Record<string, string[]>;
+  claims: WarClaimRow[];
   onLeave: () => void;
 }) {
   const about = ABOUT[roomId];
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 800px)");
+    const apply = () => setSheet(narrow.matches);
+    apply();
+    narrow.addEventListener("change", apply);
+    return () => narrow.removeEventListener("change", apply);
+  }, []);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [rules, setRules] = useState<string>("");
   const [rows, setRows] = useState<RoomRow[] | null>(null);
   const [boardError, setBoardError] = useState(false);
   const clocks = useRoomClocks();
   const slug = about?.slug ?? "all";
   const slot = clocks[slug];
-  const activity = roomActivity(matches, slug);
+  const activity = roomActivity(matches, claims, slug);
+  const here = peopleHere(matches, queues, slug);
 
   useEffect(() => {
     const base = apiBase();
@@ -241,7 +276,12 @@ export function RoomHud({
 
   if (!about) return null;
   return (
-    <div className="room-hud">
+    <div className={sheet && !sheetOpen ? "room-hud is-sheet" : "room-hud"}>
+      {sheet ? (
+        <button type="button" className="btn btn-secondary room-sheet-toggle" onClick={() => setSheetOpen((value) => !value)}>
+          {sheetOpen ? "Hide room panel" : "Room panel"}
+        </button>
+      ) : null}
       <button type="button" className="btn room-leave" onClick={onLeave}>
         <ArrowLeft aria-hidden="true" strokeWidth={1.75} />
         Leave room
@@ -291,7 +331,7 @@ export function RoomHud({
         ) : activity.summary === "No one yet" ? null : (
           <p className="meta">No moves in this room yet.</p>
         )}
-        <p>Inside now: {inside.length ? inside.join(", ") : "No one yet"}</p>
+        <p>Inside now: {here.length ? here.join(", ") : "No one yet"}</p>
       </section>
       {open && (
         <section className="room-panel">

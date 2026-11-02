@@ -35,6 +35,6 @@ Fast 4G, desktop core, same browser:
 | `renderer.info.memory` after the vault opened | 10 textures, 113 geometries |
 | `renderer.info.render` | 1 call, 12 triangles. The composer draws the real scene outside this counter. |
 
-The ground file is under the 1.5 MB village budget, and that file alone arrives in under 3 seconds on this throttle. The loading screen does not. At 150 ms round trip the script chunks sit in front of the model, and the full page took 11.8 seconds. Kits, props, nature, and the HDR start only after that screen clears, so they are not in the 11.8 seconds.
+The ground file is under the 1.5 MB village budget, and that file alone arrives in under 3 seconds on this throttle. The loading screen does not. At 150 ms round trip the script chunks sit in front of the model, and the full page took 11.8 seconds. Kits, props, nature, room interiors, and the HDR start only after that screen clears, so they are not in the 11.8 seconds. A room link used to pull those interiors into the first batch, which sent the percentage backwards and held the screen. The bar now keeps the highest percentage it has shown and locks when the core batch finishes.
 
-SwiftShader did keep the context for these runs. The village screenshot shows the compressed ground, paths, and building volumes. The vault screenshot shows the in-room board and the activity panel. The entry wall is still dark in this software GL view.
+SwiftShader did keep the context for these runs. The village screenshot shows the compressed ground, paths, and building volumes. The vault screenshot shows the in-room board and the activity panel.

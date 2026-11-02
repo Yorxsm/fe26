@@ -185,23 +185,17 @@ export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: 
 
 export const WALK_SHOT: CameraShot = { eye: [0, 2.4 / 1.5, 14 / 1.5], aim: [0, 2.2 / 1.5, 0], fov: 42 };
 
-/**
- * Inside the authored room. The shell runs x ±7.2, z ±6.2, ceiling y 4.4.
- * The eye sits south of center, clear of the door lintel and the side walls.
- */
-function insideRoom(x: number, z: number): CameraShot {
-  return { eye: [x + 0.15, 1.62, z + 4.35], aim: [x - 0.15, 1.4, z - 2.6], fov: 50 };
-}
-
 export const INTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": insideRoom(-42, 18),
-  "trading-village": insideRoom(46, 14),
-  "war-room": insideRoom(12, 40),
+  // Center of the shell, clear of the south wall, aimed at the board.
+  "vault-quarter": { eye: [-42, 2.05, 20.6], aim: [-42, 1.7, 12.2], fov: 52 },
+  "trading-village": { eye: [46, 2.5, 16.8], aim: [46, 2.3, 8.4], fov: 52 },
+  "war-room": { eye: [12, 2.05, 42.6], aim: [12, 1.75, 34.2], fov: 52 },
   // Wide enough that the four signs and the crew sit inside both 1280×800 and a phone.
   "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
-  "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
-  "oracle-plaza": insideRoom(20, -10),
+  "cup-stadium": { eye: [-8, 2.1, -39.4], aim: [-8, 1.7, -44.6], fov: 50 },
+  // Same forge shell as the lobby, so the eye uses that shell's doorway, not the generic room shot.
+  "oracle-plaza": { eye: [20, 2.4, -4.4], aim: [20, 2.75, -14.6], fov: 46 },
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -399,6 +393,30 @@ export const WALK_LOOP: Array<[number, number]> = [
   [12, 56],
   [-42, 34],
 ];
+
+const PAD_ROOMS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge", "oracle-plaza"];
+
+/**
+ * Stand on the pad in front of a door, on the south lip outside the volume.
+ * One agent per door, then the next door. Inside the volume the body is hidden
+ * and only the name tag shows.
+ */
+export function padStand(index: number) {
+  const slot = index % PAD_ROOMS.length;
+  const id = PAD_ROOMS[slot];
+  const door = BUILDING_DOOR[id];
+  const origin = ROOM_XZ[id];
+  const footprint = DISTRICT_FOOTPRINT[id];
+  if (!door || !origin || !footprint) return { x: 0, y: 0, z: 0, rot: 0 };
+  const lane = Math.floor(index / PAD_ROOMS.length);
+  const side = lane === 0 ? 0 : (lane % 2 === 0 ? 1 : -1) * Math.ceil(lane / 2) * 0.85;
+  return {
+    x: door[0] + side,
+    y: 0.02,
+    z: origin[1] + footprint.hz * 0.625 + 0.75,
+    rot: Math.PI,
+  };
+}
 
 export function placeAgent(index: number, time: number, paused: boolean) {
   const phase = index * 1.7;

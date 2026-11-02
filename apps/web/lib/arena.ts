@@ -148,10 +148,20 @@ export function lobbySocketUrl(): string {
   return `${apiBase().replace(/^http/, "ws")}/v1/lobby/ws`;
 }
 
+export type WarClaim = { handle: string; points: number; challenge: string };
+
 export async function fetchRecentMatches(limit = 20): Promise<ArenaMatch[] | null> {
-  const body = await readJson<{ matches?: ArenaMatch[] }>(`/v1/matches?limit=${limit}`);
+  const feed = await fetchMatchFeed(limit);
+  return feed ? feed.matches : null;
+}
+
+export async function fetchMatchFeed(limit = 20): Promise<{ matches: ArenaMatch[]; claims: WarClaim[] } | null> {
+  const body = await readJson<{ matches?: ArenaMatch[]; claims?: WarClaim[] }>(`/v1/matches?limit=${limit}`);
   if (!body) return null;
-  return Array.isArray(body.matches) ? body.matches : [];
+  return {
+    matches: Array.isArray(body.matches) ? body.matches : [],
+    claims: Array.isArray(body.claims) ? body.claims : [],
+  };
 }
 
 export async function fetchMatch(matchId: string, viewer?: string): Promise<ArenaMatchDetail | null> {

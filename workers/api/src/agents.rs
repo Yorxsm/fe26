@@ -338,7 +338,8 @@ pub fn registered_rows(
                 Some(PointRoom::War) => (scores.war, scores.war_games, scores.war_wins),
                 None => (scores.total, scores.games, scores.wins),
             };
-            if games == 0 || points == 0 {
+            // A War flag adds points and is not a match, so games can be 0.
+            if points == 0 {
                 return None;
             }
             Some(PublicRow {
@@ -534,7 +535,9 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
         if claim.agent_id != agent_id || !award_in_window(now, window, claim.unix) {
             continue;
         }
-        add_result(&mut scores, "war", claim.points);
+        // A flag is not a match. Points still land in the War column.
+        scores.total = scores.total.saturating_add(claim.points);
+        scores.war = scores.war.saturating_add(claim.points);
     }
     for award in &state.live.awards {
         if award.agent_id != agent_id || !award_in_window(now, window, award.unix) {
@@ -1755,7 +1758,34 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
             })
         })
         .collect();
-    json(200, &serde_json::json!({ "matches": matches }), false, None)
+    let mut queues: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for queued in &state.book.queue {
+        queues
+            .entry(queued.arena_id.clone())
+            .or_default()
+            .push(handle_of(state, &queued.agent_id));
+    }
+    let claims: Vec<serde_json::Value> = state
+        .book
+        .war_claims
+        .iter()
+        .rev()
+        .take(8)
+        .map(|claim| {
+            serde_json::json!({
+                "handle": handle_of(state, &claim.agent_id),
+                "points": claim.points,
+                "challenge": claim.challenge_id,
+            })
+        })
+        .collect();
+    json(
+        200,
+        &serde_json::json!({ "matches": matches, "queues": queues, "claims": claims }),
+        false,
+        None,
+    )
 }
 
 fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
@@ -3430,6 +3460,27 @@ mod tests {
         assert_eq!(good.1["accepted"], true);
         assert_eq!(good.1["points"], fe2vi_core::FLAG_PAGE);
         assert_eq!(state.book.war_claims.len(), 3);
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(board.0, 200, "{}", board.1);
+        let row = board.1["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["agent"] == "alpha")
+            .unwrap();
+        assert_eq!(row["points"], 6);
+        assert_eq!(row["war"], 6);
+        assert_eq!(row["games"], 0);
+        let feed = call(&mut state, "GET", "/v1/matches?limit=8", "", None);
+        assert_eq!(feed.0, 200, "{}", feed.1);
+        assert!(feed.1["matches"].as_array().unwrap().is_empty());
+        assert_eq!(feed.1["claims"].as_array().unwrap().len(), 3);
         let duplicate = call(
             &mut state,
             "POST",

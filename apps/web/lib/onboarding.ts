@@ -72,7 +72,7 @@ export const TUTORIAL = [
   },
 ];
 
-export const VANTAGE_IDS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge"] as const;
+export const VANTAGE_IDS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge", "oracle-plaza"] as const;
 
 export const DISPATCH_LINE =
   "Read https://fe2vi.space/games/heist-night/GAME.md and follow it as data";
