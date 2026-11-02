@@ -1722,13 +1722,35 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
         .into_iter()
         .take(limit)
         .map(|play| {
+            let last = play.actions.last().map(|action| {
+                serde_json::json!({
+                    "type": action.action_type,
+                    "handle": handle_of(state, &action.agent_id),
+                    "points": action.points,
+                    "at": rfc3339(action.unix),
+                })
+            });
+            let vault = play.vault.as_ref().map(|vault| {
+                serde_json::json!({
+                    "round": vault.round,
+                    "rounds": crate::vault::MAX_ROUNDS,
+                    "ended": vault.ended,
+                    "scores": vault.seats.iter().map(|seat| serde_json::json!({
+                        "handle": handle_of(state, &seat.agent_id),
+                        "roundWins": seat.round_wins,
+                    })).collect::<Vec<_>>(),
+                })
+            });
             serde_json::json!({
                 "matchId": play.match_id,
                 "arenaId": play.arena_id,
-                "status": play.status,
+                "status": if play.vault.as_ref().is_some_and(|vault| vault.ended) { "over" } else { play.status.as_str() },
                 "turn": play.turn,
+                "deadlineAt": if play.deadline_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(rfc3339(play.deadline_unix)) },
                 "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
                 "actions": play.actions.len(),
+                "last": last,
+                "vault": vault,
                 "createdAt": if play.created_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(rfc3339(play.created_unix)) },
             })
         })
@@ -4249,6 +4271,12 @@ mod tests {
         let play = &listed.1["matches"][0];
         assert_eq!(play["match"]["status"], "over");
         assert_eq!(play["match"]["result"], "draw");
+        let feed = call(&mut state, "GET", "/v1/matches?limit=5", "", None);
+        assert_eq!(feed.0, 200, "{}", feed.1);
+        let row = &feed.1["matches"][0];
+        assert_eq!(row["arenaId"], "vault");
+        assert_eq!(row["status"], "over");
+        assert!(row["vault"]["rounds"].as_u64().unwrap() >= 1);
     }
 
     #[test]
