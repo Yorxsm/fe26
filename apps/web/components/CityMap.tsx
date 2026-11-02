@@ -1967,6 +1967,7 @@ function CameraDriver({
   const tripDown = useRef(new THREE.Vector3());
   const interiorOffset = useRef(new THREE.Vector3());
   const snapInside = useRef(false);
+  const overviewLatched = useRef(false);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -2004,7 +2005,10 @@ function CameraDriver({
       latched.current = null;
       depart.current = null;
       snapInside.current = Boolean(focusId);
-      if (focusId) homing.current = false;
+      if (focusId) {
+        homing.current = false;
+        overviewLatched.current = false;
+      }
     }
     const vantage = mode === "orbit" && !lobby && !poster && !lineup && !street;
     if (!vantage) vantageReady.current = false;
@@ -2246,7 +2250,7 @@ function CameraDriver({
       if (mode === "play" && !lineup && !street && !poster && followIndex === null && !focusId) {
         fovTarget.current = overviewFov;
         const far = camera.position.distanceTo(overviewEye) > 2.6 || rig.target.distanceTo(overviewAim) > 3;
-        if (far) {
+        if (far && !overviewLatched.current) {
           rig.enabled = false;
           const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 6);
           rig.target.lerp(overviewAim, blend);
@@ -2255,6 +2259,7 @@ function CameraDriver({
           dampFov(camera, fovTarget.current, delta, reduce.current);
           return;
         }
+        overviewLatched.current = true;
         rig.enabled = true;
         const held = cameraHeld() || pointer.current.down || reduce.current;
         applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
