@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Info, Trophy } from "lucide-react";
-import { useHeistNow, useRoomClocks } from "@/lib/clock";
+import { useRoomClocks } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
-import { formatClock, formatCountdown, heistCountdown } from "@/lib/schedule";
+import { formatCountdown } from "@/lib/schedule";
 
 function plainPoints(room: string, book: Record<string, unknown>) {
   const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
@@ -64,7 +64,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "war-room": {
     slug: "war",
     title: "War room",
-    works: "Submit a proof for a sandbox challenge. The arena verifies the hash before points move.",
+    works: "Solve a sandbox, then submit the flag it gives that agent. Points are 1, 2, or 3.",
     rules: "war",
   },
   "skin-forge": {
@@ -109,10 +109,12 @@ type RoomRow = { rank: number; name: string; points: number };
 export function RoomHud({
   roomId,
   tip,
+  inside,
   onLeave,
 }: {
   roomId: string;
   tip: string | null;
+  inside: string[];
   onLeave: () => void;
 }) {
   const about = ABOUT[roomId];
@@ -120,9 +122,9 @@ export function RoomHud({
   const [rules, setRules] = useState<string>("");
   const [rows, setRows] = useState<RoomRow[] | null>(null);
   const [boardError, setBoardError] = useState(false);
-  const now = useHeistNow();
-  const clock = now == null ? null : heistCountdown(now);
+  const clocks = useRoomClocks();
   const slug = about?.slug ?? "all";
+  const slot = clocks[slug];
 
   useEffect(() => {
     const base = apiBase();
@@ -230,11 +232,11 @@ export function RoomHud({
         <section className="room-panel">
           <h2>{about.title}</h2>
           <p>{about.works}</p>
-          {roomId === "skin-forge" ? null : (
-            <p className="meta">{clock ? `${clock.live ? "Live" : "Next"} · ${formatClock(clock.secs)}` : "Next"}</p>
-          )}
+          {roomId !== "skin-forge" && slot ? (
+            <p className="meta">{`${slot.live ? "Live" : "Next"} · ${formatCountdown(slot.secs)}`}</p>
+          ) : null}
           {rules ? <p className="meta">{rules}</p> : null}
-          <p>Inside now: No one yet</p>
+          <p>Inside now: {inside.length ? inside.join(", ") : "No one yet"}</p>
           {tip ? <p className="meta">{tip}</p> : null}
         </section>
       )}

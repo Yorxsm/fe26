@@ -65,6 +65,15 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
     station: "Lobby",
     color: "#a85a32",
   },
+  {
+    id: "oracle-plaza",
+    name: "Oracle Plaza",
+    summary: "Coming soon.",
+    status: "soon",
+    href: "",
+    station: "Oracle Plaza",
+    color: "#c4a36c",
+  },
 ];
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
@@ -74,6 +83,7 @@ export const ROOM_XZ: Record<string, [number, number]> = {
   "trading-village": [46, 14],
   "war-room": [12, 40],
   "skin-forge": [-38, -24],
+  "oracle-plaza": [20, -10],
 };
 
 /**
@@ -86,6 +96,7 @@ export const DISTRICT_FOOTPRINT: Record<string, DistrictFootprint> = {
   "trading-village": { hx: 9.0, hz: 8.2, height: 14.0 },
   "war-room": { hx: 8.8, hz: 8.0, height: 13.5 },
   "skin-forge": { hx: 9.0, hz: 8.2, height: 12.5 },
+  "oracle-plaza": { hx: 9.0, hz: 8.2, height: 12.5 },
 };
 
 /** South face of each building. Agents use this when a room opens or closes. */
@@ -95,6 +106,7 @@ export const BUILDING_DOOR: Record<string, [number, number]> = {
   "trading-village": [46, 17.4],
   "war-room": [12, 43.4],
   "skin-forge": [-38, -20.6],
+  "oracle-plaza": [20, -6.6],
 };
 
 const ROOF_NAME: Record<string, string> = {
@@ -103,6 +115,7 @@ const ROOF_NAME: Record<string, string> = {
   "trading-village": "TRADING VILLAGE",
   "war-room": "WAR ROOM",
   "skin-forge": "LOBBY",
+  "oracle-plaza": "PLAZA",
 };
 
 export function roofLabel(id: string) {
@@ -291,28 +304,28 @@ export const INTERIOR_CAST: Record<string, CastPose[]> = {
   // World meters. Flank the boards; the frame audit rejects anyone on a screen or under 3 m.
   "vault-quarter": [
     { index: 0, x: -43.3, z: 13.1, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 9, x: -41.85, z: 13.65, rot: Math.PI, speed: 0, clip: "celebrate" },
-    { index: 1, x: -40.6, z: 13.0, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 1, x: -41.85, z: 13.65, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 2, x: -40.6, z: 13.0, rot: Math.PI, speed: 1.1, clip: "walk" },
   ],
   "trading-village": [
-    { index: 2, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 5, x: 44.8, z: 11.6, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 8, x: 47.6, z: 11.4, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 0, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 1, x: 44.8, z: 11.6, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 2, x: 47.6, z: 11.4, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "war-room": [
-    { index: 3, x: 9.5, z: 37.55, rot: 0, speed: 1.0, clip: "walk" },
-    { index: 5, x: 11.15, z: 38.15, rot: 0.15, speed: 0, clip: "idle" },
-    { index: 7, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
+    { index: 0, x: 9.5, z: 37.55, rot: 0, speed: 1.0, clip: "walk" },
+    { index: 1, x: 11.15, z: 38.15, rot: 0.15, speed: 0, clip: "idle" },
+    { index: 2, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -39.35, z: -26.5, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -38, z: -27.3, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 6, x: -36.65, z: -26.5, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 0, x: -39.35, z: -26.5, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: -38, z: -27.3, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 2, x: -36.65, z: -26.5, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
-    { index: 2, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
-    { index: 6, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
-    { index: 8, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
+    { index: 0, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
+    { index: 1, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
+    { index: 2, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
   ],
 };
 

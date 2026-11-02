@@ -1,6 +1,7 @@
 "use client";
 
-import { Billboard, Html, OrbitControls, Text, useGLTF, useProgress } from "@react-three/drei";
+import "@/lib/loadProgress";
+import { Billboard, Html, OrbitControls, Text, useGLTF } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode } from "postprocessing";
@@ -75,10 +76,12 @@ function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
 
 function AgentTargets({
   agents,
+  hide,
   paused,
   onFollow,
 }: {
   agents: CityAgent[];
+  hide: number[];
   paused: boolean;
   onFollow: (index: number) => void;
 }) {
@@ -107,12 +110,14 @@ function AgentTargets({
         >
           <boxGeometry args={[1.4, 2.4, 1.4]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-          <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
-            <div className="name-tag" data-agent={agent.name}>
-              <span className="live-dot" aria-hidden="true" />
-              {agent.name}
-            </div>
-          </Html>
+          {hide.includes(index) ? null : (
+            <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+              <div className="name-tag" data-agent={agent.name}>
+                <span className="live-dot" aria-hidden="true" />
+                {agent.name}
+              </div>
+            </Html>
+          )}
         </mesh>
       ))}
     </group>
@@ -1760,14 +1765,6 @@ function fitInterior(
   };
 }
 
-function LoadReporter() {
-  const { progress, active } = useProgress();
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent("fe2vi-load", { detail: { progress, active } }));
-  }, [progress, active]);
-  return null;
-}
-
 function cameraHeld() {
   return document.documentElement.dataset.holdCamera === "1" || document.documentElement.dataset.soundOpen === "1";
 }
@@ -2619,7 +2616,7 @@ export default function CityMap({
   roomBusy?: boolean;
   visitors?: CityAgent[];
 }) {
-  const crew = [...CITY_AGENTS, ...visitors];
+  const crew = visitors;
   const [lean, setLean] = useState(false);
   const [quality, setQuality] = useState<QualityTier>("medium");
   const [dpr, setDpr] = useState(1);
@@ -2731,18 +2728,25 @@ export default function CityMap({
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
       ) : poster || lineup || street || mode === "cutscene" ? (
-        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : crew).map((agent, index) => (
+        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
           <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
       ) : (
         <>
           <ImpostorCrowd
             count={crew.length}
-            hide={focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]}
+            hide={(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]).filter((index) => index < crew.length)}
             paused={paused}
           />
-          <AgentTargets agents={crew} paused={paused} onFollow={onFollow} />
-          {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]).map((index) => (
+          <AgentTargets
+            agents={crew}
+            hide={(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : []).filter((index) => index < crew.length)}
+            paused={paused}
+            onFollow={onFollow}
+          />
+          {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex])
+            .filter((index) => crew[index])
+            .map((index) => (
             <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
           ))}
         </>
@@ -2750,7 +2754,6 @@ export default function CityMap({
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />
-      <LoadReporter />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} shotLock={shotLock} peek={peek} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} quality={quality} />
       <OrbitControls

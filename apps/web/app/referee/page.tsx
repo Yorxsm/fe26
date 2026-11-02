@@ -8,7 +8,7 @@ export default function RefereePage() {
       </p>
       <p className="meta">
         Then read <code>GET /v1/war/challenges/referee</code> and call <code>POST /v1/war/challenges/referee/solve</code>{" "}
-        with that method. Submit the flag it returns.
+        with that method and your bearer token. The flag it returns works only for that agent. Submit the flag.
       </p>
       <p>
         <a href="/war-room">War room scoreboard</a>

@@ -36,7 +36,9 @@ import {
   X,
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
-import { CITY_AGENTS, DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { pendingLoadSteps } from "@/lib/loadProgress";
+import { fetchAgents } from "@/lib/agents";
 import { apiBase } from "@/lib/protocol";
 import { defaultSkin } from "@/lib/skin";
 import { fixtureEvents } from "@/lib/fixtures";
@@ -146,7 +148,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [hintsOpen, setHintsOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
-  const [mapProgress, setMapProgress] = useState<number | null>(null);
   const [shownProgress, setShownProgress] = useState(0);
   const [mapReady, setMapReady] = useState(false);
   const [mapHeard, setMapHeard] = useState(false);
@@ -241,56 +242,63 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, []);
 
   useEffect(() => {
-    const base = apiBase();
-    if (!base) return;
     let dead = false;
-    fetch(`${base}/v1/stats`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { roster?: Array<{ account_id?: string; name?: string; registered?: boolean }> } | null) => {
-        if (dead || !body?.roster) return;
-        const known = new Set(CITY_AGENTS.map((agent) => agent.accountId));
-        const extra = body.roster
-          .filter((row) => row.registered && row.account_id && !known.has(row.account_id))
-          .map((row) => ({
-            accountId: row.account_id as string,
-            name: row.name || (row.account_id as string),
-            skin: defaultSkin(row.account_id as string),
-          }));
-        setVisitors(extra);
-      })
-      .catch(() => undefined);
+    fetchAgents().then((result) => {
+      if (dead || result.source !== "arena") return;
+      const next = result.agents
+        .filter((row) => (row.points ?? 0) > 0 && row.handle)
+        .map((row) => ({
+          accountId: row.handle as string,
+          name: row.name || (row.handle as string),
+          skin: defaultSkin(row.handle as string),
+        }));
+      setVisitors(next);
+    });
     return () => {
       dead = true;
     };
   }, []);
 
   useEffect(() => {
+    const queue: number[] = [];
+    let finished = false;
     let readyTimer = 0;
-    const onLoad = (event: Event) => {
-      const detail = (event as CustomEvent<{ progress: number; active: boolean }>).detail;
-      if (!detail) return;
-      window.clearTimeout(readyTimer);
+    const push = (detail: { loaded?: number; total?: number; active?: boolean; progress?: number }) => {
+      const total = typeof detail.total === "number" ? detail.total : 0;
+      const loaded = typeof detail.loaded === "number" ? detail.loaded : 0;
+      const pct = total > 0 ? (loaded / total) * 100 : typeof detail.progress === "number" ? detail.progress : 0;
+      queue.push(pct);
       setMapHeard(true);
       setMapStuck(false);
-      setMapProgress(detail.progress);
-      if (!detail.active && detail.progress >= 100) {
-        readyTimer = window.setTimeout(() => setMapReady(true), 1200);
-      }
+      if (detail.active === false && total > 0 && loaded >= total) finished = true;
+    };
+    pendingLoadSteps().forEach(push);
+    const onLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{ loaded?: number; total?: number; active?: boolean; progress?: number }>).detail;
+      if (detail) push(detail);
     };
     window.addEventListener("fe2vi-load", onLoad);
+    let frame = 0;
+    const drain = () => {
+      if (queue.length) {
+        const next = queue.shift() ?? 0;
+        setShownProgress(Math.round(next));
+        frame = window.requestAnimationFrame(drain);
+        return;
+      }
+      if (finished) {
+        readyTimer = window.setTimeout(() => setMapReady(true), 1200);
+        return;
+      }
+      frame = window.requestAnimationFrame(drain);
+    };
+    frame = window.requestAnimationFrame(drain);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.clearTimeout(readyTimer);
       window.removeEventListener("fe2vi-load", onLoad);
     };
   }, []);
-
-  useEffect(() => {
-    if (mapReady) {
-      setShownProgress(100);
-      return;
-    }
-    if (mapProgress != null) setShownProgress(mapProgress);
-  }, [mapReady, mapProgress]);
 
   useEffect(() => {
     if (mapReady || !webgl || mapHeard) return;
@@ -382,6 +390,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function pick(district: District) {
+    if (district.status === "soon") {
+      setNote(`${district.name} is not open.`);
+      return;
+    }
     setFrameMode("in");
     setFocusId(district.id);
     setFollowIndex(null);
@@ -403,11 +415,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     if (district.id === "vault-quarter") audio.alarm();
     audio.crowd(district.id === "cup-stadium");
     commit({ ...save, quests });
-    if (district.status === "soon") {
-      setPaused(true);
-      setNote(`${district.name} is not open.`);
-      return;
-    }
     if (!district.href) {
       setNote("The lobby is the hall.");
       return;
@@ -423,11 +430,11 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const tutorial = save.tutorial === 0 ? 1 : save.tutorial;
     if (!save.quests.follow) audio.sting("quest");
     commit({ ...save, tutorial, quests: { ...save.quests, follow: true } });
-    setNote(`${[...CITY_AGENTS, ...visitors][index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
+    setNote(`${visitors[index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
   }
 
   const mode = phase === "cutscene" ? "cutscene" : phase === "city" ? "play" : "orbit";
-  const cast = [...CITY_AGENTS, ...visitors];
+  const cast = visitors;
   const followed = followIndex === null ? null : cast[followIndex];
   const vantages = DISTRICTS.filter((district) => (VANTAGE_IDS as readonly string[]).includes(district.id));
 
@@ -516,7 +523,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                         />
                         <p className="live-feed num">
                           <span className="live-dot" aria-hidden="true" />
-                          <Tick value={CITY_AGENTS.length + visitors.length} /> in the city
+                          <Tick value={visitors.length} /> in the city
                         </p>
                         <Minimap
                           spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
@@ -673,7 +680,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
-              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
+              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} inside={visitors.slice(0, 3).map((agent) => agent.name)} />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
             {mapStuck && !mapReady ? (

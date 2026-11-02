@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/loadProgress";
 import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -16,32 +17,45 @@ const ROOMS: Record<string, { url: string; position: [number, number, number] }>
   "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -42] },
 };
 
+/** Same rig as the Lobby. Diffuse walls need this much light under SwiftShader. */
+const LOBBY_LIGHTS: Array<{ at: [number, number, number]; color: string; intensity: number; distance: number }> = [
+  { at: [0, 6.2, -0.6], color: "#e7c9a4", intensity: 26, distance: 16 },
+  { at: [-3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
+  { at: [3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
+];
+
 const ROOM_LIGHTS: Record<string, Array<{ at: [number, number, number]; color: string; intensity: number; distance: number }>> = {
-  "vault-quarter": [
-    { at: [-3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
-    { at: [3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
-    { at: [0, 2.8, 1.2], color: "#c5cad2", intensity: 7.4, distance: 5.5 },
-  ],
-  "trading-village": [
-    { at: [-3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
-    { at: [3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
-    { at: [0, 5.1, 2.2], color: "#c9d3de", intensity: 11.5, distance: 10 },
-  ],
-  "war-room": [
-    { at: [0, 1.35, -0.4], color: "#1f6b45", intensity: 2.2, distance: 3.4 },
-    { at: [0, 2.6, -3.6], color: "#d4d2cc", intensity: 5, distance: 6 },
-  ],
-  "skin-forge": [
-    { at: [0, 6.2, -0.6], color: "#e7c9a4", intensity: 26, distance: 16 },
-    { at: [-3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
-    { at: [3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
-  ],
-  "cup-stadium": [
-    { at: [-1.7, 5.3, -2.5], color: "#f0d2a8", intensity: 28, distance: 11 },
-    { at: [1.7, 5.3, -2.5], color: "#f0d2a8", intensity: 28, distance: 11 },
-    { at: [0, 5.1, 0.5], color: "#e7b07a", intensity: 16, distance: 9 },
-  ],
+  "vault-quarter": LOBBY_LIGHTS,
+  "trading-village": LOBBY_LIGHTS,
+  "war-room": [...LOBBY_LIGHTS, { at: [0, 2.4, -0.4], color: "#3d9a62", intensity: 8, distance: 10 }],
+  "skin-forge": LOBBY_LIGHTS,
+  "cup-stadium": LOBBY_LIGHTS,
 };
+
+/** Lobby walls are rough and barely metal. The other rooms ship dark or mirror-like, which SwiftShader paints black. */
+function matchLobbyMaterial(material: THREE.Material, meshName: string) {
+  const standard = material as THREE.MeshStandardMaterial;
+  if (!standard.isMeshStandardMaterial) return material;
+  const copy = standard.clone();
+  const name = `${copy.name} ${meshName}`.toLowerCase();
+  if (name.includes("laser") || name.includes("glow")) return copy;
+  const structural = name.includes("wall") || name.includes("floor") || name.includes("trim");
+  if (structural) {
+    copy.metalness = Math.min(copy.metalness, name.includes("trim") ? 0.2 : 0.06);
+    copy.roughness = Math.max(copy.roughness, 0.58);
+    const luma = (copy.color.r + copy.color.g + copy.color.b) / 3;
+    if (luma > 0.001 && luma < 0.34) {
+      const target = name.includes("floor") ? 0.28 : name.includes("trim") ? 0.52 : 0.46;
+      copy.color.multiplyScalar(Math.min(target / luma, 8));
+    }
+  } else if (copy.metalness > 0.7) {
+    copy.metalness = 0.35;
+    copy.roughness = Math.max(copy.roughness, 0.42);
+  }
+  copy.envMapIntensity = 0.15;
+  copy.fog = false;
+  return copy;
+}
 
 function RoomMesh({ url }: { url: string }) {
   const gltf = useGLTF(url, false, true);
@@ -53,15 +67,19 @@ function RoomMesh({ url }: { url: string }) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const name = mesh.name.toLowerCase();
+      if (name.includes("beam")) mesh.visible = false;
+      const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map((material) =>
+        matchLobbyMaterial(material, mesh.name),
+      );
       materials.forEach((material) => {
         const standard = material as THREE.MeshStandardMaterial;
-        const name = mesh.name.toLowerCase();
-        if (name.includes("beam")) mesh.visible = false;
+        if (!standard.isMeshStandardMaterial) return;
         if (name.includes("laser")) standard.emissiveIntensity = 2.1;
         else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
         else if (standard.emissiveIntensity > 2) standard.emissiveIntensity = 2;
       });
+      mesh.material = Array.isArray(mesh.material) ? materials : materials[0];
     });
     return cloned;
   }, [gltf.scene]);
@@ -379,9 +397,9 @@ function RoomBoards({ id }: { id: string }) {
         {screen("WEB", [{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }])}
         {screen("CRYPTO", [{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }])}
         {screen("SCORE", [
-          { label: "CONTRACT", value: "100", tone: "orange" },
-          { label: "WEB", value: "150", tone: "green" },
-          { label: "CRYPTO", value: "80", tone: "orange" },
+          { label: "CONTRACT", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" },
+          { label: "WEB", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "green" },
+          { label: "CRYPTO", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" },
         ])}
         <HoloMap />
       </>
