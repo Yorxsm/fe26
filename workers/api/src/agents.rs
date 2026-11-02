@@ -2018,21 +2018,14 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
             .as_ref()
             .and_then(|action| action.intent.as_deref());
         return vault_act(
-            state,
-            index,
-            &agent_id,
-            kind,
-            target,
-            intent,
-            &request_id,
-            now,
+            state, index, &agent_id, kind, target, intent, request_id, now,
         );
     }
     let current = current_seat(&state.book.matches[index]);
     if current != seat {
         return fail(403, "not_your_turn", "Wait for your seat.");
     }
-    if !legal_actions(&arena_id).iter().any(|legal| *legal == kind) {
+    if !legal_actions(&arena_id).contains(&kind) {
         return fail(
             400,
             "illegal_action",
@@ -2134,12 +2127,11 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
-            if play.vault.is_some() {
-                let (rows, ended) = {
-                    let vault = play.vault.as_mut().unwrap();
-                    let rows = vault.resolve(now);
-                    (rows, vault.ended)
-                };
+            let resolved = play.vault.as_mut().map(|vault| {
+                let rows = vault.resolve(now);
+                (rows, vault.ended)
+            });
+            if let Some((rows, ended)) = resolved {
                 for row in rows {
                     play.actions.push(Played {
                         agent_id: row.agent_id,
@@ -3606,8 +3598,10 @@ mod tests {
             created_unix: 100,
         });
 
-        let mut state = ArenaState::default();
-        state.book = before.clone();
+        let mut state = ArenaState {
+            book: before.clone(),
+            ..ArenaState::default()
+        };
         let now = 1 + SEEN_KEEP_SECS;
         assert!(prune_seen(&mut state, now));
         assert_eq!(state.book.seen.len(), 1);

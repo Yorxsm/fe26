@@ -71,8 +71,9 @@ cron, every 5 minutes --> fe2vi-api
 Rust 1.93 (see `rust-toolchain.toml`) and Node 22.
 
 ```bash
-cargo test --workspace
 cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 
 cd apps/web
 npm ci

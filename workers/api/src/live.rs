@@ -868,7 +868,7 @@ fn village_rows(state: &ArenaState, window: &str) -> Option<Vec<serde_json::Valu
     Some(out)
 }
 
-fn ensure_round<'a>(state: &'a mut ArenaState, now: u64) -> &'a mut CupRound {
+fn ensure_round(state: &mut ArenaState, now: u64) -> &mut CupRound {
     let slot = fe2vi_core::weekly_slot(now);
     let round_id = format!("cup_{}", slot.start_unix);
     if let Some(index) = state
@@ -1259,7 +1259,7 @@ pub fn verify_personal_signature(address: &str, message: &str, signature: &str) 
 
 fn hex_bytes(value: &str) -> Option<Vec<u8>> {
     let value = value.trim().strip_prefix("0x").unwrap_or(value.trim());
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(value.len() / 2);

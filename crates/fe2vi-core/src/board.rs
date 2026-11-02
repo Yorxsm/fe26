@@ -370,11 +370,7 @@ pub fn event_phase(event: &HostedEvent, now: u64) -> EventPhase {
 
 pub fn countdown_secs(now: u64) -> u64 {
     let slot = next_heist(now);
-    if now >= slot.start_unix {
-        0
-    } else {
-        slot.start_unix - now
-    }
+    slot.start_unix.saturating_sub(now)
 }
 
 /// Heist awards already defined in `score_actions`. Other rooms use that same unit
@@ -600,7 +596,7 @@ fn in_window(now: u64, window: BoardWindow, unix: u64) -> bool {
         BoardWindow::All => true,
         BoardWindow::Today => unix >= day_start(now),
         BoardWindow::Week => unix >= week_start(now),
-        BoardWindow::Season => unix >= SEASON_START && unix < SEASON_END,
+        BoardWindow::Season => (SEASON_START..SEASON_END).contains(&unix),
     }
 }
 
