@@ -233,8 +233,8 @@ function VillageMural() {
     };
   }, []);
   return (
-    <mesh position={[0, 4.8, 8]} rotation={[0, -0.57, 0]} raycast={() => undefined}>
-      <planeGeometry args={[11, 6.2]} />
+    <mesh position={[-18, 4.0, 16]} rotation={[0, -0.85, 0]} raycast={() => undefined}>
+      <planeGeometry args={[9, 5.1]} />
       {map ? <meshBasicMaterial key="painted" map={map} toneMapped={false} side={THREE.DoubleSide} /> : <meshBasicMaterial key="plain" color="#141416" toneMapped={false} side={THREE.DoubleSide} />}
     </mesh>
   );
@@ -1216,13 +1216,15 @@ function Station({
       <primitive
         object={scene}
         onClick={(event: ThreeEvent<MouseEvent>) => {
-          event.stopPropagation();
           let node: THREE.Object3D | null = event.object;
           while (node) {
             const id = node.userData.district as string | undefined;
             if (id) {
               const district = DISTRICTS.find((entry) => entry.id === id);
-              if (district) onPick(district);
+              if (district) {
+                event.stopPropagation();
+                onPick(district);
+              }
               return;
             }
             node = node.parent;
@@ -1453,14 +1455,29 @@ function AgentMesh({
   const mood = useRef<Mood>("trait");
   const skin = useMemo(() => displaySkin(agent, index, poster), [agent, index, poster]);
   const scene = useMemo(() => {
-    const cloned = SkeletonUtils.clone(gltf.scene);
+    const clonedSource = SkeletonUtils.clone(gltf.scene);
+    const cloned = new THREE.Group();
+    while (clonedSource.children.length) cloned.add(clonedSource.children[0]);
     dress(cloned, paintFinish(skin.paint), screenColor(skin.screen));
     applyLook(cloned, skin, "trait");
     cloned.traverse((node) => {
       const mesh = node as THREE.Mesh;
-      if (mesh.isMesh) {
-        mesh.frustumCulled = false;
-        mesh.raycast = () => undefined;
+      if (!mesh.isMesh) return;
+      mesh.frustumCulled = false;
+      mesh.raycast = () => undefined;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      if (/^body\.(torso|leg|arm|head|faceplate|boot|hand)/.test(mesh.name) && material) {
+        material.transparent = false;
+        material.opacity = 1;
+        material.depthWrite = true;
+        material.alphaTest = 0;
+        if (material.color) material.color.set("#d4d2cc");
+        if (material.emissive) {
+          material.emissive.set("#f4efe6");
+          material.emissiveIntensity = 1.15;
+        }
+        material.side = THREE.DoubleSide;
+        mesh.visible = true;
       }
     });
     return cloned;
@@ -1468,8 +1485,9 @@ function AgentMesh({
   const bodyFit = useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene);
     const height = box.max.y - box.min.y;
-    const scale = height > 0.05 ? AGENT_SCALE / height : AGENT_SCALE;
-    return { scale, foot: box.min.y };
+    const sane = height > 0.35 && height < 3.2;
+    const scale = sane ? AGENT_SCALE / height : AGENT_SCALE;
+    return { scale, foot: sane ? box.min.y : 0, height };
   }, [scene]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
   const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
@@ -1517,6 +1535,8 @@ function AgentMesh({
     const roomMove = stationed && focusId && !crossing ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
     if (crossing) {
       pose = { x: crossing.x, y: 0, z: crossing.z, rot: crossing.rot };
+    } else if (frameMode === "in" && stationed) {
+      pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     } else if (roomMove) {
       pose = { x: roomMove.x, y: roomMove.y, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
@@ -1595,6 +1615,8 @@ function AgentMesh({
       group.current.visible = shown && !underChip && roomMove?.visible !== false && !gateHide;
       poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
+      group.current.scale.set(1, 1, 1);
+      group.current.updateMatrixWorld(true);
       if (frameMode === "in" && focusId) {
         const shot = INTERIOR_SHOTS[focusId];
         const crew = INTERIOR_CAST[focusId];
@@ -1676,7 +1698,7 @@ function AgentMesh({
   });
 
   return (
-    <group ref={group}>
+    <group ref={group} frustumCulled={false}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
         <circleGeometry args={[1.15 * fit, 20]} />
         <meshBasicMaterial color="#05060a" transparent opacity={0.38} depthWrite={false} />
@@ -1776,7 +1798,7 @@ function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; qual
   );
 
   useFrame((_, delta) => {
-    gl.toneMappingExposure = shotKind.current === "interior" ? 1.55 : 1;
+    gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : 1;
     grade.composer.render(delta);
   }, 1);
 
@@ -1826,14 +1848,10 @@ function fitInterior(
   const desktop = 1.6;
   const halfH = Math.atan(Math.tan((authored * Math.PI) / 360) * desktop);
   let fov = (2 * Math.atan(Math.tan(halfH) / Math.max(aspect, 0.42)) * 180) / Math.PI;
-  fov = Math.min(74, Math.max(authored, fov));
-  const aim = new THREE.Vector3(shot.aim[0], shot.aim[1] + (aspect < 0.7 ? 0.7 : 0.3), shot.aim[2]);
-  const back = new THREE.Vector3(shot.eye[0] - shot.aim[0], shot.eye[1] - shot.aim[1], shot.eye[2] - shot.aim[2]);
-  const pull = Math.min(1.22, Math.max(1, (desktop / Math.max(aspect, 0.45)) * (authored / fov)));
-  const eye = new THREE.Vector3(shot.aim[0], shot.aim[1], shot.aim[2]).add(back.multiplyScalar(pull));
+  fov = Math.min(68, Math.max(authored, fov));
   return {
-    eye: [eye.x, eye.y, eye.z] as [number, number, number],
-    aim: [aim.x, aim.y, aim.z] as [number, number, number],
+    eye: shot.eye,
+    aim: [shot.aim[0], shot.aim[1] + 0.15, shot.aim[2]] as [number, number, number],
     fov,
   };
 }
@@ -1958,7 +1976,7 @@ function CameraDriver({
     rig.autoRotate = false;
     if (fovTarget.current === null) fovTarget.current = camera.fov;
 
-    if (mode === "orbit") {
+    if (mode === "orbit" && !focusId) {
       fovTarget.current = lobby ? 46 : 48;
       if (lobby) {
         rig.enabled = false;
@@ -2731,23 +2749,9 @@ export default function CityMap({
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
   useEffect(() => {
-    const coreArrived = () => performance.getEntriesByType("resource").some((entry) => entry.name.includes("station-core"));
-    const ready = (step: { active?: boolean; total?: number }) => step.active === false && (step.total ?? 0) > 0 && coreArrived();
-    let timer = 0;
-    const arm = () => {
-      if (timer) return;
-      timer = window.setTimeout(() => setDetail(true), 1600);
-    };
-    if (pendingLoadSteps().some(ready)) arm();
-    const onLoad = (event: Event) => {
-      const step = (event as CustomEvent<{ active?: boolean; total?: number }>).detail;
-      if (step && ready(step)) arm();
-    };
-    window.addEventListener("fe2vi-load", onLoad);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("fe2vi-load", onLoad);
-    };
+    const onPlayable = () => setDetail(true);
+    window.addEventListener("fe2vi-playable", onPlayable);
+    return () => window.removeEventListener("fe2vi-playable", onPlayable);
   }, []);
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;

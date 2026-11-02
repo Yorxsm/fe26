@@ -42,8 +42,8 @@ function matchLobbyMaterial(material: THREE.Material, meshName: string) {
   const name = `${copy.name} ${meshName}`.toLowerCase();
       if (name.includes("laser") || name.includes("glow")) return copy;
       const luma = (copy.color.r + copy.color.g + copy.color.b) / 3;
-      if (luma > 0.001 && luma < 0.42) {
-        copy.color.multiplyScalar(Math.min(0.5 / luma, 8));
+      if (luma > 0.001 && luma < 0.28) {
+        copy.color.multiplyScalar(Math.min(0.34 / luma, 4));
       }
       copy.metalness = Math.min(copy.metalness, name.includes("trim") ? 0.2 : 0.12);
       copy.roughness = Math.max(copy.roughness, 0.55);
@@ -625,8 +625,8 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   return (
     <Suspense fallback={null}>
       <group position={room.position}>
-        <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.15 : 2.6} />
-        <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.85 : 1.85} />
+        <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.05 : 1.35} />
+        <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.72 : 0.9} />
         <RoomMesh key={`${focusId}-${room.url}`} url={room.url} roomId={focusId} />
         {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
           <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />

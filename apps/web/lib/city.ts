@@ -191,11 +191,11 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "trading-village": { eye: [46, 2.5, 16.8], aim: [46, 2.3, 8.4], fov: 52 },
   "war-room": { eye: [12, 2.05, 42.6], aim: [12, 1.75, 34.2], fov: 52 },
   // Wide enough that the four signs and the crew sit inside both 1280×800 and a phone.
-  "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
+  "skin-forge": { eye: [-38, 1.85, -21.6], aim: [-38, 1.7, -27.4], fov: 48 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
   "cup-stadium": { eye: [-8, 2.1, -39.4], aim: [-8, 1.7, -44.6], fov: 50 },
   // Same forge shell as the lobby, so the eye uses that shell's doorway, not the generic room shot.
-  "oracle-plaza": { eye: [20, 2.4, -4.4], aim: [20, 2.75, -14.6], fov: 46 },
+  "oracle-plaza": { eye: [20, 1.85, -7.6], aim: [20, 1.7, -13.4], fov: 48 },
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -322,9 +322,9 @@ export const ROOM_STATIONS: Record<string, Array<[number, number, number]>> = {
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
   // World meters. Flank the boards; the frame audit rejects anyone on a screen or under 3 m.
   "vault-quarter": [
-    { index: 0, x: -43.3, z: 13.1, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 1, x: -41.85, z: 13.65, rot: Math.PI, speed: 0, clip: "celebrate" },
-    { index: 2, x: -40.6, z: 13.0, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 0, x: -43.3, z: 16.2, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: -41.4, z: 16.7, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 2, x: -40.2, z: 16.0, rot: Math.PI, speed: 1.1, clip: "walk" },
   ],
   "trading-village": [
     { index: 0, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
@@ -413,7 +413,7 @@ export function padStand(index: number) {
   return {
     x: door[0] + side,
     y: 0.02,
-    z: origin[1] + footprint.hz * 0.625 + 2.2,
+    z: door[1] + 1.7,
     rot: Math.PI,
   };
 }

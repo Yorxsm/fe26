@@ -92,18 +92,64 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
   const camera = sample?.camera;
   if (meshes > 0 && camera) break;
 }
+const direct = sample;
+await send("Page.navigate", { url: `${origin}/` });
+await delay(1500);
+await send("Runtime.evaluate", {
+  expression: `[...document.querySelectorAll('button')].find((button) => /Enter as spectator/i.test(button.textContent))?.click()`,
+});
+await delay(400);
+await send("Runtime.evaluate", {
+  expression: `[...document.querySelectorAll('button')].find((button) => /Skip/i.test(button.textContent))?.click()`,
+});
+await delay(400);
+await send("Runtime.evaluate", {
+  expression: `[...document.querySelectorAll('button')].find((button) => /Stay on the overview/i.test(button.textContent))?.click()`,
+});
+await delay(3500);
+const box = await send("Runtime.evaluate", {
+  expression: `(() => { const canvas = document.querySelector('canvas'); const rect = canvas.getBoundingClientRect(); return { x: rect.x, y: rect.y, w: rect.width, h: rect.height }; })()`,
+  returnByValue: true,
+});
+const canvas = box.result?.value ?? { x: 0, y: 0, w: 1440, h: 900 };
+const spots = [
+  [0.7, 0.42],
+  [0.62, 0.46],
+  [0.5, 0.5],
+  [0.35, 0.48],
+];
+let clicked = null;
+for (const [px, py] of spots) {
+  const x = canvas.x + canvas.w * px;
+  const y = canvas.y + canvas.h * py;
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await delay(400);
+    const result = await send("Runtime.evaluate", { expression: expr, returnByValue: true });
+    clicked = result.result?.value ?? null;
+    const meshes = Number(clicked?.meshes ?? 0);
+    const camera = clicked?.camera;
+    if (meshes > 0 && camera && camera.y > 0.8 && camera.y < 6) break;
+  }
+  if (Number(clicked?.meshes ?? 0) > 0 && clicked?.camera && clicked.camera.y > 0.8 && clicked.camera.y < 6) break;
+}
 ws.close();
 stop();
 
-const meshes = Number(sample?.meshes ?? 0);
-const camera = sample?.camera;
+const meshes = Number(direct?.meshes ?? 0);
+const camera = direct?.camera;
 const inside =
   camera &&
   camera.y > 0.8 &&
   camera.y < 6 &&
   Math.hypot(camera.x + 38, camera.z + 24) < 14;
-console.log(JSON.stringify({ meshes, camera, focusId: sample?.focusId ?? null, roomId: sample?.roomId ?? null }));
-if (meshes < 1 || !inside) {
+const clickMeshes = Number(clicked?.meshes ?? 0);
+const clickCamera = clicked?.camera;
+const clickInside = clickCamera && clickCamera.y > 0.8 && clickCamera.y < 6 && clickMeshes > 0;
+console.log(JSON.stringify({ direct: { meshes, camera, focusId: direct?.focusId ?? null }, click: { meshes: clickMeshes, camera: clickCamera, focusId: clicked?.focusId ?? null } }));
+if (meshes < 1 || !inside || !clickInside) {
   console.error("Room rendered empty or the camera stayed outside");
   process.exit(1);
 }

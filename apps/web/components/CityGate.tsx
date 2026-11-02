@@ -153,7 +153,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [hintsOpen, setHintsOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
-  const [shownProgress, setShownProgress] = useState(0);
+  const [shownProgress, setShownProgress] = useState<number | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapHeard, setMapHeard] = useState(false);
   const [mapStuck, setMapStuck] = useState(false);
@@ -296,6 +296,25 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, []);
 
   useEffect(() => {
+    if (!mapReady) return;
+    const familyOf = (variable: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(variable).split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") ?? "";
+    const body = familyOf("--font-body");
+    const mono = familyOf("--font-mono");
+    const faces: Array<[string, string, string]> = [
+      [body, "/fonts/Inter-Regular.ttf", "400"],
+      [body, "/fonts/Inter-SemiBold.ttf", "600"],
+      [body, "/fonts/Inter-Bold.ttf", "700"],
+      [mono, "/fonts/JetBrainsMono-Regular.ttf", "400"],
+    ];
+    for (const [family, url, weight] of faces) {
+      if (!family) continue;
+      const face = new FontFace(family, `url(${url})`, { weight, style: "normal" });
+      face.load().then((loaded) => document.fonts.add(loaded)).catch(() => undefined);
+    }
+  }, [mapReady]);
+
+  useEffect(() => {
     const queue: number[] = [];
     let finished = false;
     let locked = false;
@@ -327,12 +346,18 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const drain = () => {
       if (queue.length) {
         const next = queue.shift() ?? 0;
-        setShownProgress((current) => Math.max(current, Math.round(next)));
+        setShownProgress((current) => {
+          const nextValue = Math.max(current ?? 0, Math.round(next));
+          return nextValue === 0 ? current : nextValue;
+        });
         frame = window.requestAnimationFrame(drain);
         return;
       }
       if (finished) {
-        readyTimer = window.setTimeout(() => setMapReady(true), 1200);
+        readyTimer = window.setTimeout(() => {
+          setMapReady(true);
+          window.dispatchEvent(new Event("fe2vi-playable"));
+        }, 1200);
         return;
       }
       frame = window.requestAnimationFrame(drain);
@@ -439,6 +464,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       setNote(`${district.name} is not open.`);
       return;
     }
+    setPhase("city");
     setFrameMode("in");
     setFocusId(district.id);
     setFollowIndex(null);
@@ -478,7 +504,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     setNote(`${visitors[index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
   }
 
-  const mode = phase === "cutscene" ? "cutscene" : phase === "city" ? "play" : "orbit";
+  const mode = phase === "cutscene" ? "cutscene" : phase === "city" || focusId ? "play" : "orbit";
   const cast = visitors;
   const lines = useMemo(() => {
     const slug = focusId ? ROOM_SLUG[focusId] : "";
@@ -777,7 +803,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 paused={paused}
                 mode={mode}
                 beat={beat}
-                focusId={phase === "city" ? focusId : null}
+                focusId={focusId}
                 followIndex={phase === "city" ? followIndex : null}
                 frameMode={frameMode}
                 lineup={lineup}

@@ -16,21 +16,13 @@ const display = localFont({
 });
 
 const body = localFont({
-  src: [
-    { path: "../public/fonts/Inter-Regular.ttf", weight: "400", style: "normal" },
-    { path: "../public/fonts/Inter-Medium.ttf", weight: "500", style: "normal" },
-    { path: "../public/fonts/Inter-SemiBold.ttf", weight: "600", style: "normal" },
-    { path: "../public/fonts/Inter-Bold.ttf", weight: "700", style: "normal" },
-  ],
+  src: [{ path: "../public/fonts/Inter-Medium.ttf", weight: "500", style: "normal" }],
   variable: "--font-body",
   display: "swap",
 });
 
 const mono = localFont({
-  src: [
-    { path: "../public/fonts/JetBrainsMono-Regular.ttf", weight: "400", style: "normal" },
-    { path: "../public/fonts/JetBrainsMono-Medium.ttf", weight: "500", style: "normal" },
-  ],
+  src: [{ path: "../public/fonts/JetBrainsMono-Medium.ttf", weight: "500", style: "normal" }],
   variable: "--font-mono",
   display: "swap",
 });
