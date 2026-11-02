@@ -52,6 +52,9 @@ pub struct Player {
     pub capabilities: Vec<String>,
     #[serde(default = "default_skin_id")]
     pub skin_id: String,
+    /// Unix timestamps of War proof attempts, including misses.
+    #[serde(default)]
+    pub war_hits: Vec<u64>,
 }
 
 fn default_skin_id() -> String {
@@ -326,7 +329,7 @@ pub fn registered_rows(
                 Some(PointRoom::War) => (scores.war, scores.war_games, scores.war_wins),
                 None => (scores.total, scores.games, scores.wins),
             };
-            if games == 0 {
+            if games == 0 || points == 0 {
                 return None;
             }
             Some(PublicRow {
@@ -700,6 +703,7 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
         wallets: wallets.clone(),
         capabilities: capabilities.clone(),
         skin_id: "ingot".to_string(),
+        war_hits: Vec::new(),
     });
     json(
         201,
@@ -1013,6 +1017,21 @@ fn submit_war(
             false,
             None,
         );
+    }
+    if let Some(player) = state
+        .book
+        .players
+        .iter_mut()
+        .find(|player| player.agent_id == agent_id)
+    {
+        let window = crate::limits::WAR_SUBMIT_WINDOW_SECS;
+        player
+            .war_hits
+            .retain(|unix| now.saturating_sub(*unix) < window);
+        if player.war_hits.len() as u32 >= crate::limits::WAR_SUBMITS_PER_MINUTE {
+            return fail(429, "rate_limited", "Too many War proofs. Wait and retry.");
+        }
+        player.war_hits.push(now);
     }
     let Some(challenge) = challenges().iter().find(|row| row.id == challenge_id) else {
         return fail(404, "not_found", "No such War challenge.");
@@ -3410,7 +3429,9 @@ mod tests {
         assert!(rows
             .iter()
             .all(|row| row["games"].as_u64().unwrap_or(0) > 0));
-        assert!(rows.iter().any(|row| row["name"] == "Mason"));
+        assert!(rows
+            .iter()
+            .all(|row| row["points"].as_u64().unwrap_or(0) > 0));
 
         let (hall_status, hall) = call(
             &mut state,
@@ -3538,6 +3559,7 @@ mod tests {
             wallets: Wallets::default(),
             capabilities: Vec::new(),
             skin_id: "ingot".into(),
+            war_hits: Vec::new(),
         };
         let done = PlayMatch {
             match_id: "mt_done".into(),

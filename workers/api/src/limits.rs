@@ -9,6 +9,10 @@ use sha2::{Digest, Sha256};
 
 pub const REGISTER_PER_HOUR: u32 = 5;
 pub const REGISTER_WINDOW_SECS: u64 = 60 * 60;
+pub const REGISTER_PER_DAY: u32 = 20;
+pub const REGISTER_DAY_SECS: u64 = 24 * 60 * 60;
+pub const WAR_SUBMITS_PER_MINUTE: u32 = 5;
+pub const WAR_SUBMIT_WINDOW_SECS: u64 = 60;
 /// Burst cap enforced by the binding. A minute cannot exceed the hourly cap.
 pub const REGISTER_BURST: u32 = 5;
 pub const REGISTER_BURST_PERIOD_SECS: u64 = 60;
@@ -73,11 +77,19 @@ pub fn classify(method: &str, path: &str, authorization: Option<&str>, ip: &str)
 }
 
 pub fn register_retry_after(now: u64) -> u64 {
-    let elapsed = now % REGISTER_WINDOW_SECS;
+    window_retry(now, REGISTER_WINDOW_SECS)
+}
+
+pub fn register_day_retry(now: u64) -> u64 {
+    window_retry(now, REGISTER_DAY_SECS)
+}
+
+fn window_retry(now: u64, window: u64) -> u64 {
+    let elapsed = now % window;
     if elapsed == 0 {
-        REGISTER_WINDOW_SECS
+        window
     } else {
-        REGISTER_WINDOW_SECS - elapsed
+        window - elapsed
     }
 }
 

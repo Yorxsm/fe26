@@ -377,6 +377,7 @@ mod edge {
             "ALTER TABLE players ADD COLUMN wallets_json TEXT NOT NULL DEFAULT '{}'",
             "ALTER TABLE players ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE players ADD COLUMN skin_id TEXT NOT NULL DEFAULT 'ingot'",
+            "ALTER TABLE players ADD COLUMN war_hits_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE player_matches ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE player_matches ADD COLUMN vault_json TEXT NOT NULL DEFAULT 'null'",
             "ALTER TABLE player_lobby_posts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
@@ -462,6 +463,8 @@ mod edge {
             wallets_json: String,
             capabilities_json: String,
             skin_id: String,
+            #[serde(default)]
+            war_hits_json: String,
         }
         #[derive(serde::Deserialize)]
         struct TokenRow {
@@ -537,7 +540,7 @@ mod edge {
             match_id: String,
             created_unix: i64,
         }
-        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
+        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let tokens = sql
             .exec(
                 "SELECT agent_id, token_hash, token_prefix FROM player_tokens",
@@ -617,6 +620,7 @@ mod edge {
                         capabilities: serde_json::from_str(&row.capabilities_json)
                             .unwrap_or_default(),
                         skin_id: row.skin_id,
+                        war_hits: serde_json::from_str(&row.war_hits_json).unwrap_or_default(),
                     }
                 })
                 .collect(),
@@ -769,8 +773,9 @@ mod edge {
             let wallets = serde_json::to_string(&player.wallets).unwrap_or_else(|_| "{}".into());
             let capabilities =
                 serde_json::to_string(&player.capabilities).unwrap_or_else(|_| "[]".into());
+            let war_hits = serde_json::to_string(&player.war_hits).unwrap_or_else(|_| "[]".into());
             sql.exec(
-                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET handle = excluded.handle, name = excluded.name, description = excluded.description, owner_contact = excluded.owner_contact, token_hash = excluded.token_hash, token_prefix = excluded.token_prefix, status = excluded.status, created_unix = excluded.created_unix, wallets_json = excluded.wallets_json, capabilities_json = excluded.capabilities_json, skin_id = excluded.skin_id",
+                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET handle = excluded.handle, name = excluded.name, description = excluded.description, owner_contact = excluded.owner_contact, token_hash = excluded.token_hash, token_prefix = excluded.token_prefix, status = excluded.status, created_unix = excluded.created_unix, wallets_json = excluded.wallets_json, capabilities_json = excluded.capabilities_json, skin_id = excluded.skin_id, war_hits_json = excluded.war_hits_json",
                 Some(vec![
                     player.agent_id.clone().into(),
                     player.handle.clone().into(),
@@ -784,6 +789,7 @@ mod edge {
                     wallets.into(),
                     capabilities.into(),
                     player.skin_id.clone().into(),
+                    war_hits.into(),
                 ]),
             )?;
             sql.exec(
@@ -1007,10 +1013,8 @@ mod edge {
                 ensure_rate_sql(&sql)?;
                 register_slot_open(&sql, ip, now)?
             };
-            if !open {
-                return Ok(Some(rate_limited(crate::limits::register_retry_after(
-                    now,
-                ))?));
+            if let Some(retry_after) = open {
+                return Ok(Some(rate_limited(retry_after)?));
             }
             if let Some(response) = self
                 .limit_binding(
@@ -1077,31 +1081,54 @@ mod edge {
         Ok(())
     }
 
-    fn register_slot_open(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<bool> {
+    fn register_slot_open(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<Option<u64>> {
         #[derive(serde::Deserialize)]
         struct Row {
             n: i64,
         }
         let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        let day = (now / crate::limits::REGISTER_DAY_SECS) as i64;
         sql.exec(
             "DELETE FROM rate_register WHERE bucket < ?",
             Some(vec![(bucket - 1).into()]),
         )?;
-        let rows = sql
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS rate_register_day (ip TEXT NOT NULL, bucket INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (ip, bucket))",
+            None::<Vec<worker::SqlStorageValue>>,
+        )?;
+        let hour_rows = sql
             .exec(
                 "SELECT n FROM rate_register WHERE ip = ? AND bucket = ?",
                 Some(vec![ip.to_string().into(), bucket.into()]),
             )?
             .to_array::<Row>()?;
-        let n = rows.first().map(|row| row.n).unwrap_or(0);
-        Ok(n < crate::limits::REGISTER_PER_HOUR as i64)
+        let day_rows = sql
+            .exec(
+                "SELECT n FROM rate_register_day WHERE ip = ? AND bucket = ?",
+                Some(vec![ip.to_string().into(), day.into()]),
+            )?
+            .to_array::<Row>()?;
+        let hour_n = hour_rows.first().map(|row| row.n).unwrap_or(0);
+        let day_n = day_rows.first().map(|row| row.n).unwrap_or(0);
+        if day_n >= crate::limits::REGISTER_PER_DAY as i64 {
+            return Ok(Some(crate::limits::register_day_retry(now)));
+        }
+        if hour_n >= crate::limits::REGISTER_PER_HOUR as i64 {
+            return Ok(Some(crate::limits::register_retry_after(now)));
+        }
+        Ok(None)
     }
 
     fn note_register(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<()> {
         let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        let day = (now / crate::limits::REGISTER_DAY_SECS) as i64;
         sql.exec(
             "INSERT INTO rate_register (ip, bucket, n) VALUES (?, ?, 1) ON CONFLICT(ip, bucket) DO UPDATE SET n = n + 1",
             Some(vec![ip.to_string().into(), bucket.into()]),
+        )?;
+        sql.exec(
+            "INSERT INTO rate_register_day (ip, bucket, n) VALUES (?, ?, 1) ON CONFLICT(ip, bucket) DO UPDATE SET n = n + 1",
+            Some(vec![ip.to_string().into(), day.into()]),
         )?;
         Ok(())
     }
