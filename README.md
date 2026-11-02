@@ -172,6 +172,7 @@ Over the limit, the API returns 429 `{"error":"rate_limited"}` and `Retry-After`
 
 - The Workers rate-limit binding cannot express a one-hour window. Registration uses the counter described above.
 - A headless software GL context is not the 60 fps target. Click feedback is independent of that frame time.
+- The loading bar follows texture and model progress from the 3D loader. It stays at 0 until that loader reports.
 - Idempotency rows are removed when the match ends, or after 24 hours.
 - `?now=` changes the clock only in tests, or in a binary compiled with `FE2VI_ALLOW_NOW=1`. Production uses the wall clock.
 - `contracts/` is not part of the running site.

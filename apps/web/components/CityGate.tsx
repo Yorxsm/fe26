@@ -147,7 +147,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
   const [mapProgress, setMapProgress] = useState<number | null>(null);
-  const [shownProgress, setShownProgress] = useState(3);
+  const [shownProgress, setShownProgress] = useState(0);
   const [mapReady, setMapReady] = useState(false);
   const [mapHeard, setMapHeard] = useState(false);
   const [mapStuck, setMapStuck] = useState(false);
@@ -289,14 +289,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       setShownProgress(100);
       return;
     }
-    const id = window.setInterval(() => {
-      setShownProgress((value) => {
-        const target = Math.min(92, Math.max(0, mapProgress ?? 0));
-        const creep = value + Math.max(0.35, (92 - value) * 0.018);
-        return Math.min(92, Math.max(creep, target));
-      });
-    }, 180);
-    return () => window.clearInterval(id);
+    if (mapProgress != null) setShownProgress(mapProgress);
   }, [mapReady, mapProgress]);
 
   useEffect(() => {
