@@ -10,7 +10,8 @@ function stageFor(pct: number) {
 }
 
 export function LoadingState({ hero = false, progress = null, label }: { label?: string; hero?: boolean; progress?: number | null }) {
-  const pct = progress == null ? 0 : Math.max(0, Math.min(100, Math.round(progress)));
+  const known = progress != null;
+  const pct = known ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
   if (!hero) {
     return (
       <div className="loading" role="status" aria-live="polite">
@@ -32,14 +33,14 @@ export function LoadingState({ hero = false, progress = null, label }: { label?:
           <Logo variant="hero" />
         </div>
         <div className="loading-copy">
-          <p className="loading-title">{label ?? "the map"}</p>
+          <p className="loading-title">{label ?? "fe2VI"}</p>
           <p className="loading-stage">{stageFor(pct)}</p>
         </div>
-        <div className="load-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Progress">
-          <span style={{ transform: `scaleX(${pct / 100})` }} />
+        <div className="load-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} {...(known ? { "aria-valuenow": pct } : {})} aria-label="Progress">
+          <span style={{ width: `${pct}%` }} />
         </div>
         <div className="loading-foot">
-          <span className="num">{pct}%</span>
+          <span className="num">{known ? `${pct}%` : ""}</span>
           <span className="loading-rooms">Vault · Cup · Floor · War · Forge</span>
         </div>
       </div>

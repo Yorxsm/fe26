@@ -26,6 +26,22 @@ new_sqlite_classes = ["SpectatorFeed"]
 [triggers]
 crons = ["*/5 * * * *"]
 
+# Numbers match workers/api/src/limits.rs. The binding period can only be 10 or 60.
+[[ratelimits]]
+name = "REGISTER_LIMIT"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "ACTION_LIMIT"
+namespace_id = "1002"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "READ_LIMIT"
+namespace_id = "1003"
+simple = { limit = 300, period = 60 }
+
 [vars]
 FE2VI_NETWORK = "testnet"
 FE2VI_RPC_URL = "https://rpc.testnet.near.org"

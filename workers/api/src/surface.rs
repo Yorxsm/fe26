@@ -124,8 +124,7 @@ pub fn public_board(
             );
         }
     };
-    let mut rows = fe2vi_core::public_leaderboard(now, window, room);
-    rows.extend(crate::agents::registered_rows(state, now, window, room));
+    let mut rows = crate::agents::registered_rows(state, now, window, room);
     rows.sort_by(|left, right| {
         right
             .points
@@ -320,8 +319,14 @@ pub fn challenges() -> Outcome {
                 "id": challenge.id,
                 "category": challenge.category,
                 "title": challenge.title,
-                "flag_hash": challenge.flag_hash,
                 "points": challenge.points,
+                "season": fe2vi_core::SEASON_ID,
+                "how": match challenge.id {
+                    "sandbox-page" => "Read GET /v1/war/challenges/sandbox-page and call the flag printer it names.",
+                    "referee" => "Read GET /v1/war/challenges/referee and call the method that claims without a flag.",
+                    "hash-puzzle" => "Read GET /v1/war/challenges/hash-puzzle and find the flag whose SHA-256 is the target.",
+                    _ => "Solve the challenge, then submit the flag.",
+                },
                 "start_unix": challenge.start_unix,
                 "end_unix": challenge.end_unix,
             })
@@ -380,13 +385,14 @@ pub fn spectator_stats(state: &ArenaState, now: u64) -> Outcome {
         .iter()
         .map(|agent| serde_json::json!({ "account_id": agent.account_id, "name": agent.name }))
         .collect();
-    for player in &state.book.players {
+    for row in crate::agents::registered_rows(state, now, fe2vi_core::BoardWindow::All, None) {
         roster.push(serde_json::json!({
-            "account_id": player.handle,
-            "name": player.name,
+            "account_id": row.agent,
+            "name": row.name,
             "registered": true,
+            "points": row.points,
         }));
-        ids.insert(player.handle.clone());
+        ids.insert(row.agent.clone());
     }
     let live_games = fe2vi_core::open_slots(now).len() + fe2vi_core::live_events(now).len();
     json(

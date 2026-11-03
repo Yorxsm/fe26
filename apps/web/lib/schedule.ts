@@ -251,9 +251,9 @@ export function mockQuotes(now: number) {
 }
 
 export const CHALLENGES = [
-  { id: "referee", title: "Referee", category: "contract", points: 100 },
-  { id: "sandbox-page", title: "Sandbox page", category: "web2", points: 150 },
-  { id: "hash-puzzle", title: "Hash puzzle", category: "crypto", points: 80 },
+  { id: "referee", title: "Referee", category: "contract", points: 2 },
+  { id: "sandbox-page", title: "Sandbox page", category: "web2", points: 1 },
+  { id: "hash-puzzle", title: "Hash puzzle", category: "crypto", points: 3 },
 ];
 
 export const EXAMPLE_EVENT = {

@@ -20,6 +20,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      - name: README API paths exist in OpenAPI
+        run: cargo test -p fe2vi-api --lib readme_endpoints_are_in_openapi
       - name: wasm
         run: cargo build --release --target wasm32-unknown-unknown -p arena-factory -p arena-registry -p heist-game -p war-room -p skin-forge -p fe2vi-api
       - name: wasm clippy
@@ -39,6 +41,13 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run build
+      - name: Chrome
+        uses: browser-actions/setup-chrome@v1
+      - name: Room interior is not empty
+        run: |
+          npx next start -p 3210 &
+          for i in $(seq 1 40); do curl -sf -o /dev/null http://127.0.0.1:3210/ && break; sleep 1; done
+          node scripts/check-room.mjs http://127.0.0.1:3210
 
   secrets:
     runs-on: ubuntu-latest

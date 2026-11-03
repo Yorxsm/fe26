@@ -7,11 +7,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-pub const MAX_ROUNDS: u32 = 8;
+/// Best of 5: first seat to 3 round wins, or 5 rounds, ends the match.
+pub const MAX_ROUNDS: u32 = 5;
+pub const ROUNDS_TO_WIN: u32 = 3;
 pub const MAX_ALARM: u32 = 3;
 pub const LOCKS: usize = 3;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultSeat {
     pub agent_id: String,
     pub role: String,
@@ -24,9 +26,11 @@ pub struct VaultSeat {
     pub points: i32,
     pub loot_taken: u32,
     pub objective_met: bool,
+    #[serde(default)]
+    pub round_wins: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultSubmission {
     pub agent_id: String,
     pub action: String,
@@ -35,7 +39,7 @@ pub struct VaultSubmission {
     pub unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultResult {
     pub round: u32,
     pub agent_id: String,
@@ -47,7 +51,7 @@ pub struct VaultResult {
     pub unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VaultMatch {
     pub round: u32,
     pub locks: Vec<bool>,
@@ -92,6 +96,7 @@ impl VaultMatch {
                     points: 0,
                     loot_taken: 0,
                     objective_met: false,
+                    round_wins: 0,
                 }
             })
             .collect();
@@ -279,8 +284,13 @@ impl VaultMatch {
             self.results.push(row);
         }
         self.pending.clear();
+        self.note_round_winner();
         self.round = self.round.saturating_add(1);
-        if self.round > MAX_ROUNDS || self.alarm >= MAX_ALARM || self.loot == 0 {
+        let clinched = self
+            .seats
+            .iter()
+            .any(|seat| seat.round_wins >= ROUNDS_TO_WIN);
+        if self.round > MAX_ROUNDS || clinched || self.alarm >= MAX_ALARM || self.loot == 0 {
             self.ended = true;
             let heats: HashMap<String, u32> = self
                 .seats
@@ -304,6 +314,103 @@ impl VaultMatch {
         out
     }
 
+    fn note_round_winner(&mut self) {
+        let played = self.round;
+        let mut totals: HashMap<String, i32> = HashMap::new();
+        for row in self.results.iter().filter(|row| row.round == played) {
+            *totals.entry(row.agent_id.clone()).or_default() += row.points;
+        }
+        let best = totals.values().copied().max().unwrap_or(0);
+        if best <= 0 {
+            return;
+        }
+        let leaders: Vec<String> = totals
+            .iter()
+            .filter(|(_, points)| **points == best)
+            .map(|(agent_id, _)| agent_id.clone())
+            .collect();
+        if leaders.len() == 1 {
+            if let Some(seat) = self
+                .seats
+                .iter_mut()
+                .find(|seat| seat.agent_id == leaders[0])
+            {
+                seat.round_wins = seat.round_wins.saturating_add(1);
+            }
+        }
+    }
+
+    fn round_results(&self, handles: &HashMap<String, String>) -> Vec<serde_json::Value> {
+        let mut numbers: Vec<u32> = self.results.iter().map(|row| row.round).collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        numbers
+            .into_iter()
+            .map(|number| {
+                let rows: Vec<&VaultResult> = self
+                    .results
+                    .iter()
+                    .filter(|row| row.round == number)
+                    .collect();
+                let mut totals: HashMap<&str, i32> = HashMap::new();
+                for row in &rows {
+                    *totals.entry(row.agent_id.as_str()).or_default() += row.points;
+                }
+                let best = totals.values().copied().max().unwrap_or(0);
+                let leaders: Vec<&str> = totals
+                    .iter()
+                    .filter(|(_, points)| **points == best && best > 0)
+                    .map(|(agent_id, _)| *agent_id)
+                    .collect();
+                let winner = if leaders.len() == 1 {
+                    serde_json::Value::String(handle(handles, leaders[0]).to_string())
+                } else {
+                    serde_json::Value::Null
+                };
+                let seats: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|row| {
+                        serde_json::json!({
+                            "handle": handle(handles, &row.agent_id),
+                            "action": row.action,
+                            "outcome": row.outcome,
+                            "points": row.points,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "round": number,
+                    "winner": winner,
+                    "draw": leaders.len() != 1,
+                    "seats": seats,
+                })
+            })
+            .collect()
+    }
+
+    fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
+        if !self.ended || self.seats.is_empty() {
+            return serde_json::Value::Null;
+        }
+        let mut best = i32::MIN;
+        let mut leaders: Vec<&str> = Vec::new();
+        for seat in &self.seats {
+            let score = self.score(&seat.agent_id);
+            if score > best {
+                best = score;
+                leaders.clear();
+                leaders.push(seat.agent_id.as_str());
+            } else if score == best {
+                leaders.push(seat.agent_id.as_str());
+            }
+        }
+        if leaders.len() == 1 {
+            serde_json::Value::String(handle(handles, leaders[0]).to_string())
+        } else {
+            serde_json::Value::Null
+        }
+    }
+
     pub fn score(&self, agent_id: &str) -> i32 {
         self.seat(agent_id)
             .map(|seat| seat.points - seat.heat as i32 + if seat.objective_met { 5 } else { 0 })
@@ -312,7 +419,7 @@ impl VaultMatch {
 
     pub fn public_json(&self, handles: &HashMap<String, String>) -> serde_json::Value {
         let status = if self.ended {
-            "settled"
+            "over"
         } else if self.pending.len() >= self.seats.len() {
             "resolving"
         } else {
@@ -334,6 +441,7 @@ impl VaultMatch {
                     "lootTaken": seat.loot_taken,
                     "score": self.score(&seat.agent_id),
                     "objectiveMet": seat.objective_met,
+                    "roundWins": seat.round_wins,
                     "submitted": self.submitted(&seat.agent_id),
                 })
             })
@@ -360,12 +468,14 @@ impl VaultMatch {
             "maxRounds": MAX_ROUNDS,
             "maxAlarm": MAX_ALARM,
             "status": status,
+            "winner": self.winner_handle(handles),
             "locks": self.locks,
             "openLocks": self.locks.iter().filter(|open| **open).count(),
             "loot": self.loot,
             "alarm": self.alarm,
             "seats": seats,
             "results": results,
+            "rounds": self.round_results(handles),
             "revealed": self.ended,
         })
     }
@@ -453,5 +563,26 @@ mod tests {
         assert!(game.ended);
         assert!(game.seat("thief").unwrap().objective_met);
         assert_eq!(game.score("thief"), 5);
+    }
+
+    #[test]
+    fn best_of_five_ends_when_one_seat_takes_three_rounds() {
+        let mut game = VaultMatch::start(&["a".into(), "b".into()]);
+        for now in 1..=3 {
+            game.seats[0].intel = 1;
+            game.seats[0].tools = 1;
+            game.submit("a", "crack", None, None, now).unwrap();
+            game.submit("b", "scout", None, None, now).unwrap();
+            game.resolve(now + 1);
+        }
+        assert!(game.ended);
+        assert_eq!(game.seat("a").unwrap().round_wins, ROUNDS_TO_WIN);
+        assert!(game.round <= MAX_ROUNDS);
+        let public = game.public_json(&handles(&["a", "b"]));
+        let rounds = public["rounds"].as_array().unwrap();
+        assert_eq!(rounds.len(), 3);
+        assert_eq!(rounds[0]["winner"], "a");
+        assert_eq!(rounds[0]["draw"], false);
+        assert_eq!(rounds[0]["seats"].as_array().unwrap().len(), 2);
     }
 }

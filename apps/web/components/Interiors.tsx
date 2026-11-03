@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/loadProgress";
 import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -14,36 +15,44 @@ const ROOMS: Record<string, { url: string; position: [number, number, number] }>
   "war-room": { url: "/models/interior-war.glb", position: [12, 0, 40] },
   "skin-forge": { url: "/models/interior-forge.glb", position: [-38, 0, -24] },
   "cup-stadium": { url: "/models/interior-stadium.glb", position: [-8, 0, -42] },
+  "oracle-plaza": { url: "/models/interior-forge.glb", position: [20, 0, -10] },
 };
+
+/** Same rig as the Lobby. Diffuse walls need this much light under SwiftShader. */
+const LOBBY_LIGHTS: Array<{ at: [number, number, number]; color: string; intensity: number; distance: number }> = [
+  { at: [0, 6.2, -0.6], color: "#e7c9a4", intensity: 26, distance: 16 },
+  { at: [-3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
+  { at: [3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
+];
 
 const ROOM_LIGHTS: Record<string, Array<{ at: [number, number, number]; color: string; intensity: number; distance: number }>> = {
-  "vault-quarter": [
-    { at: [-3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
-    { at: [3.4, 2.85, -1.6], color: "#d7dbe2", intensity: 11.5, distance: 6.5 },
-    { at: [0, 2.8, 1.2], color: "#c5cad2", intensity: 7.4, distance: 5.5 },
-  ],
-  "trading-village": [
-    { at: [-3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
-    { at: [3.2, 5.4, -1.2], color: "#d5dde6", intensity: 16.4, distance: 12 },
-    { at: [0, 5.1, 2.2], color: "#c9d3de", intensity: 11.5, distance: 10 },
-  ],
-  "war-room": [
-    { at: [0, 1.35, -0.4], color: "#1f6b45", intensity: 2.2, distance: 3.4 },
-    { at: [0, 2.6, -3.6], color: "#d4d2cc", intensity: 5, distance: 6 },
-  ],
-  "skin-forge": [
-    { at: [0, 6.2, -0.6], color: "#e7c9a4", intensity: 26, distance: 16 },
-    { at: [-3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
-    { at: [3.2, 4.4, -1.5], color: "#e7b07a", intensity: 12, distance: 9 },
-  ],
-  "cup-stadium": [
-    { at: [-1.7, 5.3, -2.5], color: "#f0d2a8", intensity: 28, distance: 11 },
-    { at: [1.7, 5.3, -2.5], color: "#f0d2a8", intensity: 28, distance: 11 },
-    { at: [0, 5.1, 0.5], color: "#e7b07a", intensity: 16, distance: 9 },
-  ],
+  "vault-quarter": LOBBY_LIGHTS,
+  "trading-village": LOBBY_LIGHTS,
+  "war-room": [...LOBBY_LIGHTS, { at: [0, 2.4, -0.4], color: "#3d9a62", intensity: 8, distance: 10 }],
+  "skin-forge": LOBBY_LIGHTS,
+  "cup-stadium": LOBBY_LIGHTS,
+  "oracle-plaza": LOBBY_LIGHTS,
 };
 
-function RoomMesh({ url }: { url: string }) {
+/** Lobby walls are rough and barely metal. The other rooms ship dark or mirror-like, which SwiftShader paints black. */
+function matchLobbyMaterial(material: THREE.Material, meshName: string) {
+  const standard = material as THREE.MeshStandardMaterial;
+  if (!standard.isMeshStandardMaterial) return material;
+  const copy = standard.clone();
+  const name = `${copy.name} ${meshName}`.toLowerCase();
+      if (name.includes("laser") || name.includes("glow")) return copy;
+      const luma = (copy.color.r + copy.color.g + copy.color.b) / 3;
+      if (luma > 0.001 && luma < 0.28) {
+        copy.color.multiplyScalar(Math.min(0.34 / luma, 4));
+      }
+      copy.metalness = Math.min(copy.metalness, name.includes("trim") ? 0.2 : 0.12);
+      copy.roughness = Math.max(copy.roughness, 0.55);
+  copy.envMapIntensity = 0.15;
+  copy.fog = false;
+  return copy;
+}
+
+function RoomMesh({ url, roomId }: { url: string; roomId: string }) {
   const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
@@ -52,19 +61,33 @@ function RoomMesh({ url }: { url: string }) {
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mesh.frustumCulled = true;
+      const name = mesh.name.toLowerCase();
+      if (name.includes("beam")) mesh.visible = false;
+      const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map((material) =>
+        matchLobbyMaterial(material, mesh.name),
+      );
       materials.forEach((material) => {
         const standard = material as THREE.MeshStandardMaterial;
-        const name = mesh.name.toLowerCase();
-        if (name.includes("beam")) mesh.visible = false;
+        if (!standard.isMeshStandardMaterial) return;
         if (name.includes("laser")) standard.emissiveIntensity = 2.1;
         else if (name.includes("glow")) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.32);
-        else standard.emissiveIntensity = Math.min(standard.emissiveIntensity, 0.05);
+        else if (standard.emissiveIntensity > 2) standard.emissiveIntensity = 2;
       });
+      mesh.material = Array.isArray(mesh.material) ? materials : materials[0];
     });
     return cloned;
   }, [gltf.scene]);
+  useLayoutEffect(() => {
+    let meshes = 0;
+    scene.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh && mesh.visible) meshes += 1;
+    });
+    const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+    probe.meshes = meshes;
+    probe.roomId = roomId;
+  }, [roomId, scene]);
   return <primitive object={scene} />;
 }
 
@@ -285,10 +308,8 @@ function Screen({
   );
 }
 
-function placed(id: string, name: string): FrameBoard {
-  const board = FRAME_BOARDS[id]?.find((entry) => entry.name === name);
-  if (!board) throw new Error(`${id} ${name}`);
-  return board;
+function placed(id: string, name: string): FrameBoard | null {
+  return FRAME_BOARDS[id]?.find((entry) => entry.name === name) ?? null;
 }
 
 const BOARD_ROOM: Record<string, string> = {
@@ -297,6 +318,7 @@ const BOARD_ROOM: Record<string, string> = {
   "trading-village": "village",
   "war-room": "war",
   "skin-forge": "all",
+  "oracle-plaza": "all",
 };
 
 function useSeasonBoard(id: string) {
@@ -337,16 +359,23 @@ function RoomBoards({ id }: { id: string }) {
     tone: clock?.live ? "green" : "orange",
   };
   const rankRows = useSeasonBoard(id);
+  const seasonRows = rankRows.some((row) => row.value)
+    ? rankRows
+    : [
+        { label: "SEASON", value: "1", tone: "orange" as const },
+        { label: "FORMAT", value: "BEST OF 5" },
+      ];
   const quotes = mockQuotes(now ?? 0);
   const screen = (name: string, rows: BoardRow[]) => {
     const board = placed(id, name);
+    if (!board) return null;
     return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} />;
   };
   if (id === "vault-quarter") {
     return (
       <>
         {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }])}
-        {screen("SEASON", rankRows)}
+        {screen("SEASON", seasonRows)}
       </>
     );
   }
@@ -379,9 +408,9 @@ function RoomBoards({ id }: { id: string }) {
         {screen("WEB", [{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }])}
         {screen("CRYPTO", [{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }])}
         {screen("SCORE", [
-          { label: "CONTRACT", value: "100", tone: "orange" },
-          { label: "WEB", value: "150", tone: "green" },
-          { label: "CRYPTO", value: "80", tone: "orange" },
+          { label: "CONTRACT", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" },
+          { label: "WEB", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "green" },
+          { label: "CRYPTO", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" },
         ])}
         <HoloMap />
       </>
@@ -392,7 +421,7 @@ function RoomBoards({ id }: { id: string }) {
     return (
       <>
         {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
-        {screen("SEASON", rankRows)}
+        {screen("SEASON", seasonRows)}
         {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => {
           const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
           const status = !slot
@@ -415,7 +444,36 @@ function RoomBoards({ id }: { id: string }) {
       </>
     );
   }
+  if (id === "oracle-plaza") {
+    const signRoom: Record<string, string> = { vault: "vault", cup: "cup", floor: "village", war: "war" };
+    return (
+      <>
+        {screen("HALL", [clockRow, { label: "SEASON", value: "BOARD" }, { label: "MATCHES", value: "LIVE" }])}
+        {screen("SEASON", seasonRows)}
+        {FRAME_BOARDS["oracle-plaza"].filter((board) => board.sign).map((board) => {
+          const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
+          const status = !slot
+            ? "…"
+            : slot.live && slot.kind === "season"
+              ? "Open all season"
+              : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
+          return (
+            <Screen
+              key={board.name}
+              position={board.at}
+              size={board.size}
+              title={board.name}
+              sign={board.sign}
+              status={status}
+              tone={slot?.live ? "green" : "orange"}
+            />
+          );
+        })}
+      </>
+    );
+  }
   const cup = placed(id, "CUP");
+  if (!cup) return null;
   return (
     <>
       <Screen
@@ -594,7 +652,9 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   return (
     <Suspense fallback={null}>
       <group position={room.position}>
-        <RoomMesh key={room.url} url={room.url} />
+        <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.05 : 1.35} />
+        <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.72 : 0.9} />
+        <RoomMesh key={`${focusId}-${room.url}`} url={room.url} roomId={focusId} />
         {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
           <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />
         ))}
@@ -605,4 +665,3 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   );
 }
 
-for (const room of Object.values(ROOMS)) useGLTF.preload(room.url);

@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Info, Trophy } from "lucide-react";
-import { useHeistNow, useRoomClocks } from "@/lib/clock";
-import { CITY_AGENTS, INTERIOR_CAST } from "@/lib/city";
+import { useRoomClocks } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
-import { formatClock, formatCountdown, heistCountdown } from "@/lib/schedule";
+import { formatCountdown } from "@/lib/schedule";
 
 function plainPoints(room: string, book: Record<string, unknown>) {
   const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
@@ -47,7 +46,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "vault-quarter": {
     slug: "vault",
     title: "Vault",
-    works: "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
+    works: "Two roles, hidden objectives, and simultaneous secret orders. Best of 5 rounds.",
     rules: "vault",
   },
   "cup-stadium": {
@@ -65,7 +64,7 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
   "war-room": {
     slug: "war",
     title: "War room",
-    works: "Submit a proof for a sandbox challenge. The arena verifies the hash before points move.",
+    works: "Solve a sandbox, then submit the flag it gives that agent. Points are 1, 2, or 3.",
     rules: "war",
   },
   "skin-forge": {
@@ -74,6 +73,23 @@ const ABOUT: Record<string, { slug: string; title: string; works: string; rules:
     works: "The hall. Boards for the other rooms. Nothing here awards points.",
     rules: "",
   },
+  "oracle-plaza": {
+    slug: "all",
+    title: "Season hall",
+    works: "The season board and the matches the arena has played. This room does not award points.",
+    rules: "",
+  },
+};
+
+export type RoomMatch = {
+  matchId: string;
+  arenaId: string;
+  status: string;
+  turn: number;
+  deadlineAt: string | null;
+  seats: string[];
+  last: { type: string; handle: string; points: number } | null;
+  vault: { round: number; rounds: number; ended: boolean; scores: Array<{ handle: string; roundWins: number }> } | null;
 };
 
 const LOBBY_SIGNS = [
@@ -107,26 +123,105 @@ export function LobbySignList() {
 
 type RoomRow = { rank: number; name: string; points: number };
 
+function localWhen(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function liveDeadline(matches: RoomMatch[] | null, slug: string) {
+  if (!matches) return "";
+  const mine = slug === "all" ? matches : matches.filter((match) => match.arenaId === slug);
+  const live = mine.find((match) => match.status === "live" && match.deadlineAt);
+  return live?.deadlineAt ? ` Deadline ${localWhen(live.deadlineAt)}.` : "";
+}
+
+export type WarClaimRow = { handle: string; points: number; challenge: string };
+
+function displayName(handle: string, names: Record<string, string>) {
+  const known = names[handle];
+  if (known) return known;
+  return handle
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function peopleHere(matches: RoomMatch[] | null, queues: Record<string, string[]>, slug: string, names: Record<string, string>) {
+  if (!matches || slug === "all") return [];
+  const seated = matches.filter((match) => match.status === "live" && match.arenaId === slug).flatMap((match) => match.seats);
+  const waiting = queues[slug] ?? [];
+  return [...new Set([...seated, ...waiting].filter(Boolean).map((handle) => displayName(handle, names)))];
+}
+
+function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: string) {
+  if (matches === null) return { summary: "Reading the arena…", rows: [] as string[] };
+  const mine = slug === "all" ? matches : matches.filter((match) => match.arenaId === slug);
+  const live = mine.find((match) => match.status === "live");
+  const done = mine.find((match) => match.status !== "live");
+  const focus = live ?? done;
+  if (!focus) {
+    if (slug === "war" && claims.length) {
+      return {
+        summary: "Recent solves.",
+        rows: claims.slice(0, 5).map((claim) => `${claim.handle} ${claim.challenge} · ${claim.points}`),
+      };
+    }
+    return { summary: "No one yet", rows: [] as string[] };
+  }
+  const seats = focus.seats.filter(Boolean).join(" · ") || "Open seats";
+  const vault = focus.vault;
+  const summary = live
+    ? vault
+      ? `Round ${vault.round} of ${vault.rounds}. ${vault.scores.map((seat) => `${seat.handle} ${seat.roundWins}`).join(" · ") || seats}. Turn ${live.turn}.`
+      : `${seats}. Turn ${live.turn}.`
+    : `Last match · ${focus.status}. ${seats}.`;
+  const rows = mine
+    .map((match) => match.last)
+    .filter((row): row is NonNullable<RoomMatch["last"]> => Boolean(row?.type && row.handle))
+    .slice(0, 5)
+    .map((row) => (row.points > 0 ? `${row.handle} ${row.type} · ${row.points}` : `${row.handle} ${row.type}`));
+  return { summary, rows };
+}
+
 export function RoomHud({
   roomId,
   tip,
+  matches,
+  queues,
+  claims,
+  names,
   onLeave,
 }: {
   roomId: string;
   tip: string | null;
+  matches: RoomMatch[] | null;
+  queues: Record<string, string[]>;
+  claims: WarClaimRow[];
+  names: Record<string, string>;
   onLeave: () => void;
 }) {
   const about = ABOUT[roomId];
   const [open, setOpen] = useState(false);
+  const [full, setFull] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 800px)");
+    const apply = () => setSheet(narrow.matches);
+    apply();
+    narrow.addEventListener("change", apply);
+    return () => narrow.removeEventListener("change", apply);
+  }, []);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [rules, setRules] = useState<string>("");
   const [rows, setRows] = useState<RoomRow[] | null>(null);
   const [boardError, setBoardError] = useState(false);
-  const now = useHeistNow();
-  const clock = now == null ? null : heistCountdown(now);
-  const crew = (INTERIOR_CAST[roomId] ?? [])
-    .map((member) => CITY_AGENTS[member.index]?.name)
-    .filter(Boolean);
+  const clocks = useRoomClocks();
   const slug = about?.slug ?? "all";
+  const slot = clocks[slug];
+  const activity = roomActivity(matches, claims, slug);
+  const here = peopleHere(matches, queues, slug, names);
 
   useEffect(() => {
     const base = apiBase();
@@ -193,7 +288,12 @@ export function RoomHud({
 
   if (!about) return null;
   return (
-    <div className="room-hud">
+    <div className={sheet && !sheetOpen ? "room-hud is-sheet" : "room-hud"}>
+      {sheet ? (
+        <button type="button" className="btn btn-secondary room-sheet-toggle" onClick={() => setSheetOpen((value) => !value)}>
+          {sheetOpen ? "Hide room panel" : "Room panel"}
+        </button>
+      ) : null}
       <button type="button" className="btn room-leave" onClick={onLeave}>
         <ArrowLeft aria-hidden="true" strokeWidth={1.75} />
         Leave room
@@ -202,7 +302,8 @@ export function RoomHud({
         <Info aria-hidden="true" strokeWidth={1.75} />
         {about.title}
       </button>
-      <section className="room-board" aria-label={`${about.title} leaderboard`}>
+      <p className="room-goal">{about.works}</p>
+      <section className={full ? "room-board is-full" : "room-board"} aria-label={`${about.title} leaderboard`}>
         <header className="room-board-head">
           <span>
             <Trophy aria-hidden="true" strokeWidth={1.75} />
@@ -225,18 +326,33 @@ export function RoomHud({
           </ol>
         ) : null}
         {rows !== null && rows.length > 5 ? <p className="room-board-hint">Scroll the board for more.</p> : null}
-        <a className="btn btn-secondary room-link" href={`/leaderboard?room=${about.slug}`}>
+        <button type="button" className="btn btn-secondary room-link" onClick={() => setFull((value) => !value)}>
           <Trophy aria-hidden="true" strokeWidth={1.75} />
-          Full leaderboard
-        </a>
+          {full ? "Close board" : "Full board"}
+        </button>
+      </section>
+      <section className="room-activity" aria-label={`${about.title} activity`}>
+        <h2>What's happening</h2>
+        <p>{activity.summary}{liveDeadline(matches, slug)}</p>
+        {activity.rows.length ? (
+          <ul>
+            {activity.rows.map((row) => (
+              <li key={row}>{row}</li>
+            ))}
+          </ul>
+        ) : activity.summary === "No one yet" ? null : (
+          <p className="meta">No moves in this room yet.</p>
+        )}
+        <p>Inside now: {here.length ? here.join(", ") : "No one yet"}</p>
       </section>
       {open && (
         <section className="room-panel">
           <h2>{about.title}</h2>
           <p>{about.works}</p>
-          <p className="meta">{clock ? `${clock.live ? "Live" : "Next"} · ${formatClock(clock.secs)}` : "Next"}</p>
+          {roomId !== "skin-forge" && slot ? (
+            <p className="meta">{`${slot.live ? "Live" : "Next"} · ${formatCountdown(slot.secs)}`}</p>
+          ) : null}
           {rules ? <p className="meta">{rules}</p> : null}
-          <p>Inside now: {crew.length ? crew.join(", ") : "No one"}</p>
           {tip ? <p className="meta">{tip}</p> : null}
         </section>
       )}

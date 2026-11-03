@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AudioHud } from "@/components/AudioHud";
 import { Lobby } from "@/components/Lobby";
@@ -11,7 +11,7 @@ import { audio } from "@/lib/audio";
 import { HomeChips } from "@/components/HomeChips";
 import { Logo } from "@/components/Logo";
 import { MarkdownDoc } from "@/components/MarkdownDoc";
-import { LobbySignList, RoomHud } from "@/components/RoomHud";
+import { LobbySignList, RoomHud, type RoomMatch, type WarClaimRow } from "@/components/RoomHud";
 import {
   ArrowLeft,
   ArrowRight,
@@ -36,7 +36,9 @@ import {
   X,
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
-import { CITY_AGENTS, DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { loadShownFloor, pendingLoadSteps, rememberLoadFloor } from "@/lib/loadProgress";
+import { fetchAgents } from "@/lib/agents";
 import { apiBase } from "@/lib/protocol";
 import { defaultSkin } from "@/lib/skin";
 import { fixtureEvents } from "@/lib/fixtures";
@@ -93,6 +95,7 @@ function webglAvailable() {
 }
 
 const ROOM_DEPTH = "fe2vi.roomDepth";
+const LOAD_GIVE_UP_MS = 20_000;
 
 function roomDepth() {
   return Number(sessionStorage.getItem(ROOM_DEPTH) || "0") || 0;
@@ -112,6 +115,7 @@ const ROOM_SLUG: Record<string, string> = {
   "trading-village": "village",
   "war-room": "war",
   "skin-forge": "lobby",
+  "oracle-plaza": "hall",
 };
 
 const HUD_LINKS = [
@@ -126,6 +130,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const path = usePathname();
   const [phase, setPhase] = useState<Phase>("boot");
   const [visitors, setVisitors] = useState<CityAgent[]>([]);
+  const [matches, setMatches] = useState<RoomMatch[] | null>(null);
+  const [queues, setQueues] = useState<Record<string, string[]>>({});
+  const [claims, setClaims] = useState<WarClaimRow[]>([]);
+  const heard = useRef("");
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
   const [paused, setPaused] = useState(false);
@@ -145,9 +153,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [hintsOpen, setHintsOpen] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
-  const [mapProgress, setMapProgress] = useState<number | null>(null);
-  const [shownProgress, setShownProgress] = useState(3);
+  const [shownProgress, setShownProgress] = useState<number | null>(loadShownFloor() || null);
   const [mapReady, setMapReady] = useState(false);
+  const [mapHeard, setMapHeard] = useState(false);
+  const [mapStuck, setMapStuck] = useState(false);
 
   useEffect(() => {
     const loaded = loadSpectator();
@@ -184,9 +193,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const slug = new URLSearchParams(window.location.search).get("room");
     const fromSlug = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
     if (fromSlug) {
-      setFocusId(fromSlug);
-      setFrameMode("in");
-      setPhase("city");
+      selectRoom(fromSlug);
       return;
     }
     if (window.location.hash === "#title") {
@@ -219,9 +226,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       const slug = new URLSearchParams(window.location.search).get("room");
       const id = slug ? Object.entries(ROOM_SLUG).find(([, value]) => value === slug)?.[0] : null;
       if (id) {
-        setFocusId(id);
-        setFrameMode("in");
-        setPhase("city");
+        selectRoom(id);
       } else {
         setFrameMode("out");
         window.setTimeout(() => setFocusId(null), 700);
@@ -239,60 +244,134 @@ export function CityGate({ onboarding }: { onboarding: string }) {
 
   useEffect(() => {
     const base = apiBase();
-    if (!base) return;
     let dead = false;
-    fetch(`${base}/v1/stats`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { roster?: Array<{ account_id?: string; name?: string; registered?: boolean }> } | null) => {
-        if (dead || !body?.roster) return;
-        const known = new Set(CITY_AGENTS.map((agent) => agent.accountId));
-        const extra = body.roster
-          .filter((row) => row.registered && row.account_id && !known.has(row.account_id))
-          .map((row) => ({
-            accountId: row.account_id as string,
-            name: row.name || (row.account_id as string),
-            skin: defaultSkin(row.account_id as string),
-          }));
-        setVisitors(extra);
-      })
-      .catch(() => undefined);
+    const pull = () => {
+      fetch(`${base}/v1/matches?limit=20`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: { matches?: RoomMatch[]; queues?: Record<string, string[]>; claims?: WarClaimRow[] } | null) => {
+          if (dead || !body) return;
+          const next = Array.isArray(body.matches) ? body.matches : [];
+          setQueues(body.queues && typeof body.queues === "object" ? body.queues : {});
+          setClaims(Array.isArray(body.claims) ? body.claims : []);
+          const live = next.find((match) => match.status === "live" && match.last);
+          const token = live?.last ? `${live.matchId}:${live.last.handle}:${live.last.type}:${live.turn}` : "";
+          if (token && token !== heard.current) {
+            heard.current = token;
+            audio.click();
+          }
+          setMatches(next);
+        })
+        .catch(() => {
+          if (!dead) setMatches((current) => current ?? []);
+        });
+    };
+    pull();
+    const timer = window.setInterval(pull, 8000);
+    return () => {
+      dead = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let dead = false;
+    fetchAgents().then((result) => {
+      if (dead || result.source !== "arena") return;
+      const next = result.agents
+        .filter((row) => (row.points ?? 0) > 0 && row.handle)
+        .map((row) => ({
+          accountId: row.handle as string,
+          name: row.name || (row.handle as string),
+          skin: defaultSkin(row.handle as string),
+        }));
+      setVisitors(next);
+    });
     return () => {
       dead = true;
     };
   }, []);
 
   useEffect(() => {
+    if (!mapReady) return;
+    const familyOf = (variable: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(variable).split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") ?? "";
+    const body = familyOf("--font-body");
+    const mono = familyOf("--font-mono");
+    const faces: Array<[string, string, string]> = [
+      [body, "/fonts/Inter-Regular.ttf", "400"],
+      [body, "/fonts/Inter-SemiBold.ttf", "600"],
+      [body, "/fonts/Inter-Bold.ttf", "700"],
+      [mono, "/fonts/JetBrainsMono-Regular.ttf", "400"],
+    ];
+    for (const [family, url, weight] of faces) {
+      if (!family) continue;
+      const face = new FontFace(family, `url(${url})`, { weight, style: "normal" });
+      face.load().then((loaded) => document.fonts.add(loaded)).catch(() => undefined);
+    }
+  }, [mapReady]);
+
+  useEffect(() => {
+    const queue: number[] = [];
+    let finished = false;
+    let locked = false;
+    let maxSeen = 0;
     let readyTimer = 0;
-    const onLoad = (event: Event) => {
-      const detail = (event as CustomEvent<{ progress: number; active: boolean }>).detail;
-      if (!detail) return;
-      window.clearTimeout(readyTimer);
-      setMapProgress(detail.progress);
-      if (!detail.active && detail.progress >= 100) {
-        readyTimer = window.setTimeout(() => setMapReady(true), 1200);
+    const push = (detail: { loaded?: number; total?: number; active?: boolean; progress?: number }) => {
+      if (locked) return;
+      const total = typeof detail.total === "number" ? detail.total : 0;
+      const loaded = typeof detail.loaded === "number" ? detail.loaded : 0;
+      let pct = total > 0 ? (loaded / total) * 100 : typeof detail.progress === "number" ? detail.progress : 0;
+      pct = Math.max(maxSeen, pct);
+      maxSeen = pct;
+      queue.push(pct);
+      setMapHeard(true);
+      setMapStuck(false);
+      if (detail.active === false && total > 0 && loaded >= total) {
+        locked = true;
+        finished = true;
+        queue.push(100);
       }
     };
+    pendingLoadSteps().forEach(push);
+    const onLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{ loaded?: number; total?: number; active?: boolean; progress?: number }>).detail;
+      if (detail) push(detail);
+    };
     window.addEventListener("fe2vi-load", onLoad);
+    let frame = 0;
+    const drain = () => {
+      if (queue.length) {
+        const next = queue.shift() ?? 0;
+        setShownProgress((current) => {
+          const nextValue = Math.max(loadShownFloor(), current ?? 0, Math.round(next));
+          if (nextValue > 0) rememberLoadFloor(nextValue);
+          return nextValue > 0 ? nextValue : current;
+        });
+        frame = window.requestAnimationFrame(drain);
+        return;
+      }
+      if (finished) {
+        readyTimer = window.setTimeout(() => {
+          setMapReady(true);
+          window.dispatchEvent(new Event("fe2vi-playable"));
+        }, 1200);
+        return;
+      }
+      frame = window.requestAnimationFrame(drain);
+    };
+    frame = window.requestAnimationFrame(drain);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.clearTimeout(readyTimer);
       window.removeEventListener("fe2vi-load", onLoad);
     };
   }, []);
 
   useEffect(() => {
-    if (mapReady) {
-      setShownProgress(100);
-      return;
-    }
-    const id = window.setInterval(() => {
-      setShownProgress((value) => {
-        const target = Math.min(92, Math.max(0, mapProgress ?? 0));
-        const creep = value + Math.max(0.35, (92 - value) * 0.018);
-        return Math.min(92, Math.max(creep, target));
-      });
-    }, 180);
-    return () => window.clearInterval(id);
-  }, [mapReady, mapProgress]);
+    if (mapReady || !webgl || mapHeard) return;
+    const timer = window.setTimeout(() => setMapStuck(true), LOAD_GIVE_UP_MS);
+    return () => window.clearTimeout(timer);
+  }, [mapReady, webgl, mapHeard]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 800px)");
@@ -347,6 +426,13 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     saveSpectator(next);
   }
 
+  function selectRoom(id: string) {
+    setPhase("city");
+    setFrameMode("in");
+    setFocusId(id);
+    setFollowIndex(null);
+  }
+
   function enterCity(nextFocus: string | null) {
     const next = { ...save, entered: true };
     commit(next);
@@ -378,9 +464,11 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function pick(district: District) {
-    setFrameMode("in");
-    setFocusId(district.id);
-    setFollowIndex(null);
+    if (district.status === "soon") {
+      setNote(`${district.name} is not open.`);
+      return;
+    }
+    selectRoom(district.id);
     setHotspot(null);
     const quests = { ...save.quests };
     if (district.id === "vault-quarter") {
@@ -399,11 +487,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     if (district.id === "vault-quarter") audio.alarm();
     audio.crowd(district.id === "cup-stadium");
     commit({ ...save, quests });
-    if (district.status === "soon") {
-      setPaused(true);
-      setNote(`${district.name} is not open.`);
-      return;
-    }
     if (!district.href) {
       setNote("The lobby is the hall.");
       return;
@@ -419,11 +502,23 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     const tutorial = save.tutorial === 0 ? 1 : save.tutorial;
     if (!save.quests.follow) audio.sting("quest");
     commit({ ...save, tutorial, quests: { ...save.quests, follow: true } });
-    setNote(`${[...CITY_AGENTS, ...visitors][index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
+    setNote(`${visitors[index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
   }
 
-  const mode = phase === "cutscene" ? "cutscene" : phase === "city" ? "play" : "orbit";
-  const cast = [...CITY_AGENTS, ...visitors];
+  const mode = phase === "cutscene" ? "cutscene" : phase === "city" || focusId ? "play" : "orbit";
+  const cast = visitors;
+  const lines = useMemo(() => {
+    const slug = focusId ? ROOM_SLUG[focusId] : "";
+    const broad = !slug || slug === "lobby" || slug === "hall";
+    const mine = !matches ? [] : broad ? matches : matches.filter((match) => match.arenaId === slug);
+    const live = mine.find((match) => match.status === "live" && match.last);
+    const last = live?.last;
+    if (!last) return {};
+    const out: Record<string, string> = { [last.handle]: last.type };
+    const agent = visitors.find((row) => row.accountId === last.handle || row.name === last.handle);
+    if (agent) out[agent.name] = last.type;
+    return out;
+  }, [matches, focusId, visitors]);
   const followed = followIndex === null ? null : cast[followIndex];
   const vantages = DISTRICTS.filter((district) => (VANTAGE_IDS as readonly string[]).includes(district.id));
 
@@ -469,7 +564,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               </div>
             )}
             {(phase === "vantage" || phase === "city") && (
-            <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
+            <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium", "oracle-plaza"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
               <div className="hud-tl ui-in">
                 <a
                   className="hud-brand"
@@ -488,7 +583,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 </nav>
               </div>
               <div className="hud-tr ui-in">
-                <CountdownChip compact={frameMode === "in" && Boolean(focusId)} />
+                {frameMode === "in" && focusId ? null : <CountdownChip compact={false} />}
                 <AudioHud live={soundLive} />
                 {phase === "city" && (
                   <div className={narrow && !questOpen ? "hud-aside is-collapsed" : "hud-aside"}>
@@ -512,7 +607,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                         />
                         <p className="live-feed num">
                           <span className="live-dot" aria-hidden="true" />
-                          <Tick value={CITY_AGENTS.length + visitors.length} /> in the city
+                          <Tick value={visitors.length} /> in the city
                         </p>
                         <Minimap
                           spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
@@ -629,17 +724,16 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     <Trophy aria-hidden="true" strokeWidth={1.75} />
                     <span className="bar-label">Leaderboard</span>
                   </a>
+                  <button type="button" className="btn btn-secondary" title="Games" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
+                    <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
+                    <span className="bar-label">Games</span>
+                  </button>
                   {DISTRICTS.find((district) => district.id === focusId)?.href ? (
-                    <a className="btn btn-secondary" title="Enter the room" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
+                    <a className="btn btn-secondary room-enter" title="Enter the room" href={DISTRICTS.find((district) => district.id === focusId)?.href}>
                       <DoorOpen aria-hidden="true" strokeWidth={1.75} />
                       <span className="bar-label">Enter the room</span>
                     </a>
-                  ) : (
-                    <button type="button" className="btn btn-secondary" title="Games" onClick={() => setShowGames((value) => !value)} aria-pressed={showGames}>
-                      <Gamepad2 aria-hidden="true" strokeWidth={1.75} />
-                      <span className="bar-label">Games</span>
-                    </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn-secondary"
@@ -655,13 +749,15 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                     <button
                       type="button"
                       className="btn btn-ghost"
+                      title="Free camera"
+                      aria-label="Free camera"
                       onClick={() => {
                         setFocusId(null);
                         setFollowIndex(null);
                       }}
                     >
                       <Video aria-hidden="true" strokeWidth={1.75} />
-                      Free camera
+                      <span className="bar-label">Free camera</span>
                     </button>
                   )}
                 </div>
@@ -669,18 +765,47 @@ export function CityGate({ onboarding }: { onboarding: string }) {
             </header>
             )}
             {phase === "city" && focusId && ROOM_SLUG[focusId] && (
-              <RoomHud roomId={focusId} tip={hotspot} onLeave={leaveRoom} />
+              <RoomHud
+                roomId={focusId}
+                tip={hotspot}
+                onLeave={leaveRoom}
+                matches={matches}
+                queues={queues}
+                claims={claims}
+                names={Object.fromEntries(visitors.map((visitor) => [visitor.accountId, visitor.name]))}
+              />
             )}
             {phase === "city" && frameMode === "in" && focusId === "skin-forge" ? <LobbySignList /> : null}
-            {phase !== "boot" && !mapReady ? <LoadingState label="the city" hero progress={shownProgress} /> : null}
-            {phase === "boot" ? (
+            {mapStuck && !mapReady ? (
+              <div className="loading-screen load-failed" role="alert">
+                <div className="city-fallback-card">
+                  <Logo variant="hero" />
+                  <p className="label">City link</p>
+                  <h1>The village did not open.</h1>
+                  <p>The 3D view did not start. Reload to try again. The boards still work without it.</p>
+                  <div className="city-fallback-actions">
+                    <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+                      <RotateCw aria-hidden="true" strokeWidth={1.75} />
+                      Reload
+                    </button>
+                    <a className="btn btn-secondary" href="/leaderboard">
+                      <Trophy aria-hidden="true" strokeWidth={1.75} />
+                      Leaderboard
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ) : phase !== "boot" && !mapReady ? (
               <LoadingState label="the city" hero progress={shownProgress} />
-            ) : (
+            ) : null}
+            {phase === "boot" && !mapStuck ? (
+              <LoadingState label="the city" hero progress={shownProgress} />
+            ) : phase === "boot" ? null : (
               <CityMap
                 paused={paused}
                 mode={mode}
                 beat={beat}
-                focusId={phase === "city" ? focusId : null}
+                focusId={focusId}
                 followIndex={phase === "city" ? followIndex : null}
                 frameMode={frameMode}
                 lineup={lineup}
@@ -697,6 +822,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 shotLock={shotLock}
                 roomBusy={roomBusy}
                 visitors={visitors}
+                lines={lines}
               />
             )}
             {phase === "title" && (

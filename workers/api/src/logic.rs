@@ -31,7 +31,9 @@ pub struct ArenaState {
     pub follows: Vec<FollowEdge>,
     #[serde(default)]
     pub grants: Vec<StoredGrant>,
-    #[serde(default)]
+    /// Loaded from SQL. Omitted on write so the arena value cannot grow with
+    /// every player, match, and idempotency row.
+    #[serde(default, skip_serializing)]
     pub book: crate::agents::PlayerBook,
     #[serde(default)]
     pub live: crate::live::LiveBook,
@@ -105,6 +107,21 @@ pub struct Incoming<'a> {
     pub authorization: Option<&'a str>,
     pub ingest_token: Option<&'a str>,
     pub policy_check: Option<&'a crate::live::PolicyCheck>,
+}
+
+thread_local! {
+    static WAR_SECRET: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Set the worker secret for this request. `None` means it is unset.
+/// The value is not a default and is never filled from a public string.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn set_request_war_secret(secret: Option<String>) {
+    WAR_SECRET.with(|slot| *slot.borrow_mut() = secret);
+}
+
+pub(crate) fn request_war_secret() -> Option<String> {
+    WAR_SECRET.with(|slot| slot.borrow().clone())
 }
 
 pub struct Fanout {
@@ -477,12 +494,30 @@ pub(crate) fn path_with_query(path: &str, query: Option<&str>) -> String {
     }
 }
 
-/// Explicit `?now=` wins. Host tests otherwise stay on [`fe2vi_core::DEMO_EPOCH`].
-/// The deployed worker uses the wall clock.
+/// Tests may pass `?now=`. Production ignores it and uses the wall clock.
+/// A dev build can opt in with `FE2VI_ALLOW_NOW=1` at compile time.
 pub(crate) fn query_now(path: &str) -> u64 {
-    query_param(path, "now")
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(wall_unix)
+    let override_now = if clock_override_allowed() {
+        query_param(path, "now").and_then(|value| value.parse().ok())
+    } else {
+        None
+    };
+    resolve_now(override_now, wall_unix())
+}
+
+pub(crate) fn resolve_now(override_now: Option<u64>, wall: u64) -> u64 {
+    override_now.unwrap_or(wall)
+}
+
+fn clock_override_allowed() -> bool {
+    #[cfg(test)]
+    {
+        true
+    }
+    #[cfg(not(test))]
+    {
+        option_env!("FE2VI_ALLOW_NOW") == Some("1")
+    }
 }
 
 fn wall_unix() -> u64 {
@@ -933,6 +968,25 @@ mod tests {
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
+    }
+
+    #[test]
+    fn production_clock_ignores_the_query_override() {
+        let wall = 1_700_000_000u64;
+        assert_eq!(resolve_now(None, wall), wall);
+        assert_eq!(resolve_now(Some(9_999_999_999), wall), 9_999_999_999);
+        assert!(
+            !include_str!("logic.rs").contains("query_param(path, \"now\")\n        .and_then"),
+            "production query_now must not apply ?now= before the allow check"
+        );
+        let source = include_str!("logic.rs");
+        let allow = source
+            .split("fn clock_override_allowed")
+            .nth(1)
+            .unwrap_or("");
+        assert!(allow.contains("cfg(test)"));
+        assert!(allow.contains("FE2VI_ALLOW_NOW"));
+        assert!(allow.contains("option_env!"));
     }
 
     #[test]

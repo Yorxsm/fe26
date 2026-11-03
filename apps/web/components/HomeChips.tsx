@@ -3,7 +3,7 @@
 import { Bot, Clock, Gamepad2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { loadHome, type HomeRelay } from "@/lib/api";
-import { FIXTURE_AGENTS, formatClock, heistCountdown, openSlots } from "@/lib/schedule";
+import { formatClock, heistCountdown, openSlots } from "@/lib/schedule";
 
 type HomeView = {
   source: "relay" | "fixture";
@@ -45,7 +45,7 @@ export function HomeChips() {
       } else {
         relay.current = null;
         const note = loaded.reason === "unset" ? "Fixture. This build has no API URL." : "Fixture. The API did not answer.";
-        setView(derive(Math.floor(Date.now() / 1000), FIXTURE_AGENTS.length, [], "fixture", note));
+        setView(derive(Math.floor(Date.now() / 1000), 0, [], "fixture", note));
       }
     };
     void pull();
@@ -55,7 +55,7 @@ export function HomeChips() {
       setView((current) => {
         if (!current) return current;
         const events = held ? held.events : [];
-        const agents = held ? held.agents : FIXTURE_AGENTS.length;
+        const agents = held ? held.agents : 0;
         return derive(now, agents, events, current.source, current.note);
       });
     }, 1000);

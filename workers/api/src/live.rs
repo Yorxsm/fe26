@@ -1410,15 +1410,37 @@ fn finalize_round(book: &mut LiveBook, round_id: String, now: u64) {
                 .then_with(|| left.enrolled_unix.cmp(&right.enrolled_unix))
                 .then_with(|| left.handle.cmp(&right.handle))
         });
-        let points = [10u32, 6, 4, 2, 1];
+        let leader_bps = ranked
+            .iter()
+            .find(|seat| seat.eligible && seat.risk_adjusted_bps > 0.0)
+            .map(|seat| seat.risk_adjusted_bps);
+        let leaders = leader_bps
+            .map(|leader| {
+                ranked
+                    .iter()
+                    .filter(|seat| {
+                        seat.eligible && (seat.risk_adjusted_bps - leader).abs() < f64::EPSILON
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
         for (position, seat) in ranked.iter_mut().enumerate() {
             seat.rank = if seat.eligible {
                 position as u32 + 1
             } else {
                 0
             };
-            if seat.eligible && position < points.len() && seat.risk_adjusted_bps > 0.0 {
-                seat.points = points[position];
+            if seat.eligible && seat.risk_adjusted_bps > 0.0 {
+                seat.points = match leader_bps {
+                    Some(leader) if (seat.risk_adjusted_bps - leader).abs() < f64::EPSILON => {
+                        if leaders > 1 {
+                            fe2vi_core::MATCH_DRAW
+                        } else {
+                            fe2vi_core::MATCH_WIN
+                        }
+                    }
+                    _ => fe2vi_core::MATCH_LOSS,
+                };
                 awards.push(LiveAward {
                     agent_id: seat.agent_id.clone(),
                     handle: seat.handle.clone(),
@@ -1637,7 +1659,7 @@ mod tests {
         });
         finalize_round(&mut book, "cup_1".into(), 201);
         let round = &book.rounds[0];
-        assert_eq!(round.seats[0].points, 10);
+        assert_eq!(round.seats[0].points, fe2vi_core::MATCH_WIN);
         assert_eq!(round.seats[0].handle, "steady");
         assert!(
             round

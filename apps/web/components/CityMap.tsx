@@ -1,27 +1,28 @@
 "use client";
 
-import { Billboard, Html, OrbitControls, Text, useGLTF, useProgress } from "@react-three/drei";
+import { Billboard, Html, OrbitControls, Text, useGLTF } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode } from "postprocessing";
-import { Interiors } from "@/components/Interiors";
+import dynamic from "next/dynamic";
+
+const Interiors = dynamic(() => import("@/components/Interiors").then((mod) => mod.Interiors), { ssr: false });
+import { InteriorBoundary } from "@/components/InteriorBoundary";
 import { Nature } from "@/components/Nature";
 import { Props } from "@/components/Props";
 import { World } from "@/components/World";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { SkeletonUtils } from "three-stdlib";
 import { audio } from "@/lib/audio";
+import { pendingLoadSteps } from "@/lib/loadProgress";
+import { villageCoreUrl, villageKitsUrl, villageTier, type VillageTier } from "@/lib/village";
 import { FRAME_BOARDS } from "@/lib/boards";
-import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
+import { AGENT_HEAD, AGENT_SCALE, BUILDING_DOOR, CITY_AGENTS, CUTSCENE_CAST, CUTSCENE_SHOTS, DISTRICTS, EXTERIOR_SHOTS, FACE_SHOT, INTERIOR_CAST, INTERIOR_SHOTS, LINEUP_SHOT, LINEUP_SPOTS, ROOM_XZ, STREET_SHOT, WALK_SHOT, interiorPose, padStand, placeAgent, poseClearOf, roofLabel, thresholdPose, type CityAgent, type District, type QualityTier } from "@/lib/city";
 import { PAINT_COLORS } from "@/lib/skin";
 import { expressionForClip, mountFace, redrawFace, type FaceExpression } from "@/lib/faceCanvas";
 import { lineupSkin, nodeVisible, paintFinish, screenColor, type Mood, type PaintFinish, type SkinTraits } from "@/lib/skin";
 
-useGLTF.preload("/models/kits.glb", false, true);
-useGLTF.preload("/models/station.glb", false, true);
-useGLTF.preload("/models/agent.glb", false, true);
 
 const ROOM_PREFIX: Record<string, string> = {
   vault: "vault-quarter",
@@ -29,6 +30,7 @@ const ROOM_PREFIX: Record<string, string> = {
   market: "trading-village",
   war: "war-room",
   forge: "skin-forge",
+  oracle: "oracle-plaza",
 };
 
 /** Free-camera home. The lobby uses titleEye so the lockup sits on sky. */
@@ -45,6 +47,57 @@ function showPick(name: string, x: number, z: number) {
   node.textContent = name;
 }
 
+function BuildingVolumes({ hideId }: { hideId: string | null }) {
+  return (
+    <group>
+      {DISTRICTS.filter((district) => district.status === "live" && district.id !== hideId).map((district) => {
+        const { hx, hz, height } = district.footprint;
+        const bodyH = Math.min(height * 0.62, 9);
+        return (
+          <group key={district.id} position={[district.x, 0, district.z]}>
+            <mesh position={[0, bodyH / 2, 0]} castShadow receiveShadow>
+              <boxGeometry args={[hx * 1.35, bodyH, hz * 1.25]} />
+              <meshStandardMaterial color={district.color} roughness={0.84} metalness={0.04} />
+            </mesh>
+            <mesh position={[0, bodyH + 0.28, 0]} castShadow>
+              <boxGeometry args={[hx * 1.5, 0.5, hz * 1.4]} />
+              <meshStandardMaterial color="#1c1916" roughness={0.72} metalness={0.08} />
+            </mesh>
+            <mesh position={[0, 1.25, hz * 0.64]}>
+              <boxGeometry args={[1.5, 2.4, 0.28]} />
+              <meshStandardMaterial color="#141416" roughness={0.62} />
+            </mesh>
+            {[-1, 1].map((side) => (
+              <mesh key={side} position={[side * hx * 0.42, 3.1, hz * 0.64]}>
+                <boxGeometry args={[1.2, 0.9, 0.1]} />
+                <meshStandardMaterial color="#e7b07a" emissive="#c94a1a" emissiveIntensity={0.28} roughness={0.45} />
+              </mesh>
+            ))}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function DoorMarks() {
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const point = useRef(new THREE.Vector3());
+  useFrame(() => {
+    const doors = DISTRICTS.map((district) => {
+      point.current.set(district.x, 4, district.z).project(camera);
+      return {
+        id: district.id,
+        x: (point.current.x * 0.5 + 0.5) * size.width,
+        y: (1 - (point.current.y * 0.5 + 0.5)) * size.height,
+      };
+    });
+    (window as unknown as { __fe2viDoors?: unknown }).__fe2viDoors = doors;
+  });
+  return null;
+}
+
 function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
   return (
     <group>
@@ -52,6 +105,13 @@ function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
         <mesh
           key={district.id}
           position={[district.x, 5, district.z]}
+          onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+            event.stopPropagation();
+            document.body.style.cursor = "pointer";
+          }}
+          onPointerOut={() => {
+            document.body.style.cursor = "auto";
+          }}
           onClick={(event: ThreeEvent<MouseEvent>) => {
             event.stopPropagation();
             showPick(district.name, district.x, district.z);
@@ -68,10 +128,12 @@ function BuildingHits({ onPick }: { onPick: (district: District) => void }) {
 
 function AgentTargets({
   agents,
+  hide,
   paused,
   onFollow,
 }: {
   agents: CityAgent[];
+  hide: number[];
   paused: boolean;
   onFollow: (index: number) => void;
 }) {
@@ -100,16 +162,32 @@ function AgentTargets({
         >
           <boxGeometry args={[1.4, 2.4, 1.4]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-          <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
-            <div className="name-tag" data-agent={agent.name}>
-              <span className="live-dot" aria-hidden="true" />
-              {agent.name}
-            </div>
-          </Html>
+          {hide.includes(index) ? null : (
+            <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+              <div className="name-tag" data-agent={agent.name}>
+                <span className="live-dot" aria-hidden="true" />
+                {agent.name}
+              </div>
+            </Html>
+          )}
         </mesh>
       ))}
     </group>
   );
+}
+
+/** Paint the black header artwork #d4d2cc. The SVG file itself stays untouched. */
+function lightArtwork(image: HTMLImageElement) {
+  const scratch = document.createElement("canvas");
+  scratch.width = image.naturalWidth || image.width;
+  scratch.height = image.naturalHeight || image.height;
+  const ctx = scratch.getContext("2d");
+  if (!ctx) return image;
+  ctx.drawImage(image, 0, 0, scratch.width, scratch.height);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = "#d4d2cc";
+  ctx.fillRect(0, 0, scratch.width, scratch.height);
+  return scratch;
 }
 
 function VillageMural() {
@@ -120,55 +198,65 @@ function VillageMural() {
     const word = new Image();
     mark.src = "/brand/near-mark.svg";
     word.src = "/brand/near-wordmark.svg";
-    Promise.all([
-      mark.decode(),
-      word.decode(),
-      document.fonts.load('700 72px "Chakra Petch"').catch(() => undefined),
-    ]).then(() => {
-      if (dead) return;
+    const display = getComputedStyle(document.documentElement).getPropertyValue("--font-display").split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || "sans-serif";
+    const paint = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
+      canvas.width = 1600;
+      canvas.height = 900;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.fillStyle = "#141416";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      const markH = 112;
-      const gap = 28;
-      const wordScale = 96 / 86;
-      const wordW = 345 * wordScale;
-      const wordH = 86 * wordScale;
+      ctx.strokeStyle = "#d4d2cc";
+      ctx.lineWidth = 28;
+      ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+      const markH = 340;
+      const gap = 48;
+      const wordH = 210;
+      const wordW = 345 * (wordH / 86);
       const lockW = markH + gap + wordW;
-      const lockH = Math.max(markH, wordH);
-      const pad = markH;
-      const plateW = lockW + pad * 2;
-      const plateH = lockH + pad * 2;
-      const plateX = (canvas.width - plateW) / 2;
-      const plateY = 72;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(plateX, plateY, plateW, plateH);
-      ctx.drawImage(mark, plateX + pad, plateY + pad + (lockH - markH) / 2, markH, markH);
-      ctx.drawImage(word, plateX + pad + markH + gap, plateY + pad + (lockH - wordH) / 2, wordW, wordH);
+      const lockX = (canvas.width - lockW) / 2;
+      const lockY = 150;
+      const ink = lightArtwork(mark);
+      const letters = lightArtwork(word);
+      ctx.drawImage(ink, lockX, lockY, markH, markH);
+      ctx.drawImage(letters, lockX + markH + gap, lockY + (markH - wordH) / 2, wordW, wordH);
       ctx.fillStyle = "#d4d2cc";
-      ctx.font = '700 68px "Chakra Petch", sans-serif';
+      ctx.font = `700 108px "${display}", sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("THE FUTURE IS NEAR", canvas.width / 2, plateY + plateH + 78);
+      ctx.fillText("THE FUTURE IS NEAR", canvas.width / 2, 680);
       ctx.fillStyle = "#c94a1a";
-      ctx.fillRect(plateX, plateY + plateH + 118, plateW, 10);
+      ctx.fillRect(lockX, 760, lockW, 16);
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
       texture.needsUpdate = true;
       setMap(texture);
-    }).catch(() => undefined);
+    };
+    Promise.all([mark.decode(), word.decode()])
+      .then(() => {
+        if (dead) return;
+        paint();
+      })
+      .catch(() => undefined);
+    const fonts = document.fonts.load(`700 84px "${display}"`).catch(() => undefined);
+    const raced = Promise.race([fonts, new Promise((resolve) => window.setTimeout(resolve, 400))]);
+    raced.then(() => {
+      if (!dead && mark.complete && word.complete) paint();
+    });
     return () => {
       dead = true;
     };
   }, []);
+  const narrow = useThree((state) => state.size.width < state.size.height);
+  if (!map) return null;
+  const width = narrow ? 11 : 12;
+  const height = width * 0.52;
   return (
-    <mesh position={[-6, 4.4, 6]} rotation={[0, -0.46, 0]}>
-      <planeGeometry args={[18, 10]} />
-      {map ? <meshBasicMaterial map={map} toneMapped={false} /> : <meshStandardMaterial color="#141416" roughness={0.6} />}
+    <mesh position={narrow ? [-2, 7.2, 10] : [-12, 8.2, 20]} rotation={[0, 0, 0]} raycast={() => undefined}>
+      <planeGeometry args={[width, height]} />
+      <meshBasicMaterial map={map} toneMapped={false} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -203,8 +291,27 @@ function InteriorBackdrop({ id }: { id: string | null }) {
   );
 }
 
-const overviewEye = new THREE.Vector3(-32, 16, 58);
-const overviewAim = new THREE.Vector3(14, 6, -4);
+const overviewEye = new THREE.Vector3(0, 84, 108);
+const overviewAim = new THREE.Vector3(0, 0, -2);
+/** Shot the composer must draw. CameraDriver fills it; Grade applies it in the render callback. */
+const renderShot = {
+  on: false,
+  eye: new THREE.Vector3(),
+  aim: new THREE.Vector3(),
+  fov: 48,
+};
+/** Pull back until all six plots sit inside the desktop and phone frames, clear of the bars. */
+function overviewFrame(aspect: number) {
+  const narrow = !Number.isFinite(aspect) || aspect < 0.9;
+  if (narrow) {
+    overviewEye.set(0, 120, 78);
+    overviewAim.set(0, 2, 0);
+    return 76;
+  }
+  overviewEye.set(0, 84, 108);
+  overviewAim.set(0, 0, -2);
+  return 48;
+}
 /**
  * Lobby. Almost level, from above the roofs, so the horizon lands near
  * mid-frame and the lit plaza fills the lower half. Mobile looks a little
@@ -263,7 +370,7 @@ function detectQuality(): QualityTier {
 
 function dprForQuality(tier: QualityTier) {
   if (typeof window === "undefined") return 1;
-  const cap = tier === "high" ? 2 : tier === "medium" ? 1.5 : 1;
+  const cap = tier === "low" ? 1 : 1.5;
   return Math.min(window.devicePixelRatio || 1, cap);
 }
 
@@ -605,7 +712,7 @@ function Smoke({ position }: { position: [number, number, number] }) {
   );
 }
 
-const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium"]);
+const INTERIOR_IDS = new Set(["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium", "oracle-plaza"]);
 
 const BUILDING_GRADE: Record<string, { tint: string; rough: number; metal: number }> = {
   vault: { tint: "#d4a05a", rough: 0.78, metal: 0.02 },
@@ -677,21 +784,26 @@ function buildingGrade(name: string) {
 }
 
 function Kits({
+  url,
   onPick,
   focusId,
   frameMode,
   beatId,
 }: {
+  url: string;
   onPick: (district: District) => void;
   focusId: string | null;
   frameMode: "in" | "out";
   beatId: string | null;
 }) {
-  const gltf = useGLTF("/models/kits.glb", false, true);
+  const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const cloned = gltf.scene.clone(true);
     cloned.traverse((node) => {
       const label = sourceName(node);
+      if (/^kit\.(pier|club|oracle)(\.|$)/.test(label)) {
+        node.visible = false;
+      }
       const key = label.startsWith("kit.") ? label.split(".")[1] : "";
       if (key && ROOM_PREFIX[key]) node.userData.district = ROOM_PREFIX[key];
       const mesh = node as THREE.Mesh;
@@ -1076,17 +1188,21 @@ function applyLook(root: THREE.Object3D, skin: SkinTraits, mood: Mood) {
 }
 
 function Station({
+  url,
   onPick,
   focusId,
   beatPrefix,
   concealed,
+  showLabels,
 }: {
+  url: string;
   onPick: (district: District) => void;
   focusId: string | null;
   beatPrefix: string | null;
   concealed: boolean;
+  showLabels: boolean;
 }) {
-  const gltf = useGLTF("/models/station.glb", false, true);
+  const gltf = useGLTF(url, false, true);
   const scene = useMemo(() => {
     const root = dress(gltf.scene.clone(true));
     mergeStatic(root, (mesh) => {
@@ -1142,17 +1258,32 @@ function Station({
       <primitive
         object={scene}
         onClick={(event: ThreeEvent<MouseEvent>) => {
-          event.stopPropagation();
           let node: THREE.Object3D | null = event.object;
           while (node) {
             const id = node.userData.district as string | undefined;
             if (id) {
               const district = DISTRICTS.find((entry) => entry.id === id);
-              if (district) onPick(district);
+              if (district) {
+                event.stopPropagation();
+                onPick(district);
+              }
               return;
             }
             node = node.parent;
           }
+          const point = event.point;
+          let best: District | null = null;
+          let bestDistance = 16;
+          for (const district of DISTRICTS) {
+            const distance = Math.hypot(point.x - district.x, point.z - district.z);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              best = district;
+            }
+          }
+          if (!best) return;
+          event.stopPropagation();
+          onPick(best);
         }}
       />
       {DISTRICTS.map((district) => {
@@ -1174,9 +1305,11 @@ function Station({
                 <planeGeometry args={[plate, 0.12]} />
                 <meshStandardMaterial color="#c94a1a" />
               </mesh>
-              <Text font={DISPLAY_FONT} fontSize={0.72} color="#d4d2cc" anchorX="center" anchorY="middle" maxWidth={plate - 0.8}>
-                {label}
-              </Text>
+              {showLabels ? (
+                <Text font={DISPLAY_FONT} fontSize={0.72} color="#d4d2cc" anchorX="center" anchorY="middle" maxWidth={plate - 0.8}>
+                  {label}
+                </Text>
+              ) : null}
             </Billboard>
             {door ? (
               <group
@@ -1351,6 +1484,7 @@ function AgentMesh({
   beat = 0,
   frameMode = "out",
   rim = true,
+  line = "",
 }: {
   agent: CityAgent;
   index: number;
@@ -1365,6 +1499,7 @@ function AgentMesh({
   beat?: number;
   frameMode?: "in" | "out";
   rim?: boolean;
+  line?: string;
 }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
   const group = useRef<THREE.Group>(null);
@@ -1377,22 +1512,39 @@ function AgentMesh({
   const mood = useRef<Mood>("trait");
   const skin = useMemo(() => displaySkin(agent, index, poster), [agent, index, poster]);
   const scene = useMemo(() => {
-    const cloned = SkeletonUtils.clone(gltf.scene);
+    const clonedSource = SkeletonUtils.clone(gltf.scene);
+    const cloned = new THREE.Group();
+    while (clonedSource.children.length) cloned.add(clonedSource.children[0]);
     dress(cloned, paintFinish(skin.paint), screenColor(skin.screen));
     applyLook(cloned, skin, "trait");
     cloned.traverse((node) => {
       const mesh = node as THREE.Mesh;
-      if (mesh.isMesh) {
-        mesh.frustumCulled = true;
-        mesh.raycast = () => undefined;
+      if (!mesh.isMesh) return;
+      mesh.frustumCulled = false;
+      mesh.raycast = () => undefined;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      if (/^body\.(torso|leg|arm|head|faceplate|boot|hand)/.test(mesh.name) && material) {
+        material.transparent = false;
+        material.opacity = 1;
+        material.depthWrite = true;
+        material.alphaTest = 0;
+        if (material.color) material.color.set("#d4d2cc");
+        if (material.emissive) {
+          material.emissive.set("#f4efe6");
+          material.emissiveIntensity = 1.15;
+        }
+        material.side = THREE.DoubleSide;
+        mesh.visible = true;
       }
     });
     return cloned;
   }, [gltf.scene, skin]);
-  const bodyScale = useMemo(() => {
+  const bodyFit = useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene);
     const height = box.max.y - box.min.y;
-    return height > 0.05 ? AGENT_SCALE / height : AGENT_SCALE;
+    const sane = height > 0.35 && height < 3.2;
+    const scale = sane ? AGENT_SCALE / height : AGENT_SCALE;
+    return { scale, foot: sane ? box.min.y : 0, height };
   }, [scene]);
   const face = useMemo(() => mountFace(scene, sourceName), [scene]);
   const blink = useRef({ next: 1 + (index % 5) * 0.7, amount: 0, active: 0 });
@@ -1440,9 +1592,15 @@ function AgentMesh({
     const roomMove = stationed && focusId && !crossing ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
     if (crossing) {
       pose = { x: crossing.x, y: 0, z: crossing.z, rot: crossing.rot };
+    } else if (frameMode === "in" && stationed) {
+      pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
     } else if (roomMove) {
-      pose = { x: roomMove.x, y: 0, z: roomMove.z, rot: roomMove.rot };
+      pose = { x: roomMove.x, y: roomMove.y, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
+    if (mode === "play" && !poster && !lineup && !(focusId && frameMode === "in")) {
+      const pad = padStand(index);
+      pose = { x: pad.x, y: pad.y, z: pad.z + 5.2, rot: pad.rot };
+    }
     const nextMood = lineup || poster ? "trait" : moodFor(pose.x, pose.z);
     if (nextMood !== mood.current) {
       mood.current = nextMood;
@@ -1511,9 +1669,11 @@ function AgentMesh({
     const bodyBox = cover.canvas ? agentOnScreen(pose.x, pose.z, state.camera, cover.canvas) : null;
     const underChip = Boolean(bodyBox && cover.bottom.some((rect) => rectsOverlap(bodyBox, rect)));
     if (group.current) {
-      group.current.visible = shown && !underChip && roomMove?.visible !== false && !gateHide;
+      group.current.visible = shown && roomMove?.visible !== false && !gateHide;
       poseRef.current = { x: pose.x, y: 1.4, z: pose.z };
       group.current.position.set(pose.x, pose.y, pose.z);
+      group.current.scale.set(1, 1, 1);
+      group.current.updateMatrixWorld(true);
       if (frameMode === "in" && focusId) {
         const shot = INTERIOR_SHOTS[focusId];
         const crew = INTERIOR_CAST[focusId];
@@ -1594,8 +1754,10 @@ function AgentMesh({
     }
   });
 
+  const outdoors = mode === "play" && !poster && !lineup && !(frameMode === "in" && focusId);
+  const bodyScale = outdoors ? bodyFit.scale * 2.4 : mode === "play" && !poster && !lineup ? bodyFit.scale * 0.9 : bodyFit.scale;
   return (
-    <group ref={group}>
+    <group ref={group} frustumCulled={false}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
         <circleGeometry args={[1.15 * fit, 20]} />
         <meshBasicMaterial color="#05060a" transparent opacity={0.38} depthWrite={false} />
@@ -1619,6 +1781,7 @@ function AgentMesh({
       </mesh>
       <primitive
         object={scene}
+        position={[0, -bodyScale * bodyFit.foot, 0]}
         scale={bodyScale}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
@@ -1630,11 +1793,14 @@ function AgentMesh({
           onPeek?.(poseRef.current);
         }}
       />
-      <group ref={tag} position={[0, 5.2, 0]}>
+      <group ref={tag} position={[0, bodyScale * bodyFit.height + 0.28, 0]}>
         <Html center sprite zIndexRange={[4, 1]} style={{ pointerEvents: "none" }}>
+          <div className="name-stack">
+          {line ? <div className="say-bubble">{line}</div> : null}
           <div ref={tagEl} className="name-tag" data-agent={agent.name}>
             <span className="live-dot" aria-hidden="true" />
             {agent.name}
+          </div>
           </div>
         </Html>
       </group>
@@ -1642,57 +1808,47 @@ function AgentMesh({
   );
 }
 
-function Grade({ shot, quality }: { shot: "interior" | "hero" | "overview"; quality: QualityTier }) {
-  const gl = useThree((state) => state.gl);
+function PhoneAir() {
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
-  const size = useThree((state) => state.size);
+  useFrame(() => {
+    const fog = scene.fog as THREE.Fog | null;
+    if (!fog || !("near" in fog)) return;
+    const narrow = camera instanceof THREE.PerspectiveCamera && camera.aspect < 0.9;
+    fog.near = narrow ? 90 : 70;
+    fog.far = narrow ? 480 : 280;
+  });
+  return null;
+}
+
+function Grade({ shot }: { shot: "interior" | "hero" | "overview"; quality?: QualityTier }) {
+  const gl = useThree((state) => state.gl);
   const shotKind = useRef(shot);
   shotKind.current = shot;
-  const grade = useMemo(() => {
-    const composer = new EffectComposer(gl, { multisampling: 0, frameBufferType: THREE.HalfFloatType });
-    composer.addPass(new RenderPass(scene, camera));
-    if (quality === "low") {
-      composer.addPass(
-        new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC })),
-      );
-    } else {
-      composer.addPass(
-        new EffectPass(
-          camera,
-          new BloomEffect({
-            intensity: quality === "high" ? 0.4 : 0.24,
-            luminanceThreshold: 0.82,
-            luminanceSmoothing: 0.18,
-            mipmapBlur: true,
-            radius: 0.55,
-            levels: 5,
-          }),
-          new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
-        ),
-      );
+  postBudget.composerPasses = 1;
+
+  useFrame((state) => {
+    const live = state.camera;
+    if (renderShot.on && live instanceof THREE.PerspectiveCamera) {
+      live.position.copy(renderShot.eye);
+      live.up.set(0, 1, 0);
+      live.lookAt(renderShot.aim);
+      if (Math.abs(live.fov - renderShot.fov) > 0.2) {
+        live.fov = renderShot.fov;
+        live.updateProjectionMatrix();
+      }
     }
-    if (quality === "high") {
-      composer.addPass(new EffectPass(camera, new SMAAEffect()));
+    if (live instanceof THREE.PerspectiveCamera) {
+      live.matrixAutoUpdate = true;
+      live.matrixWorldAutoUpdate = true;
+      live.updateMatrixWorld(true);
     }
-    postBudget.composerPasses = composer.passes.length;
-    return { composer };
-  }, [camera, gl, quality, scene]);
-
-  useLayoutEffect(() => {
-    grade.composer.setSize(size.width, size.height);
-  }, [grade, size.height, size.width]);
-
-  useLayoutEffect(
-    () => () => {
-      grade.composer.dispose();
-    },
-    [grade],
-  );
-
-  useFrame((_, delta) => {
-    gl.toneMappingExposure = shotKind.current === "interior" ? 0.95 : 1;
-    grade.composer.render(delta);
+    const narrow = live instanceof THREE.PerspectiveCamera && live.aspect < 0.9;
+    gl.toneMappingExposure = shotKind.current === "interior" ? 1.12 : narrow ? 1.45 : 1;
+    gl.setRenderTarget(null);
+    gl.render(state.scene, live);
+    const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+    probe.drawn = { x: live.position.x, y: live.position.y, z: live.position.z };
   }, 1);
 
   return null;
@@ -1741,23 +1897,31 @@ function fitInterior(
   const desktop = 1.6;
   const halfH = Math.atan(Math.tan((authored * Math.PI) / 360) * desktop);
   let fov = (2 * Math.atan(Math.tan(halfH) / Math.max(aspect, 0.42)) * 180) / Math.PI;
-  fov = Math.min(74, Math.max(authored, fov));
-  const aim = new THREE.Vector3(shot.aim[0], shot.aim[1] + (aspect < 0.7 ? 0.7 : 0.3), shot.aim[2]);
-  const back = new THREE.Vector3(shot.eye[0] - shot.aim[0], shot.eye[1] - shot.aim[1], shot.eye[2] - shot.aim[2]);
-  const pull = Math.min(1.22, Math.max(1, (desktop / Math.max(aspect, 0.45)) * (authored / fov)));
-  const eye = new THREE.Vector3(shot.aim[0], shot.aim[1], shot.aim[2]).add(back.multiplyScalar(pull));
+  fov = Math.min(68, Math.max(authored, fov));
   return {
-    eye: [eye.x, eye.y, eye.z] as [number, number, number],
-    aim: [aim.x, aim.y, aim.z] as [number, number, number],
+    eye: shot.eye,
+    aim: [shot.aim[0], shot.aim[1] + 0.15, shot.aim[2]] as [number, number, number],
     fov,
   };
 }
 
-function LoadReporter() {
-  const { progress, active } = useProgress();
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent("fe2vi-load", { detail: { progress, active } }));
-  }, [progress, active]);
+function PerfProbe() {
+  const gl = useThree((state) => state.gl);
+  useFrame(() => {
+    let node = document.getElementById("fe2vi-perf");
+    if (!node) {
+      node = document.createElement("p");
+      node.id = "fe2vi-perf";
+      node.hidden = true;
+      document.body.appendChild(node);
+    }
+    const calls = gl.info.render.calls;
+    const triangles = gl.info.render.triangles;
+    if (calls > Number(node.dataset.calls || 0)) node.dataset.calls = String(calls);
+    if (triangles > Number(node.dataset.triangles || 0)) node.dataset.triangles = String(triangles);
+    node.dataset.textures = String(gl.info.memory.textures);
+    node.dataset.geometries = String(gl.info.memory.geometries);
+  });
   return null;
 }
 
@@ -1769,7 +1933,7 @@ function widenOrbit(controls: Rig | null) {
   if (!controls) return;
   controls.minDistance = 8;
   controls.maxDistance = 360;
-  controls.minPolarAngle = 0.35;
+  controls.minPolarAngle = 0.15;
   controls.maxPolarAngle = 1.5;
   controls.enablePan = true;
   const delta = (controls as Rig & { _sphericalDelta?: { set: (x: number, y: number, z: number) => void } })._sphericalDelta;
@@ -1818,6 +1982,8 @@ function CameraDriver({
   const tripUp = useRef(new THREE.Vector3());
   const tripDown = useRef(new THREE.Vector3());
   const interiorOffset = useRef(new THREE.Vector3());
+  const snapInside = useRef(false);
+  const overviewLatched = useRef(false);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -1845,6 +2011,8 @@ function CameraDriver({
   useFrame((state, delta) => {
     const rig = controls;
     if (!rig?.target || !(camera instanceof THREE.PerspectiveCamera)) return;
+    renderShot.on = false;
+    const overviewFov = overviewFrame(camera.aspect);
     const driving = mode === "cutscene" || lineup || street || Boolean(poster) || (mode === "play" && (followIndex !== null || Boolean(focusId)));
     if (wasDriving.current && !driving) homing.current = true;
     wasDriving.current = driving;
@@ -1852,15 +2020,19 @@ function CameraDriver({
       lastFocus.current = focusId;
       latched.current = null;
       depart.current = null;
-      if (focusId) homing.current = false;
+      snapInside.current = Boolean(focusId);
+      if (focusId) {
+        homing.current = false;
+        overviewLatched.current = false;
+      }
     }
     const vantage = mode === "orbit" && !lobby && !poster && !lineup && !street;
     if (!vantage) vantageReady.current = false;
     rig.autoRotate = false;
     if (fovTarget.current === null) fovTarget.current = camera.fov;
 
-    if (mode === "orbit") {
-      fovTarget.current = lobby ? 46 : 48;
+    if (mode === "orbit" && !focusId) {
+      fovTarget.current = lobby ? 46 : overviewFov;
       if (lobby) {
         rig.enabled = false;
         const mobileLobby = camera.aspect < 0.7;
@@ -1893,7 +2065,7 @@ function CameraDriver({
           const blend = 1 - Math.exp(-delta * 3);
           rig.target.lerp(aim, blend);
           camera.position.lerp(eye, blend);
-          collideCamera(camera.position, rig.target, null);
+          if (camera.position.y < 40) collideCamera(camera.position, rig.target, null);
           camera.lookAt(rig.target);
           dampFov(camera, fovTarget.current, delta, false);
           return;
@@ -1901,13 +2073,11 @@ function CameraDriver({
         widenOrbit(controls);
         rig.target.copy(overviewAim);
         if (far) camera.position.copy(overviewEye);
+        camera.lookAt(rig.target);
+        controls?.update();
         vantageReady.current = true;
       }
       rig.enabled = true;
-      const held = cameraHeld() || pointer.current.down || reduce.current;
-      applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-      collideCamera(camera.position, rig.target, null);
-      camera.lookAt(rig.target);
       dampFov(camera, fovTarget.current, delta, reduce.current);
       return;
     }
@@ -1915,7 +2085,7 @@ function CameraDriver({
     if (!driving && homing.current) {
       rig.enabled = false;
       widenOrbit(controls);
-      fovTarget.current = 48;
+      fovTarget.current = overviewFov;
       aim.copy(overviewAim);
       eye.copy(overviewEye);
       const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 4);
@@ -1927,8 +2097,10 @@ function CameraDriver({
       if (camera.position.distanceTo(overviewEye) < 0.6) {
         camera.position.copy(overviewEye);
         rig.target.copy(overviewAim);
+        camera.lookAt(overviewAim);
         controls?.update();
         homing.current = false;
+        overviewLatched.current = true;
       }
       return;
     }
@@ -2020,7 +2192,7 @@ function CameraDriver({
     } else if (focusId) {
       const room = DISTRICTS.find((district) => district.id === focusId);
       if (room && frameMode === "out") {
-        fovTarget.current = 48;
+        fovTarget.current = overviewFov;
         if (!depart.current) depart.current = { from: camera.position.clone(), at: state.clock.elapsedTime };
         const trip = depart.current;
         const t = Math.min(1, (state.clock.elapsedTime - trip.at) / 1.15);
@@ -2046,67 +2218,78 @@ function CameraDriver({
         return;
       }
       depart.current = null;
-      if (room) {
-        const shot = (frameMode === "out" ? EXTERIOR_SHOTS : INTERIOR_SHOTS)[room.id];
-        const inside = frameMode === "in" && !shotLock;
+      if (room && frameMode === "in" && !shotLock) {
+        const shot = INTERIOR_SHOTS[room.id];
         if (shot) {
-          const framed = inside ? fitInterior(camera, shot) : shot;
+          const framed = fitInterior(camera, shot);
           eye.set(framed.eye[0], framed.eye[1], framed.eye[2]);
           aim.set(framed.aim[0], framed.aim[1], framed.aim[2]);
-          fovTarget.current = framed.fov ?? shot.fov ?? 32;
+          fovTarget.current = framed.fov ?? shot.fov ?? 50;
         } else {
-          eye.set(room.x, 2.6, room.z + 8);
-          aim.set(room.x, 1.8, room.z);
+          eye.set(room.x, 2.2, room.z + 4.2);
+          aim.set(room.x, 1.7, room.z - 2);
+          fovTarget.current = 50;
+        }
+        const blend = snapInside.current || reduce.current ? 1 : 1 - Math.exp(-delta * 8);
+        if (snapInside.current) snapInside.current = false;
+        rig.target.lerp(aim, blend);
+        camera.position.lerp(eye, blend);
+        if (camera.position.distanceTo(eye) < 0.35) {
+          camera.position.copy(eye);
+          rig.target.copy(aim);
+          latched.current = focusId;
+        }
+        camera.lookAt(rig.target);
+        dampFov(camera, fovTarget.current, delta, reduce.current);
+        renderShot.on = true;
+        renderShot.eye.copy(eye);
+        renderShot.aim.copy(aim);
+        renderShot.fov = fovTarget.current ?? 50;
+        rig.enabled = false;
+        const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+        probe.focusId = focusId;
+        probe.camera = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+        return;
+      }
+      if (room) {
+        const shot = EXTERIOR_SHOTS[room.id];
+        if (shot) {
+          eye.set(shot.eye[0], shot.eye[1], shot.eye[2]);
+          aim.set(shot.aim[0], shot.aim[1], shot.aim[2]);
+          fovTarget.current = shot.fov ?? 42;
         }
         ignoreId = room.id;
-        if (frameMode === "out" || latched.current !== focusId && camera.position.distanceTo(eye) > 0.55) {
-          latched.current = null;
-        }
-        const settled = inside && (latched.current === focusId || camera.position.distanceTo(eye) < 0.55);
-        if (controls && inside && !settled) controls.enabled = false;
-        if (controls && frameMode === "out") {
-          controls.enabled = true;
-          controls.minDistance = 8;
-          controls.maxDistance = 360;
-        }
-        if (settled && controls) {
-          latched.current = focusId;
-          controls.enabled = true;
-          controls.enableDamping = true;
-          controls.dampingFactor = 0.075;
-          controls.minDistance = INTERIOR_MIN_DISTANCE;
-          controls.maxDistance = INTERIOR_MAX_DISTANCE;
-          controls.enablePan = false;
-          controls.minPolarAngle = 0.7;
-          controls.maxPolarAngle = 1.4;
-          controls.target.set(peek ? peek.x : room.x, peek ? peek.y : 1.35, peek ? peek.z : room.z);
-          clampInteriorCamera(camera.position, room);
-          interiorOffset.current.copy(camera.position).sub(controls.target);
-          const span = interiorOffset.current.length();
-          if (span > INTERIOR_MAX_DISTANCE && span > 0.001) {
-            interiorOffset.current.setLength(INTERIOR_MAX_DISTANCE);
-            camera.position.copy(controls.target).add(interiorOffset.current);
-            clampInteriorCamera(camera.position, room);
-          }
-          controls.update();
-          dampFov(camera, fovTarget.current, delta, reduce.current);
-          return;
-        }
         drive = true;
       }
     }
     if (!drive) {
       if (mode === "play" && !lineup && !street && !poster && followIndex === null && !focusId) {
-        const held = cameraHeld() || pointer.current.down || reduce.current;
-        applyIdleDrift(camera, rig, state.clock.elapsedTime, held);
-        collideCamera(camera.position, rig.target, null);
-        if (!held) camera.lookAt(rig.target);
+        fovTarget.current = overviewFov;
+        const far = camera.position.distanceTo(overviewEye) > 2.6 || rig.target.distanceTo(overviewAim) > 3;
+        if (!overviewLatched.current && far) {
+          rig.enabled = false;
+          const blend = reduce.current ? 1 : 1 - Math.exp(-delta * 6);
+          rig.target.lerp(overviewAim, blend);
+          camera.position.lerp(overviewEye, blend);
+          camera.lookAt(rig.target);
+          dampFov(camera, fovTarget.current, delta, reduce.current);
+          return;
+        }
+        if (!overviewLatched.current) {
+          camera.position.copy(overviewEye);
+          rig.target.copy(overviewAim);
+          camera.lookAt(overviewAim);
+          controls?.update();
+          overviewLatched.current = true;
+        }
+        rig.enabled = true;
       }
       dampFov(camera, fovTarget.current, delta, reduce.current);
       return;
     }
     if (collide) collideCamera(eye, aim, ignoreId);
-    const blend = reduce.current ? 1 : 1 - Math.exp(-delta * (camera.position.distanceTo(eye) > 18 ? 3.6 : 6));
+    const blend = snapInside.current || reduce.current ? 1 : 1 - Math.exp(-delta * (camera.position.distanceTo(eye) > 18 ? 3.6 : 6));
+    if (snapInside.current) snapInside.current = false;
     rig.target.lerp(aim, blend);
     camera.position.lerp(eye, blend);
     if (collide) collideCamera(camera.position, rig.target, ignoreId);
@@ -2593,6 +2776,7 @@ export default function CityMap({
   shotLock = false,
   roomBusy = false,
   visitors = [],
+  lines = {},
 }: {
   paused: boolean;
   mode: "orbit" | "cutscene" | "play";
@@ -2611,8 +2795,11 @@ export default function CityMap({
   shotLock?: boolean;
   roomBusy?: boolean;
   visitors?: CityAgent[];
+  lines?: Record<string, string>;
 }) {
-  const crew = [...CITY_AGENTS, ...visitors];
+  const crew = visitors;
+  const [tier] = useState<VillageTier>(villageTier);
+  const [detail, setDetail] = useState(false);
   const [lean, setLean] = useState(false);
   const [quality, setQuality] = useState<QualityTier>("medium");
   const [dpr, setDpr] = useState(1);
@@ -2636,6 +2823,11 @@ export default function CityMap({
   const [peek, setPeek] = useState<{ x: number; y: number; z: number } | null>(null);
   const [crowd] = useState(readCrowd);
   const crowdOn = crowd.measure && !poster && !lineup && !street;
+  useEffect(() => {
+    const onPlayable = () => setDetail(true);
+    window.addEventListener("fe2vi-playable", onPlayable);
+    return () => window.removeEventListener("fe2vi-playable", onPlayable);
+  }, []);
   const shotId = mode === "cutscene" ? BEAT_IDS[Math.min(beat, BEAT_IDS.length - 1)] : frameMode === "in" ? focusId : null;
   const openInterior = shotId && INTERIOR_IDS.has(shotId) ? shotId : null;
 
@@ -2644,13 +2836,14 @@ export default function CityMap({
       className="city-canvas"
       dpr={dpr}
       shadows={quality !== "low"}
-      camera={{ position: [overviewEye.x, overviewEye.y, overviewEye.z], fov: 42, near: 0.35, far: 2500 }}
+      camera={{ position: [0, 84, 108], fov: 48, near: 0.35, far: 2500 }}
+      frameloop={paused && !openInterior ? "demand" : "always"}
       gl={{
         antialias: quality !== "low",
         alpha: false,
         powerPreference: "default",
         failIfMajorPerformanceCaveat: false,
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: false,
       }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.NoToneMapping;
@@ -2669,20 +2862,33 @@ export default function CityMap({
     >
       <color attach="background" args={["#070a1a"]} />
       <QualitySettings quality={quality} />
-      <World quality={quality} />
-      <Nature />
-      <Props />
+      <PhoneAir />
+      <World quality={quality} environment={detail} />
       <InteriorBackdrop id={openInterior} />
-      <Kits onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} />
-      <Interiors focusId={openInterior} frameMode={openInterior ? "in" : frameMode} />
+      <BuildingVolumes hideId={openInterior} />
+      <PerfProbe />
+      {openInterior ? (
+        <Suspense fallback={null}>
+          <InteriorBoundary onLeave={() => onClearFocus?.()}>
+            <Interiors focusId={openInterior} frameMode="in" />
+          </InteriorBoundary>
+        </Suspense>
+      ) : null}
+      <Suspense fallback={null}>
+        {detail ? <Nature /> : null}
+        {detail ? <Props /> : null}
+        {detail ? <Kits url={villageKitsUrl(tier)} onPick={onPick} focusId={focusId} frameMode={frameMode} beatId={openInterior} /> : null}
+      </Suspense>
       <group position={[-42, 6.4, 33]}>
         <mesh>
           <boxGeometry args={[7.2, 1.35, 0.16]} />
           <meshStandardMaterial color="#e2b340" metalness={0.35} roughness={0.48} emissive="#ffc14a" emissiveIntensity={0.32} />
         </mesh>
-        <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
-          VAULT
-        </Text>
+        {detail ? (
+          <Text position={[0, 0, 0.1]} font={DISPLAY_FONT} fontSize={0.48} color="#2a1c08" anchorX="center" anchorY="middle">
+            VAULT
+          </Text>
+        ) : null}
       </group>
       <Smoke position={[-34, 13.4, -26]} />
       <WindowGlow />
@@ -2700,6 +2906,7 @@ export default function CityMap({
       </mesh>
       <VillageMural />
       <BuildingHits onPick={onPick} />
+      <DoorMarks />
       <PickRing />
       {lean ? (
         <pointLight position={[0, 8, 12]} intensity={18} color="#ffb070" distance={80} decay={2} />
@@ -2718,37 +2925,45 @@ export default function CityMap({
           <meshBasicMaterial color="#101018" />
         </mesh>
       ) : null}
-      <Station onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} />
+      <Station url={villageCoreUrl(tier)} onPick={onPick} focusId={focusId} beatPrefix={mode === "cutscene" ? (BEAT_PREFIX[beat] ?? null) : null} concealed={Boolean(openInterior)} showLabels={detail} />
       <DrawProbe />
       <FrameAudit />
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
       ) : poster || lineup || street || mode === "cutscene" ? (
-        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : crew).map((agent, index) => (
+        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
           <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
         ))
-      ) : (
+      ) : detail ? (
         <>
-          <ImpostorCrowd
-            count={crew.length}
-            hide={focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]}
-            paused={paused}
-          />
-          <AgentTargets agents={crew} paused={paused} onFollow={onFollow} />
-          {(focusId ? (INTERIOR_CAST[focusId] ?? []).map((member) => member.index) : followIndex == null ? [] : [followIndex]).map((index) => (
-            <AgentMesh key={`detail-${index}`} agent={crew[index]} index={index} paused={paused} focusId={focusId} lineup={false} poster={null} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
+          {crew.map((agent, index) => (
+            <AgentMesh
+              key={agent.accountId}
+              agent={agent}
+              index={index}
+              paused={paused}
+              focusId={focusId}
+              lineup={false}
+              poster={null}
+              onFollow={onFollow}
+              onPeek={setPeek}
+              roomBusy={roomBusy}
+              mode={mode}
+              beat={beat}
+              frameMode={frameMode}
+              line={lines[agent.name] || lines[agent.accountId] || ""}
+            />
           ))}
         </>
-      )}
+      ) : null}
       {crowd.measure ? <FrameStats count={crowd.count} /> : null}
       {street ? <ScaleProbe /> : null}
       <Ears paused={paused} />
-      <LoadReporter />
       <CameraDriver mode={mode} beat={beat} focusId={focusId} followIndex={followIndex} paused={paused} frameMode={frameMode} lineup={lineup} street={street} poster={poster} lobby={lobby} shotLock={shotLock} peek={peek} />
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} quality={quality} />
       <OrbitControls
         makeDefault
-        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}
+        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street && !(frameMode === "in" && Boolean(focusId))}
         enablePan
         enableZoom
         enableRotate
@@ -2756,8 +2971,7 @@ export default function CityMap({
         dampingFactor={0.08}
         autoRotate={false}
         touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
-        target={[overviewAim.x, overviewAim.y, overviewAim.z]}
-        minPolarAngle={0.35}
+        minPolarAngle={0.15}
         maxPolarAngle={1.5}
         minDistance={lean ? 6 : 8}
         maxDistance={360}

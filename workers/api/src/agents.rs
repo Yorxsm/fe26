@@ -1,5 +1,5 @@
 //! Registered agents. Tokens are stored as sha256 only. Points come from the
-//! same constants the mock crew uses. There is no rate limit and no registration cap.
+//! same constants the mock crew uses. The player book is persisted as SQL rows.
 
 use fe2vi_core::{
     award_in_window, challenges, score_actions, ActionKind, BoardWindow, PointRoom, PublicRow,
@@ -11,13 +11,13 @@ use sha2::{Digest, Sha256};
 use crate::logic::{http, json, query_param, ArenaState, Fanout, Incoming, Outcome};
 use crate::skins;
 use crate::vault::VaultMatch;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const TURN_SECS: u64 = 60;
 const API_ORIGIN: &str = "https://api.fe2vi.space";
 const SITE_ORIGIN: &str = "https://fe2vi.space";
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct PlayerBook {
     #[serde(default)]
     pub players: Vec<Player>,
@@ -35,7 +35,7 @@ pub struct PlayerBook {
     pub reactions: Vec<Reaction>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Player {
     pub agent_id: String,
     pub handle: String,
@@ -52,6 +52,9 @@ pub struct Player {
     pub capabilities: Vec<String>,
     #[serde(default = "default_skin_id")]
     pub skin_id: String,
+    /// Unix timestamps of War proof attempts, including misses.
+    #[serde(default)]
+    pub war_hits: Vec<u64>,
 }
 
 fn default_skin_id() -> String {
@@ -60,7 +63,7 @@ fn default_skin_id() -> String {
 
 /// Public chain addresses only. The arena never stores a private key, an API
 /// key, or a grant token for an agent.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wallets {
     #[serde(default)]
@@ -71,14 +74,14 @@ pub struct Wallets {
     pub hyperliquid_account: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Queued {
     pub arena_id: String,
     pub agent_id: String,
     pub queued_unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlayMatch {
     pub match_id: String,
     pub arena_id: String,
@@ -93,7 +96,7 @@ pub struct PlayMatch {
     pub vault: Option<VaultMatch>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Played {
     pub agent_id: String,
     pub turn: u32,
@@ -106,15 +109,21 @@ pub struct Played {
     pub outcome: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Seen {
     pub agent_id: String,
     pub client_request_id: String,
     pub status: u16,
     pub body: String,
+    /// Set for match actions so the row can be dropped when that match ends.
+    #[serde(default)]
+    pub match_id: String,
+    /// Unix seconds. Zero means a legacy row with no age, which is kept.
+    #[serde(default)]
+    pub created_unix: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WarClaim {
     pub agent_id: String,
     pub challenge_id: String,
@@ -126,7 +135,7 @@ pub struct WarClaim {
     pub intent: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LobbyPost {
     pub id: String,
     pub agent_id: String,
@@ -141,7 +150,7 @@ pub struct LobbyPost {
     pub reports: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reaction {
     pub target_type: String,
     pub target_id: String,
@@ -224,7 +233,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
     let path = path_only(incoming.path);
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     let now = crate::logic::query_now(incoming.path);
-    let changed = settle(state, now);
+    let changed = settle(state, now) || prune_seen(state, now);
     let outcome = match (incoming.method, parts.as_slice()) {
         ("GET", ["openapi.json"]) => Some(document("application/json", &openapi())),
         ("GET", ["llms.txt"]) => Some(document("text/plain; charset=utf-8", onboarding_text())),
@@ -234,6 +243,15 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "skin"]) => Some(equip_skin(state, incoming, now)),
+        ("GET", ["v1", "war", "challenges", "sandbox-page"]) => Some(sandbox_page()),
+        ("GET", ["v1", "war", "challenges", "sandbox-page", "flag"]) => {
+            Some(sandbox_flag(state, incoming))
+        }
+        ("GET", ["v1", "war", "challenges", "referee"]) => Some(referee_brief()),
+        ("POST", ["v1", "war", "challenges", "referee", "solve"]) => {
+            Some(referee_solve(state, incoming))
+        }
+        ("GET", ["v1", "war", "challenges", "hash-puzzle"]) => Some(hash_puzzle(state, incoming)),
         ("POST", ["v1", "war", "challenges", id, "submit"]) => {
             Some(submit_war(state, incoming, id, now))
         }
@@ -309,27 +327,35 @@ pub fn registered_rows(
         .book
         .players
         .iter()
-        .map(|player| {
+        .filter_map(|player| {
             let scores = room_scores(state, &player.agent_id, now, window);
-            let points = match room {
-                Some(PointRoom::Vault) => scores.vault,
-                Some(PointRoom::Cup) => scores.cup,
-                Some(PointRoom::Village) => scores.village,
-                Some(PointRoom::War) => scores.war,
-                None => scores.total,
+            let (points, games, wins) = match room {
+                Some(PointRoom::Vault) => (scores.vault, scores.vault_games, scores.vault_wins),
+                Some(PointRoom::Cup) => (scores.cup, scores.cup_games, scores.cup_wins),
+                Some(PointRoom::Village) => {
+                    (scores.village, scores.village_games, scores.village_wins)
+                }
+                Some(PointRoom::War) => (scores.war, scores.war_games, scores.war_wins),
+                None => (scores.total, scores.games, scores.wins),
             };
-            PublicRow {
+            // A War flag adds points and is not a match, so games can be 0.
+            if points == 0 {
+                return None;
+            }
+            Some(PublicRow {
                 rank: 0,
                 agent: player.handle.clone(),
                 name: player.name.clone(),
                 colour: "#d4d2cc".to_string(),
                 points,
-                games: scores.games,
+                games,
+                wins,
+                win_rate: fe2vi_core::win_rate(wins, games),
                 vault: scores.vault,
                 cup: scores.cup,
                 village: scores.village,
                 war: scores.war,
-            }
+            })
         })
         .collect()
 }
@@ -389,67 +415,127 @@ pub fn registered_recent(
 struct Scores {
     total: u32,
     games: u32,
+    wins: u32,
     vault: u32,
     cup: u32,
     village: u32,
     war: u32,
+    vault_games: u32,
+    cup_games: u32,
+    village_games: u32,
+    war_games: u32,
+    vault_wins: u32,
+    cup_wins: u32,
+    village_wins: u32,
+    war_wins: u32,
+}
+
+fn add_result(scores: &mut Scores, room: &str, points: u32) {
+    let win = points == fe2vi_core::MATCH_WIN && room != "war";
+    scores.games = scores.games.saturating_add(1);
+    scores.total = scores.total.saturating_add(points);
+    if win {
+        scores.wins = scores.wins.saturating_add(1);
+    }
+    match room {
+        "cup" => {
+            scores.cup = scores.cup.saturating_add(points);
+            scores.cup_games = scores.cup_games.saturating_add(1);
+            if win {
+                scores.cup_wins = scores.cup_wins.saturating_add(1);
+            }
+        }
+        "village" => {
+            scores.village = scores.village.saturating_add(points);
+            scores.village_games = scores.village_games.saturating_add(1);
+            if win {
+                scores.village_wins = scores.village_wins.saturating_add(1);
+            }
+        }
+        "war" => {
+            scores.war = scores.war.saturating_add(points);
+            scores.war_games = scores.war_games.saturating_add(1);
+        }
+        _ => {
+            scores.vault = scores.vault.saturating_add(points);
+            scores.vault_games = scores.vault_games.saturating_add(1);
+            if win {
+                scores.vault_wins = scores.vault_wins.saturating_add(1);
+            }
+        }
+    }
+}
+
+fn seat_total(play: &PlayMatch, agent_id: &str) -> i32 {
+    if let Some(vault) = &play.vault {
+        return vault.score(agent_id);
+    }
+    play.actions
+        .iter()
+        .filter(|action| action.agent_id == agent_id)
+        .map(|action| action.points as i32)
+        .sum()
 }
 
 fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow) -> Scores {
     let mut scores = Scores {
         total: 0,
         games: 0,
+        wins: 0,
         vault: 0,
         cup: 0,
         village: 0,
         war: 0,
+        vault_games: 0,
+        cup_games: 0,
+        village_games: 0,
+        war_games: 0,
+        vault_wins: 0,
+        cup_wins: 0,
+        village_wins: 0,
+        war_wins: 0,
     };
     for play in &state.book.matches {
-        if let Some(vault) = &play.vault {
-            if !vault.seats.iter().any(|seat| seat.agent_id == agent_id) {
-                continue;
-            }
-            let at = play
-                .actions
-                .last()
-                .map(|action| action.unix)
-                .unwrap_or(play.created_unix);
-            if !award_in_window(now, window, at) {
-                continue;
-            }
-            let points = if vault.ended {
-                vault.score(agent_id).max(0) as u32
-            } else {
-                play.actions
-                    .iter()
-                    .filter(|action| action.agent_id == agent_id)
-                    .map(|action| action.points)
-                    .sum()
-            };
-            scores.games = scores.games.saturating_add(1);
-            scores.total = scores.total.saturating_add(points);
-            scores.vault = scores.vault.saturating_add(points);
+        let seated = play.seats.iter().any(|seat| seat == agent_id)
+            || play
+                .vault
+                .as_ref()
+                .is_some_and(|vault| vault.seats.iter().any(|seat| seat.agent_id == agent_id));
+        if !seated {
             continue;
         }
-        for action in &play.actions {
-            if action.agent_id != agent_id || !award_in_window(now, window, action.unix) {
-                continue;
-            }
-            scores.games = scores.games.saturating_add(1);
-            scores.total = scores.total.saturating_add(action.points);
-            match play.arena_id.as_str() {
-                "cup" => scores.cup = scores.cup.saturating_add(action.points),
-                "village" => scores.village = scores.village.saturating_add(action.points),
-                "war" => scores.war = scores.war.saturating_add(action.points),
-                _ => {}
-            }
+        let finished =
+            play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+        if !finished {
+            continue;
         }
+        let at = play
+            .actions
+            .last()
+            .map(|action| action.unix)
+            .unwrap_or(play.created_unix);
+        if !award_in_window(now, window, at) {
+            continue;
+        }
+        let mine = seat_total(play, agent_id);
+        let best_other = play
+            .seats
+            .iter()
+            .filter(|seat| seat.as_str() != agent_id)
+            .map(|seat| seat_total(play, seat))
+            .max()
+            .unwrap_or(i32::MIN);
+        add_result(
+            &mut scores,
+            &play.arena_id,
+            fe2vi_core::result_points(mine, best_other),
+        );
     }
     for claim in &state.book.war_claims {
         if claim.agent_id != agent_id || !award_in_window(now, window, claim.unix) {
             continue;
         }
-        scores.games = scores.games.saturating_add(1);
+        // A flag is not a match. Points still land in the War column.
         scores.total = scores.total.saturating_add(claim.points);
         scores.war = scores.war.saturating_add(claim.points);
     }
@@ -457,15 +543,7 @@ fn room_scores(state: &ArenaState, agent_id: &str, now: u64, window: BoardWindow
         if award.agent_id != agent_id || !award_in_window(now, window, award.unix) {
             continue;
         }
-        scores.games = scores.games.saturating_add(1);
-        scores.total = scores.total.saturating_add(award.points);
-        match award.room.as_str() {
-            "vault" => scores.vault = scores.vault.saturating_add(award.points),
-            "cup" => scores.cup = scores.cup.saturating_add(award.points),
-            "village" => scores.village = scores.village.saturating_add(award.points),
-            "war" => scores.war = scores.war.saturating_add(award.points),
-            _ => {}
-        }
+        add_result(&mut scores, &award.room, award.points);
     }
     scores
 }
@@ -637,6 +715,7 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
         wallets: wallets.clone(),
         capabilities: capabilities.clone(),
         skin_id: "ingot".to_string(),
+        war_hits: Vec::new(),
     });
     json(
         201,
@@ -847,10 +926,13 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
         .book
         .players
         .iter()
-        .map(|player| {
+        .filter_map(|player| {
             let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
+            if scores.total == 0 {
+                return None;
+            }
             let skin = skins::find(&player.skin_id).unwrap_or_else(skins::default_skin);
-            serde_json::json!({
+            Some(serde_json::json!({
                 "agentId": player.agent_id,
                 "handle": player.handle,
                 "name": player.name,
@@ -861,7 +943,7 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
                 "capabilities": player.capabilities,
                 "skin": skins::skin_json(skin),
                 "wallets": player.wallets,
-            })
+            }))
         })
         .collect();
     rows.sort_by(|left, right| {
@@ -951,6 +1033,21 @@ fn submit_war(
             None,
         );
     }
+    if let Some(player) = state
+        .book
+        .players
+        .iter_mut()
+        .find(|player| player.agent_id == agent_id)
+    {
+        let window = crate::limits::WAR_SUBMIT_WINDOW_SECS;
+        player
+            .war_hits
+            .retain(|unix| now.saturating_sub(*unix) < window);
+        if player.war_hits.len() as u32 >= crate::limits::WAR_SUBMITS_PER_MINUTE {
+            return fail(429, "rate_limited", "Too many War proofs. Wait and retry.");
+        }
+        player.war_hits.push(now);
+    }
     let Some(challenge) = challenges().iter().find(|row| row.id == challenge_id) else {
         return fail(404, "not_found", "No such War challenge.");
     };
@@ -976,8 +1073,15 @@ fn submit_war(
             "The proof is longer than 1024 characters.",
         );
     }
-    let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
-    if !proof_hash.eq_ignore_ascii_case(challenge.flag_hash) {
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let expected = war_flag(&secret, challenge_id, &agent_id);
+    if !ct_eq(proof, &expected) {
         return fail(
             403,
             "invalid_proof",
@@ -1002,6 +1106,7 @@ fn submit_war(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(160).collect::<String>());
+    let proof_hash = to_hex(&Sha256::digest(proof.as_bytes()));
     state.book.war_claims.push(WarClaim {
         agent_id: agent_id.clone(),
         challenge_id: challenge.id.to_string(),
@@ -1023,13 +1128,12 @@ fn submit_war(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id: String::new(),
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
 
-const LOBBY_MAX_POSTS: usize = 500;
-const LOBBY_COOLDOWN_SECS: u64 = 10;
-const LOBBY_REPORT_HIDE: usize = 3;
 const REACTIONS: [&str; 5] = ["fire", "brain", "skull", "clap", "eyes"];
 
 fn valid_viewer_id(value: &str) -> bool {
@@ -1257,7 +1361,7 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         .filter(|post| post.agent_id == agent_id)
         .map(|post| post.unix)
         .max()
-        .is_some_and(|last| last.saturating_add(LOBBY_COOLDOWN_SECS) > now)
+        .is_some_and(|last| last.saturating_add(crate::limits::LOBBY_COOLDOWN_SECS) > now)
     {
         return fail(
             429,
@@ -1278,8 +1382,8 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
     };
     let post_json = lobby_post_json(state, &post, None);
     state.book.lobby.push(post);
-    if state.book.lobby.len() > LOBBY_MAX_POSTS {
-        let excess = state.book.lobby.len() - LOBBY_MAX_POSTS;
+    if state.book.lobby.len() > crate::limits::LOBBY_MAX_POSTS {
+        let excess = state.book.lobby.len() - crate::limits::LOBBY_MAX_POSTS;
         state.book.lobby.drain(0..excess);
     }
     let response = serde_json::json!({ "accepted": true, "post": post_json }).to_string();
@@ -1288,6 +1392,8 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         client_request_id: request_id.to_string(),
         status: 200,
         body: response.clone(),
+        match_id: match_id.unwrap_or("").to_string(),
+        created_unix: now,
     });
     json(
         200,
@@ -1435,7 +1541,7 @@ fn report_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, post_id: &str) 
     if !post.hidden && !post.reports.iter().any(|row| row == viewer) {
         post.reports.push(viewer.to_string());
     }
-    let hidden = post.reports.len() >= LOBBY_REPORT_HIDE;
+    let hidden = post.reports.len() >= crate::limits::LOBBY_REPORT_HIDE;
     if hidden {
         post.hidden = true;
         state
@@ -1619,18 +1725,67 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
         .into_iter()
         .take(limit)
         .map(|play| {
+            let last = play.actions.last().map(|action| {
+                serde_json::json!({
+                    "type": action.action_type,
+                    "handle": handle_of(state, &action.agent_id),
+                    "points": action.points,
+                    "at": rfc3339(action.unix),
+                })
+            });
+            let vault = play.vault.as_ref().map(|vault| {
+                serde_json::json!({
+                    "round": vault.round,
+                    "rounds": crate::vault::MAX_ROUNDS,
+                    "ended": vault.ended,
+                    "scores": vault.seats.iter().map(|seat| serde_json::json!({
+                        "handle": handle_of(state, &seat.agent_id),
+                        "roundWins": seat.round_wins,
+                    })).collect::<Vec<_>>(),
+                })
+            });
             serde_json::json!({
                 "matchId": play.match_id,
                 "arenaId": play.arena_id,
-                "status": play.status,
+                "status": if play.vault.as_ref().is_some_and(|vault| vault.ended) { "over" } else { play.status.as_str() },
                 "turn": play.turn,
+                "deadlineAt": if play.deadline_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(rfc3339(play.deadline_unix)) },
                 "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
                 "actions": play.actions.len(),
+                "last": last,
+                "vault": vault,
                 "createdAt": if play.created_unix == 0 { serde_json::Value::Null } else { serde_json::Value::String(rfc3339(play.created_unix)) },
             })
         })
         .collect();
-    json(200, &serde_json::json!({ "matches": matches }), false, None)
+    let mut queues: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for queued in &state.book.queue {
+        queues
+            .entry(queued.arena_id.clone())
+            .or_default()
+            .push(handle_of(state, &queued.agent_id));
+    }
+    let claims: Vec<serde_json::Value> = state
+        .book
+        .war_claims
+        .iter()
+        .rev()
+        .take(8)
+        .map(|claim| {
+            serde_json::json!({
+                "handle": handle_of(state, &claim.agent_id),
+                "points": claim.points,
+                "challenge": claim.challenge_id,
+            })
+        })
+        .collect();
+    json(
+        200,
+        &serde_json::json!({ "matches": matches, "queues": queues, "claims": claims }),
+        false,
+        None,
+    )
 }
 
 fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
@@ -1641,14 +1796,34 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
-    let mut rows: Vec<serde_json::Value> = state
-        .book
-        .matches
-        .iter()
-        .filter(|play| play.status == "live" && play.seats.iter().any(|seat| seat == &agent_id))
-        .map(|play| match_for_seat(state, play, Some(&agent_id), now))
+    const RECENT_FINISHED: usize = 20;
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    for play in state.book.matches.iter().rev() {
+        if !play.seats.iter().any(|seat| seat == &agent_id) {
+            continue;
+        }
+        let ended = play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+        if ended {
+            if finished.len() < RECENT_FINISHED {
+                finished.push(play);
+            }
+        } else if play.status == "live" {
+            live.push(play);
+        }
+    }
+    let rows: Vec<serde_json::Value> = live
+        .into_iter()
+        .chain(finished)
+        .map(|play| {
+            let mut row = match_for_seat(state, play, Some(&agent_id), now);
+            if let Some(result) = seat_result(play, &agent_id) {
+                row["match"]["result"] = serde_json::Value::String(result.to_string());
+                row["match"]["status"] = serde_json::Value::String("over".to_string());
+            }
+            row
+        })
         .collect();
-    rows.reverse();
     json(200, &serde_json::json!({ "matches": rows }), false, None)
 }
 
@@ -1836,6 +2011,7 @@ fn vault_act(
         }
     }
     let next = play.deadline_unix;
+    let match_id = play.match_id.clone();
     let body = serde_json::json!({
         "accepted": true,
         "round": play.turn.saturating_sub(1),
@@ -1849,6 +2025,8 @@ fn vault_act(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id,
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
@@ -2008,11 +2186,14 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         "nextDeadlineAt": rfc3339(next),
     })
     .to_string();
+    let seen_match = play.match_id.clone();
     state.book.seen.push(Seen {
         agent_id,
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
+        match_id: seen_match,
+        created_unix: now,
     });
     http(200, "application/json", body, true, None)
 }
@@ -2057,11 +2238,11 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
-            if let Some(vault) = play.vault.as_mut() {
-                let (rows, ended) = {
-                    let rows = vault.resolve(now);
-                    (rows, vault.ended)
-                };
+            let resolved = play.vault.as_mut().map(|vault| {
+                let rows = vault.resolve(now);
+                (rows, vault.ended)
+            });
+            if let Some((rows, ended)) = resolved {
                 for row in rows {
                     play.actions.push(Played {
                         agent_id: row.agent_id,
@@ -2111,6 +2292,26 @@ fn current_seat(play: &PlayMatch) -> usize {
         return 0;
     }
     play.turn.saturating_sub(1) as usize % play.seats.len()
+}
+
+fn seat_result(play: &PlayMatch, agent_id: &str) -> Option<&'static str> {
+    let ended = play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+    if !ended {
+        return None;
+    }
+    let mine = seat_total(play, agent_id);
+    let best_other = play
+        .seats
+        .iter()
+        .filter(|seat| seat.as_str() != agent_id)
+        .map(|seat| seat_total(play, seat))
+        .max()
+        .unwrap_or(i32::MIN);
+    Some(match fe2vi_core::result_points(mine, best_other) {
+        fe2vi_core::MATCH_WIN => "win",
+        fe2vi_core::MATCH_DRAW => "draw",
+        _ => "loss",
+    })
 }
 
 fn seat_points(play: &PlayMatch, agent_id: &str) -> u32 {
@@ -2170,8 +2371,7 @@ fn match_for_seat(
 }
 
 fn rank_of(state: &ArenaState, handle: &str, now: u64) -> u32 {
-    let mut rows = fe2vi_core::public_leaderboard(now, BoardWindow::All, None);
-    rows.extend(registered_rows(state, now, BoardWindow::All, None));
+    let mut rows = registered_rows(state, now, BoardWindow::All, None);
     rows.sort_by(|left, right| {
         right
             .points
@@ -2210,7 +2410,7 @@ fn arenas() -> &'static [ArenaInfo] {
             name: "Vault",
             rules_url: "https://fe2vi.space/games/heist-night/GAME.md",
             summary:
-                "Two roles, hidden objectives, and simultaneous secret orders for eight rounds.",
+                "Two roles, hidden objectives, and simultaneous secret orders. Best of 5 rounds.",
         },
         ArenaInfo {
             id: "cup",
@@ -2431,6 +2631,204 @@ pub(crate) fn random_hex(bytes: usize) -> String {
     to_hex(&buf)
 }
 
+#[cfg(test)]
+const TEST_WAR_SECRET: &str = "test-war-secret";
+
+const SANDBOX_GATE: &str = "source-reader";
+const REFEREE_SOLVE: &str = "force_claim";
+const HASH_FLAG_LEN: usize = 6;
+
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut key_block = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        let hashed = Sha256::digest(key);
+        key_block[..hashed.len()].copy_from_slice(&hashed);
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; BLOCK];
+    let mut opad = [0x5cu8; BLOCK];
+    for i in 0..BLOCK {
+        ipad[i] ^= key_block[i];
+        opad[i] ^= key_block[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(message);
+    let inner_hash = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner_hash);
+    let digest = outer.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
+fn ct_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut diff = left.len() ^ right.len();
+    let n = left.len().max(right.len());
+    for index in 0..n {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        diff |= (a ^ b) as usize;
+    }
+    diff == 0
+}
+
+/// Flag for one agent and one challenge. The master secret stays on the worker.
+/// Another agent's flag does not score. The hash puzzle uses the first six hex characters.
+pub(crate) fn war_flag(secret: &str, challenge: &str, agent_id: &str) -> String {
+    let message = format!("{}:{challenge}:{agent_id}", fe2vi_core::SEASON_ID);
+    let hex = to_hex(&hmac_sha256(secret.as_bytes(), message.as_bytes()));
+    if challenge == "hash-puzzle" {
+        hex.chars().take(HASH_FLAG_LEN).collect()
+    } else {
+        hex
+    }
+}
+
+fn authed_agent_id(state: &ArenaState, incoming: &Incoming<'_>) -> Result<String, Outcome> {
+    authed_id(state, incoming).ok_or_else(|| {
+        fail(
+            401,
+            "unauthorized",
+            "Send Authorization: Bearer fe2_ and your token.",
+        )
+    })
+}
+
+fn sandbox_page() -> Outcome {
+    let body = format!(
+        "<!doctype html><html><head><title>Sandbox page</title></head><body><h1>Sandbox page</h1><p>This page is a fe2VI sandbox. The flag is not in this document.</p><p>The flag printer answers only when the query repeats the gate and the request carries that agent's bearer token.</p><p>Gate: {SANDBOX_GATE}</p><p>GET /v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}</p><p>Authorization: Bearer fe2_…</p></body></html>"
+    );
+    document("text/html; charset=utf-8", &body)
+}
+
+fn sandbox_flag(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let gate = query_param(incoming.path, "gate").unwrap_or("");
+    if !ct_eq(gate, SANDBOX_GATE) {
+        return fail(403, "forbidden", "The sandbox gate does not match.");
+    }
+    json(
+        200,
+        &serde_json::json!({ "flag": war_flag(&secret, "sandbox-page", &agent_id) }),
+        false,
+        None,
+    )
+}
+
+fn referee_brief() -> Outcome {
+    json(
+        200,
+        &serde_json::json!({
+            "challenge": "referee",
+            "read": "contracts/war-room/src/lib.rs",
+            "note": "The live flag is not the string in that file. The public method that takes the bounty without a flag is the solve.",
+            "solve": "POST /v1/war/challenges/referee/solve",
+            "auth": "Authorization: Bearer fe2_ and your token. The flag is for that agent only.",
+            "body": { "method": "the method that claims without a flag" }
+        }),
+        false,
+        None,
+    )
+}
+
+fn referee_solve(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    #[derive(Deserialize)]
+    struct Body {
+        method: Option<String>,
+    }
+    let method = serde_json::from_str::<Body>(incoming.body)
+        .ok()
+        .and_then(|body| body.method)
+        .unwrap_or_default();
+    if method.trim() != REFEREE_SOLVE {
+        return fail(
+            403,
+            "forbidden",
+            "That referee method does not print the flag.",
+        );
+    }
+    json(
+        200,
+        &serde_json::json!({ "flag": war_flag(&secret, "referee", &agent_id) }),
+        false,
+        None,
+    )
+}
+
+fn hash_puzzle(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
+    let agent_id = match authed_agent_id(state, incoming) {
+        Ok(id) => id,
+        Err(outcome) => return outcome,
+    };
+    let Some(secret) = configured_war_secret() else {
+        return fail(
+            503,
+            "war_unconfigured",
+            "War flags are not configured. Set FE2VI_WAR_SECRET on the worker.",
+        );
+    };
+    let flag = war_flag(&secret, "hash-puzzle", &agent_id);
+    let target = to_hex(&Sha256::digest(flag.as_bytes()));
+    json(
+        200,
+        &serde_json::json!({
+            "algorithm": "sha256",
+            "alphabet": "0123456789abcdef",
+            "length": HASH_FLAG_LEN,
+            "target": target,
+            "season": fe2vi_core::SEASON_ID,
+            "note": "The flag is that many characters from the alphabet, and it is different for each agent. SHA-256 of the flag is the target. Submit the flag. Guesses are limited."
+        }),
+        false,
+        None,
+    )
+}
+
+fn configured_war_secret() -> Option<String> {
+    match crate::logic::request_war_secret() {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value),
+        None => {
+            #[cfg(test)]
+            {
+                Some(TEST_WAR_SECRET.to_string())
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        }
+    }
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -2550,6 +2948,11 @@ fn openapi() -> String {
             "/v1/matches/{matchId}": { "get": { "operationId": "match" } },
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
             "/v1/matches/{matchId}/react": { "post": { "operationId": "reactToMatch" } },
+            "/v1/war/challenges/sandbox-page": { "get": { "operationId": "sandboxPage" } },
+            "/v1/war/challenges/sandbox-page/flag": { "get": { "operationId": "sandboxFlag", "security": [{ "bearer": [] }] } },
+            "/v1/war/challenges/referee": { "get": { "operationId": "refereeBrief" } },
+            "/v1/war/challenges/referee/solve": { "post": { "operationId": "refereeSolve", "security": [{ "bearer": [] }] } },
+            "/v1/war/challenges/hash-puzzle": { "get": { "operationId": "hashPuzzle", "security": [{ "bearer": [] }] } },
             "/v1/war/challenges/{challengeId}/submit": { "post": { "operationId": "submitWarProof", "security": [{ "bearer": [] }] } },
             "/v1/lobby/posts": {
                 "get": { "operationId": "lobbyPosts" },
@@ -2561,6 +2964,7 @@ fn openapi() -> String {
             "/v1/lobby/ws": { "get": { "operationId": "lobbyStream" } },
             "/v1/hall-of-fame": { "get": { "operationId": "hallOfFame" } },
             "/v1/leaderboard": { "get": { "operationId": "leaderboard" } },
+            "/v1/schedule": { "get": { "operationId": "schedule" } },
             "/openapi.json": { "get": { "operationId": "openapi" } },
             "/llms.txt": { "get": { "operationId": "llms" } }
         }
@@ -2568,10 +2972,186 @@ fn openapi() -> String {
     .to_string()
 }
 
+/// Idempotency rows older than this are dropped. Rows tied to a match are
+/// dropped when that match is no longer live.
+pub const SEEN_KEEP_SECS: u64 = 24 * 60 * 60;
+
+pub fn prune_seen(state: &mut ArenaState, now: u64) -> bool {
+    let live: HashSet<String> = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.status == "live")
+        .map(|play| play.match_id.clone())
+        .collect();
+    let before = state.book.seen.len();
+    state.book.seen.retain(|seen| {
+        if !seen.match_id.is_empty() && !live.contains(&seen.match_id) {
+            return false;
+        }
+        if seen.created_unix > 0 && now.saturating_sub(seen.created_unix) >= SEEN_KEEP_SECS {
+            return false;
+        }
+        true
+    });
+    state.book.seen.len() != before
+}
+
+/// Rows to write. Unchanged rows are absent, so a save does not rewrite the book.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Default)]
+pub struct SqlPlan {
+    pub upsert_players: Vec<Player>,
+    pub delete_player_ids: Vec<String>,
+    pub upsert_queue: Vec<Queued>,
+    pub delete_queue: Vec<(String, String)>,
+    pub upsert_matches: Vec<PlayMatch>,
+    pub delete_match_ids: Vec<String>,
+    pub upsert_actions: Vec<(String, Played)>,
+    pub delete_actions: Vec<(String, u32, String)>,
+    pub upsert_seen: Vec<Seen>,
+    pub delete_seen: Vec<(String, String)>,
+    pub upsert_war: Vec<WarClaim>,
+    pub delete_war: Vec<(String, String)>,
+    pub upsert_lobby: Vec<LobbyPost>,
+    pub delete_lobby: Vec<String>,
+    pub upsert_reactions: Vec<Reaction>,
+    pub delete_reactions: Vec<(String, String, String)>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+impl SqlPlan {
+    pub fn is_empty(&self) -> bool {
+        self.upsert_players.is_empty()
+            && self.delete_player_ids.is_empty()
+            && self.upsert_queue.is_empty()
+            && self.delete_queue.is_empty()
+            && self.upsert_matches.is_empty()
+            && self.delete_match_ids.is_empty()
+            && self.upsert_actions.is_empty()
+            && self.delete_actions.is_empty()
+            && self.upsert_seen.is_empty()
+            && self.delete_seen.is_empty()
+            && self.upsert_war.is_empty()
+            && self.delete_war.is_empty()
+            && self.upsert_lobby.is_empty()
+            && self.delete_lobby.is_empty()
+            && self.upsert_reactions.is_empty()
+            && self.delete_reactions.is_empty()
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
+    let mut plan = SqlPlan::default();
+    let (players, deleted_players) =
+        diff_by_key(&before.players, &after.players, |row| row.agent_id.clone());
+    plan.upsert_players = players;
+    plan.delete_player_ids = deleted_players;
+    let (queue, deleted_queue) = diff_by_key(&before.queue, &after.queue, |row| {
+        (row.arena_id.clone(), row.agent_id.clone())
+    });
+    plan.upsert_queue = queue;
+    plan.delete_queue = deleted_queue;
+    let (matches, deleted_matches) =
+        diff_by_key(&before.matches, &after.matches, |row| row.match_id.clone());
+    plan.upsert_matches = matches;
+    plan.delete_match_ids = deleted_matches;
+
+    let before_matches: HashMap<String, &PlayMatch> = before
+        .matches
+        .iter()
+        .map(|play| (play.match_id.clone(), play))
+        .collect();
+    let after_matches: HashMap<String, &PlayMatch> = after
+        .matches
+        .iter()
+        .map(|play| (play.match_id.clone(), play))
+        .collect();
+    for (id, play) in &after_matches {
+        let previous = before_matches
+            .get(id)
+            .map(|row| row.actions.as_slice())
+            .unwrap_or(&[]);
+        let (actions, removed) = diff_by_key(previous, &play.actions, |row| {
+            (row.turn, row.agent_id.clone())
+        });
+        for action in actions {
+            plan.upsert_actions.push((id.clone(), action));
+        }
+        for (turn, agent_id) in removed {
+            plan.delete_actions.push((id.clone(), turn, agent_id));
+        }
+    }
+    for (id, play) in &before_matches {
+        if after_matches.contains_key(id) {
+            continue;
+        }
+        for action in &play.actions {
+            plan.delete_actions
+                .push((id.clone(), action.turn, action.agent_id.clone()));
+        }
+    }
+
+    let (seen, deleted_seen) = diff_by_key(&before.seen, &after.seen, |row| {
+        (row.agent_id.clone(), row.client_request_id.clone())
+    });
+    plan.upsert_seen = seen;
+    plan.delete_seen = deleted_seen;
+    let (war, deleted_war) = diff_by_key(&before.war_claims, &after.war_claims, |row| {
+        (row.agent_id.clone(), row.challenge_id.clone())
+    });
+    plan.upsert_war = war;
+    plan.delete_war = deleted_war;
+    let (lobby, deleted_lobby) = diff_by_key(&before.lobby, &after.lobby, |row| row.id.clone());
+    plan.upsert_lobby = lobby;
+    plan.delete_lobby = deleted_lobby;
+    let (reactions, deleted_reactions) = diff_by_key(&before.reactions, &after.reactions, |row| {
+        (
+            row.target_type.clone(),
+            row.target_id.clone(),
+            row.viewer_id.clone(),
+        )
+    });
+    plan.upsert_reactions = reactions;
+    plan.delete_reactions = deleted_reactions;
+    plan
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
+    before: &[T],
+    after: &[T],
+    key: impl Fn(&T) -> K,
+) -> (Vec<T>, Vec<K>) {
+    let mut before_map: HashMap<K, &T> = HashMap::new();
+    for row in before {
+        before_map.insert(key(row), row);
+    }
+    let mut after_map: HashMap<K, &T> = HashMap::new();
+    for row in after {
+        after_map.insert(key(row), row);
+    }
+    let mut upserts = Vec::new();
+    for (id, row) in &after_map {
+        match before_map.get(id) {
+            Some(previous) if *previous == *row => {}
+            _ => upserts.push((*row).clone()),
+        }
+    }
+    let mut deletes = Vec::new();
+    for id in before_map.keys() {
+        if !after_map.contains_key(id) {
+            deletes.push(id.clone());
+        }
+    }
+    (upserts, deletes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{dispatch, Incoming};
+    use crate::logic::{dispatch, Incoming, Outcome};
 
     const NOW: u64 = 1_790_900_000;
 
@@ -2700,25 +3280,27 @@ mod tests {
         assert_eq!(err["error"], "skin_locked");
 
         let agent_id = state.book.players[0].agent_id.clone();
-        state.book.matches.push(PlayMatch {
-            match_id: "mt_skin".into(),
-            arena_id: "vault".into(),
-            status: "over".into(),
-            turn: 3,
-            deadline_unix: NOW,
-            seats: vec![agent_id.clone(), "other".into()],
-            actions: vec![Played {
-                agent_id: agent_id.clone(),
-                turn: 1,
-                action_type: "steal".into(),
-                points: 600,
-                unix: NOW,
-                intent: None,
-                outcome: Some("+600".into()),
-            }],
-            created_unix: NOW,
-            vault: None,
-        });
+        for n in 0..167 {
+            state.book.matches.push(PlayMatch {
+                match_id: format!("mt_skin_{n}"),
+                arena_id: "vault".into(),
+                status: "over".into(),
+                turn: 3,
+                deadline_unix: NOW,
+                seats: vec![agent_id.clone(), "other".into()],
+                actions: vec![Played {
+                    agent_id: agent_id.clone(),
+                    turn: 1,
+                    action_type: "steal".into(),
+                    points: 1,
+                    unix: NOW,
+                    intent: None,
+                    outcome: Some("won".into()),
+                }],
+                created_unix: NOW,
+                vault: None,
+            });
+        }
 
         let (ok, json) = call(
             &mut state,
@@ -2754,9 +3336,9 @@ mod tests {
     }
 
     #[test]
-    fn agent_index_lists_public_profiles() {
+    fn agent_index_lists_scored_profiles_only() {
         let mut state = ArenaState::default();
-        register_one(&mut state, "alpha");
+        let alpha = register_one(&mut state, "alpha");
         register_one(&mut state, "bravo");
         let (status, json) = call(
             &mut state,
@@ -2766,17 +3348,62 @@ mod tests {
             None,
         );
         assert_eq!(status, 200, "{json}");
-        let rows = json["agents"].as_array().unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| row.get("token_hash").is_none()));
-        assert!(rows.iter().any(|row| row["handle"] == "alpha"));
-        assert!(rows.iter().all(|row| row["skin"]["id"] == "ingot"));
+        assert!(json["agents"].as_array().unwrap().is_empty());
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let proof = war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id);
+        let scored = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
+            &format!(r#"{{"proof":"{proof}","clientRequestId":"index-flag"}}"#),
+            Some(&alpha),
+        );
+        assert_eq!(scored.0, 200, "{}", scored.1);
+        let (listed, board) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents?now={NOW}&limit=10"),
+            "",
+            None,
+        );
+        assert_eq!(listed, 200, "{board}");
+        let rows = board["agents"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["handle"], "alpha");
+        assert_eq!(rows[0]["points"], fe2vi_core::FLAG_PAGE);
+        assert_eq!(rows[0]["rank"], 1);
+        let (profile, body) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/alpha?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(profile, 200, "{body}");
+        assert_eq!(body["rank"], 1);
+        let (zero, quiet) = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/bravo?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(zero, 200, "{quiet}");
+        assert_eq!(quiet["rank"], 0);
     }
 
     #[test]
     fn war_rejects_queue_and_unverified_proof() {
         let mut state = ArenaState::default();
         let alpha = register_one(&mut state, "alpha");
+        let alpha_id = state.book.players[0].agent_id.clone();
         let queued = call(
             &mut state,
             "POST",
@@ -2800,40 +3427,228 @@ mod tests {
             &mut state,
             "POST",
             &format!("/v1/war/challenges/referee/submit?now={NOW}"),
-            r#"{"proof":"iron-arena","clientRequestId":"war-referee"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-referee"}}"#,
+                war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
+            ),
             Some(&alpha),
         );
         assert_eq!(referee.0, 200, "{}", referee.1);
-        assert_eq!(referee.1["points"], 100);
+        assert_eq!(referee.1["points"], fe2vi_core::FLAG_REFEREE);
         let hash = call(
             &mut state,
             "POST",
             &format!("/v1/war/challenges/hash-puzzle/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_hash_2614}","clientRequestId":"war-hash"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-hash"}}"#,
+                war_flag(TEST_WAR_SECRET, "hash-puzzle", &alpha_id)
+            ),
             Some(&alpha),
         );
         assert_eq!(hash.0, 200, "{}", hash.1);
-        assert_eq!(hash.1["points"], 80);
+        assert_eq!(hash.1["points"], fe2vi_core::FLAG_HASH);
         let good = call(
             &mut state,
             "POST",
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-2","intent":"read the page source"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-2","intent":"season flag"}}"#,
+                war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id)
+            ),
             Some(&alpha),
         );
         assert_eq!(good.0, 200, "{}", good.1);
         assert_eq!(good.1["accepted"], true);
-        assert_eq!(good.1["points"], 150);
+        assert_eq!(good.1["points"], fe2vi_core::FLAG_PAGE);
         assert_eq!(state.book.war_claims.len(), 3);
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(board.0, 200, "{}", board.1);
+        let row = board.1["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["agent"] == "alpha")
+            .unwrap();
+        assert_eq!(row["points"], 6);
+        assert_eq!(row["war"], 6);
+        assert_eq!(row["games"], 0);
+        let feed = call(&mut state, "GET", "/v1/matches?limit=8", "", None);
+        assert_eq!(feed.0, 200, "{}", feed.1);
+        assert!(feed.1["matches"].as_array().unwrap().is_empty());
+        assert_eq!(feed.1["claims"].as_array().unwrap().len(), 3);
         let duplicate = call(
             &mut state,
             "POST",
             &format!("/v1/war/challenges/sandbox-page/submit?now={NOW}"),
-            r#"{"proof":"flag{fe2vi_sandbox_page_2026}","clientRequestId":"war-3"}"#,
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-3"}}"#,
+                war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id)
+            ),
             Some(&alpha),
         );
         assert_eq!(duplicate.0, 409);
         assert_eq!(duplicate.1["error"], "already_claimed");
+        let later = NOW + 120;
+        for (old, request_id) in [
+            ("iron-arena", "old-referee"),
+            ("flag{fe2vi_hash_2614}", "old-hash"),
+            ("flag{fe2vi_sandbox_page_2026}", "old-page"),
+        ] {
+            let stale = call(
+                &mut state,
+                "POST",
+                &format!("/v1/war/challenges/referee/submit?now={later}"),
+                &format!(r#"{{"proof":"{old}","clientRequestId":"{request_id}"}}"#),
+                Some(&alpha),
+            );
+            assert_eq!(stale.0, 403, "{old} {}", stale.1);
+            assert_eq!(stale.1["error"], "invalid_proof");
+        }
+        crate::logic::set_request_war_secret(Some(String::new()));
+        let closed = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={}", NOW + 180),
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"war-closed"}}"#,
+                war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
+            ),
+            Some(&alpha),
+        );
+        crate::logic::set_request_war_secret(None);
+        assert_eq!(closed.0, 503, "{}", closed.1);
+        assert_eq!(closed.1["error"], "war_unconfigured");
+    }
+
+    #[test]
+    fn war_flags_come_from_solving_each_challenge() {
+        let referee = war_flag(TEST_WAR_SECRET, "referee", "agt_fixed");
+        assert_eq!(
+            referee,
+            "c1cb60c3795fcb2ee3c0efd8ea2e53e2ed3a976545f09074fb7f7c9d45d215a9"
+        );
+        assert_eq!(
+            war_flag(TEST_WAR_SECRET, "hash-puzzle", "agt_fixed"),
+            "abb8f0"
+        );
+        assert_ne!(referee, war_flag(TEST_WAR_SECRET, "referee", "agt_other"));
+        assert_ne!(
+            referee,
+            format!("{TEST_WAR_SECRET}:season-1:referee:agt_fixed")
+        );
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
+        let page = dispatch(
+            &mut state,
+            &Incoming {
+                method: "GET",
+                path: "/v1/war/challenges/sandbox-page",
+                body: "",
+                authorization: None,
+                ingest_token: None,
+                policy_check: None,
+            },
+        );
+        let Outcome::Http { status, body, .. } = page else {
+            panic!("expected html");
+        };
+        assert_eq!(status, 200);
+        let sandbox = war_flag(TEST_WAR_SECRET, "sandbox-page", &alpha_id);
+        assert!(!body.contains(&sandbox));
+        assert!(body.contains(SANDBOX_GATE));
+        let denied = call(
+            &mut state,
+            "GET",
+            &format!("/v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}"),
+            "",
+            None,
+        );
+        assert_eq!(denied.0, 401);
+        let opened = call(
+            &mut state,
+            "GET",
+            &format!("/v1/war/challenges/sandbox-page/flag?gate={SANDBOX_GATE}"),
+            "",
+            Some(&alpha),
+        );
+        assert_eq!(opened.0, 200, "{}", opened.1);
+        assert_eq!(opened.1["flag"], sandbox);
+        let missed = call(
+            &mut state,
+            "POST",
+            "/v1/war/challenges/referee/solve",
+            r#"{"method":"claim_checked"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(missed.0, 403);
+        let solved = call(
+            &mut state,
+            "POST",
+            "/v1/war/challenges/referee/solve",
+            r#"{"method":"force_claim"}"#,
+            Some(&alpha),
+        );
+        assert_eq!(solved.0, 200, "{}", solved.1);
+        assert_eq!(
+            solved.1["flag"],
+            war_flag(TEST_WAR_SECRET, "referee", &alpha_id)
+        );
+        let shared = call(
+            &mut state,
+            "POST",
+            &format!("/v1/war/challenges/referee/submit?now={NOW}"),
+            &format!(
+                r#"{{"proof":"{}","clientRequestId":"shared-flag"}}"#,
+                solved.1["flag"].as_str().unwrap()
+            ),
+            Some(&bravo),
+        );
+        assert_eq!(shared.0, 403, "{}", shared.1);
+        let puzzle = call(
+            &mut state,
+            "GET",
+            "/v1/war/challenges/hash-puzzle",
+            "",
+            Some(&bravo),
+        );
+        assert_eq!(puzzle.0, 200, "{}", puzzle.1);
+        assert!(puzzle.1.get("flag").is_none());
+        let flag = war_flag(TEST_WAR_SECRET, "hash-puzzle", &bravo_id);
+        let target = to_hex(&Sha256::digest(flag.as_bytes()));
+        assert_eq!(puzzle.1["target"], target);
+        assert_eq!(puzzle.1["length"], HASH_FLAG_LEN);
+        assert!(!puzzle.1.to_string().contains(&flag));
+        let locked = call(
+            &mut state,
+            "GET",
+            "/v1/war/challenges/hash-puzzle",
+            "",
+            None,
+        );
+        assert_eq!(locked.0, 401);
     }
 
     #[test]
@@ -3159,12 +3974,15 @@ mod tests {
         );
         assert_eq!(board.0, 200);
         let rows = board.1["rows"].as_array().unwrap();
-        let alpha_row = rows.iter().find(|row| row["agent"] == "alpha").unwrap();
-        let bravo_row = rows.iter().find(|row| row["agent"] == "bravo").unwrap();
-        assert_eq!(alpha_row["points"], 2);
-        assert_eq!(bravo_row["points"], 1);
-        assert_eq!(alpha_row["vault"], 2);
-        assert!(rows.iter().any(|row| row["name"] == "Mason"));
+        assert!(rows
+            .iter()
+            .all(|row| row["agent"] != "alpha" && row["agent"] != "bravo"));
+        assert!(rows
+            .iter()
+            .all(|row| row["games"].as_u64().unwrap_or(0) > 0));
+        assert!(rows
+            .iter()
+            .all(|row| row["points"].as_u64().unwrap_or(0) > 0));
 
         let (hall_status, hall) = call(
             &mut state,
@@ -3178,7 +3996,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["agent"] == "alpha"));
+            .all(|row| row["agent"] != "alpha"));
         assert_eq!(hall["rooms"].as_array().unwrap().len(), 4);
 
         let profile = call(
@@ -3189,7 +4007,7 @@ mod tests {
             None,
         );
         assert_eq!(profile.0, 200);
-        assert_eq!(profile.1["points"], 2);
+        assert_eq!(profile.1["points"], 0);
         assert!(profile.1.get("apiToken").is_none());
 
         let spec = call(&mut state, "GET", "/openapi.json", "", None);
@@ -3228,7 +4046,12 @@ mod tests {
                 assert!(body.contains("https://fe2vi.space/skill/SKILL.md"));
                 assert!(body.contains("https://api.fe2vi.space"));
                 assert!(!body.contains("fe2vi.xyz"));
-                assert!(!body.to_ascii_lowercase().contains("rate limit"));
+                assert!(body.contains("## Errors and limits"));
+                assert!(body.contains("rate_limited"));
+                assert!(body.contains("Retry-After"));
+                assert!(body.contains("5 per hour"));
+                assert!(body.contains("120 per minute"));
+                assert!(body.contains("300 per minute"));
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
@@ -3271,5 +4094,281 @@ mod tests {
             200
         );
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn storage_plan_is_incremental_and_arena_json_omits_the_book() {
+        let player = Player {
+            agent_id: "ag".into(),
+            handle: "alpha".into(),
+            name: "Alpha".into(),
+            description: "d".into(),
+            owner_contact: None,
+            token_hash: "deadbeefdeadbeef".into(),
+            token_prefix: "fe2_dead".into(),
+            status: "active".into(),
+            created_unix: 10,
+            wallets: Wallets::default(),
+            capabilities: Vec::new(),
+            skin_id: "ingot".into(),
+            war_hits: Vec::new(),
+        };
+        let done = PlayMatch {
+            match_id: "mt_done".into(),
+            arena_id: "vault".into(),
+            status: "over".into(),
+            turn: 2,
+            deadline_unix: 50,
+            seats: vec!["ag".into(), "bg".into()],
+            actions: vec![Played {
+                agent_id: "ag".into(),
+                turn: 1,
+                action_type: "scout".into(),
+                points: 1,
+                unix: 40,
+                intent: None,
+                outcome: None,
+            }],
+            created_unix: 30,
+            vault: None,
+        };
+        let live = PlayMatch {
+            match_id: "mt_live".into(),
+            arena_id: "vault".into(),
+            status: "live".into(),
+            turn: 1,
+            deadline_unix: 90,
+            seats: vec!["ag".into(), "bg".into()],
+            actions: Vec::new(),
+            created_unix: 80,
+            vault: None,
+        };
+        let mut before = PlayerBook::default();
+        before.players.push(player);
+        before.matches.push(done);
+        before.matches.push(live);
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "finished".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_done".into(),
+            created_unix: 40,
+        });
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "old".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: String::new(),
+            created_unix: 1,
+        });
+        before.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "live-row".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_live".into(),
+            created_unix: 100,
+        });
+
+        let mut state = ArenaState {
+            book: before.clone(),
+            ..ArenaState::default()
+        };
+        let now = 1 + SEEN_KEEP_SECS;
+        assert!(prune_seen(&mut state, now));
+        assert_eq!(state.book.seen.len(), 1);
+        state.book.matches[1].actions.push(Played {
+            agent_id: "ag".into(),
+            turn: 1,
+            action_type: "crack".into(),
+            points: 0,
+            unix: now,
+            intent: None,
+            outcome: Some("opened".into()),
+        });
+        state.book.seen.push(Seen {
+            agent_id: "ag".into(),
+            client_request_id: "new".into(),
+            status: 200,
+            body: "{}".into(),
+            match_id: "mt_live".into(),
+            created_unix: now,
+        });
+        let plan = plan_writes(&before, &state.book);
+        assert!(plan.upsert_players.is_empty());
+        assert!(plan.delete_player_ids.is_empty());
+        assert_eq!(plan.upsert_matches.len(), 1);
+        assert_eq!(plan.upsert_matches[0].match_id, "mt_live");
+        assert_eq!(plan.upsert_actions.len(), 1);
+        assert_eq!(plan.upsert_actions[0].1.action_type, "crack");
+        assert!(plan.delete_actions.is_empty());
+        assert_eq!(plan.delete_seen.len(), 2);
+        assert_eq!(plan.upsert_seen.len(), 1);
+        assert!(!plan.is_empty());
+
+        let mut baseline = state.book.clone();
+        baseline.players[0].token_hash.clear();
+        baseline.players[0].token_prefix.clear();
+        baseline.matches[0].actions.clear();
+        baseline.matches[1].actions.clear();
+        let backfill = plan_writes(&baseline, &state.book);
+        assert_eq!(backfill.upsert_players.len(), 1);
+        assert_eq!(backfill.upsert_actions.len(), 2);
+        assert!(backfill.delete_player_ids.is_empty());
+        assert!(backfill.delete_match_ids.is_empty());
+
+        let encoded = serde_json::to_string(&state).unwrap();
+        assert!(!encoded.contains("deadbeefdeadbeef"));
+        assert!(!encoded.contains("token_hash"));
+        let mut legacy = serde_json::to_value(&state).unwrap();
+        legacy["book"] = serde_json::json!({
+            "players": [{
+                "agent_id": "ag",
+                "handle": "alpha",
+                "name": "Alpha",
+                "description": "d",
+                "owner_contact": null,
+                "token_hash": "deadbeefdeadbeef",
+                "token_prefix": "fe2_dead",
+                "status": "active",
+                "created_unix": 1
+            }]
+        });
+        let restored: ArenaState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.book.players[0].token_hash, "deadbeefdeadbeef");
+        let again = serde_json::to_string(&restored).unwrap();
+        assert!(!again.contains("deadbeefdeadbeef"));
+        assert!(plan_writes(&state.book, &state.book).is_empty());
+    }
+
+    fn openapi_templates() -> Vec<String> {
+        let doc: serde_json::Value = serde_json::from_str(&openapi()).unwrap();
+        doc["paths"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    fn path_char(ch: char, path: &str) -> bool {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '/' | '_' | '-' | '{' | '}')
+            || (ch == '.' && (path.starts_with("/openapi") || path.starts_with("/llms")))
+    }
+
+    fn mentioned_api_paths(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = text;
+        while let Some(offset) = ["/v1/", "/openapi.json", "/llms.txt"]
+            .iter()
+            .filter_map(|needle| rest.find(needle))
+            .min()
+        {
+            rest = &rest[offset..];
+            let mut path = String::new();
+            let mut end = 0;
+            for ch in rest.chars() {
+                if !path_char(ch, &path) {
+                    break;
+                }
+                path.push(ch);
+                end += ch.len_utf8();
+            }
+            while path.ends_with('.') && !path.ends_with(".json") && !path.ends_with(".txt") {
+                path.pop();
+            }
+            if path.starts_with("/v1/") || path == "/openapi.json" || path == "/llms.txt" {
+                found.push(path);
+            }
+            rest = &rest[end.max(1)..];
+        }
+        found.sort();
+        found.dedup();
+        found
+    }
+
+    fn same_shape(template: &str, path: &str) -> bool {
+        let left: Vec<&str> = template
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect();
+        let right: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter()
+            .zip(right.iter())
+            .all(|(template_part, path_part)| {
+                template_part == path_part
+                    || (template_part.starts_with('{') && template_part.ends_with('}'))
+                    || (path_part.starts_with('{') && path_part.ends_with('}'))
+            })
+    }
+
+    fn path_is_documented(path: &str, templates: &[String]) -> bool {
+        templates.iter().any(|template| same_shape(template, path))
+    }
+
+    #[test]
+    fn finished_matches_stay_on_my_matches() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        state.book.matches[0].status = "over".to_string();
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        let play = &listed.1["matches"][0];
+        assert_eq!(play["match"]["status"], "over");
+        assert_eq!(play["match"]["result"], "draw");
+        let feed = call(&mut state, "GET", "/v1/matches?limit=5", "", None);
+        assert_eq!(feed.0, 200, "{}", feed.1);
+        let row = &feed.1["matches"][0];
+        assert_eq!(row["arenaId"], "vault");
+        assert_eq!(row["status"], "over");
+        assert!(row["vault"]["rounds"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn readme_endpoints_are_in_openapi() {
+        let readme = include_str!("../../../README.md");
+        let templates = openapi_templates();
+        let mentioned = mentioned_api_paths(readme);
+        assert!(
+            mentioned.iter().any(|path| path == "/v1/agents/register"),
+            "README scan found no register path: {mentioned:?}"
+        );
+        let missing: Vec<String> = mentioned
+            .into_iter()
+            .filter(|path| !path_is_documented(path, &templates))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "README names API paths that are not in /openapi.json: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn readme_path_check_rejects_an_unknown_route() {
+        let templates = openapi_templates();
+        assert!(path_is_documented("/v1/agents/register", &templates));
+        assert!(path_is_documented("/v1/arenas/vault/queue", &templates));
+        assert!(path_is_documented(
+            "/v1/matches/{matchId}/actions",
+            &templates
+        ));
+        assert!(path_is_documented("/openapi.json", &templates));
+        assert!(!path_is_documented("/v1/not-real", &templates));
+        assert!(!path_is_documented("/v1/agents/me/not-a-route", &templates));
+        let sample = "See GET /v1/nope and GET /v1/leaderboard.";
+        let mentioned = mentioned_api_paths(sample);
+        assert!(mentioned.contains(&"/v1/nope".to_string()));
+        assert!(mentioned.contains(&"/v1/leaderboard".to_string()));
     }
 }

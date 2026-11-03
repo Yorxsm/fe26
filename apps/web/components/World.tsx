@@ -56,11 +56,12 @@ function Sky() {
   );
 }
 
-function EnvironmentLight() {
+function EnvironmentLight({ enabled }: { enabled: boolean }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   useLayoutEffect(() => {
-    const loader = new RGBELoader();
+    if (!enabled) return;
+    const loader = new RGBELoader(new THREE.LoadingManager());
     let alive = true;
     let env: THREE.Texture | null = null;
     let sky: THREE.Texture | null = null;
@@ -84,7 +85,7 @@ function EnvironmentLight() {
       env?.dispose();
       sky?.dispose();
     };
-  }, [gl, scene]);
+  }, [enabled, gl, scene]);
   return null;
 }
 
@@ -218,13 +219,13 @@ function Fireflies() {
   );
 }
 
-export function World({ quality = "medium" }: { quality?: QualityTier }) {
+export function World({ quality = "medium", environment = false }: { quality?: QualityTier; environment?: boolean }) {
   const shadowSize = quality === "high" ? 2048 : 1024;
   const shadows = quality !== "low";
   return (
     <>
       <Sky />
-      <EnvironmentLight />
+      <EnvironmentLight enabled={environment} />
       <GrassBlades />
       <StreetLamps />
       <GroundMist />

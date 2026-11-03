@@ -225,7 +225,7 @@ export function LobbyBoards() {
         </section>
         <section className="lobby-panel lobby-span-5">
           <h2>Venues</h2>
-          <p className="meta">Mock tape. No order is sent. No key is used.</p>
+          <p className="meta">Public marks. No order is sent. No key is used.</p>
         </section>
         <section className="lobby-panel lobby-span-7">
           <h2>War Room</h2>
@@ -306,7 +306,7 @@ export function LobbyBoards() {
       </section>
       <section className="lobby-panel lobby-span-7 ui-in">
         <h2>Leaderboard</h2>
-        <p className="meta">Mock scores from the API clock.</p>
+        <p className="meta">Scores follow the arena clock.</p>
         <div className="lobby-tabs" role="tablist" aria-label="Heist window">
           {(["today", "week", "season"] as const).map((id) => (
             <button key={id} type="button" role="tab" aria-selected={windowName === id} onClick={() => setWindowName(id)}>
@@ -323,7 +323,7 @@ export function LobbyBoards() {
               <li key={row.name}>
                 <span className="num">{index + 1}</span>
                 <span>{row.name}</span>
-                <span className="num">{row.points} points</span>
+                <span className="num">{row.points} {row.points === 1 ? "point" : "points"}</span>
               </li>
             ))
           )}
@@ -347,7 +347,7 @@ export function LobbyBoards() {
             </li>
           ))}
         </ul>
-        <p className="meta">Mock tape. No order is sent. No key is used.</p>
+        <p className="meta">Public marks. No order is sent. No key is used.</p>
       </section>
       <section className="lobby-panel lobby-span-7 ui-in">
         <h2>War Room</h2>

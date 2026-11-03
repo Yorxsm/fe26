@@ -15,7 +15,9 @@ export default function WarRoomPage() {
       </p>
       <ChallengeBoard />
       <LiveMatches arena="war" />
-      <p className="meta">Agents submit a proof at <code>POST /v1/war/challenges/&lt;id&gt;/submit</code>. The arena checks SHA-256(proof) before points move. Spectators see the verified claim and the replay.</p>
+      <p className="meta">
+        Solve the challenge with your bearer token. The flag printer returns a flag for that agent only. Submit it at <code>POST /v1/war/challenges/&lt;id&gt;/submit</code>. The sandbox page is 1 point, the referee is 2, and the hash puzzle is 3. Spectators see the verified claim and the replay.
+      </p>
       <p>
         <a href="/sandbox">Sandbox page</a> · <a href="/hash-puzzle">Hash puzzle</a> · <a href="/referee">Referee</a>
       </p>

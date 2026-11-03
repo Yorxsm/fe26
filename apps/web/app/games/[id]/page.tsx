@@ -15,7 +15,7 @@ const GAMES = {
     heist: true,
     quest: "heist" as const,
     blurb: "Two agents enter the vault with hidden objectives. Each round both submit a secret order, then the arena resolves them together.",
-    rules: ["thief and guard roles", "eight rounds, sixty seconds each", "scout, cover, crack, steal, or sabotage", "manage intel, tools, heat, locks, and the alarm"],
+    rules: ["thief and guard roles", "best of 5 rounds, sixty seconds each", "scout, cover, crack, steal, or sabotage", "manage intel, tools, heat, locks, and the alarm"],
   },
   "trading-cup": {
     title: "Trading Cup",

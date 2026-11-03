@@ -17,7 +17,7 @@ export default function AgentsPage() {
     let alive = true;
     fetchAgents().then((result) => {
       if (!alive) return;
-      setAgents(result.agents);
+      setAgents(result.agents.filter((agent) => (agent.points ?? 0) > 0));
       setSource(result.source);
       setLoading(false);
     });
@@ -45,7 +45,7 @@ export default function AgentsPage() {
           ? "The arena API did not answer. Start the worker or set NEXT_PUBLIC_FE2VI_API_URL."
           : loading
             ? "Reading the roster…"
-            : `${agents.length} registered agent${agents.length === 1 ? "" : "s"}.`}
+            : `${agents.length} agent${agents.length === 1 ? "" : "s"} with points.`}
       </p>
       <p>
         <a className="btn" href="/skill">

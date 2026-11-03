@@ -23,7 +23,7 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "vault-quarter",
     name: "Vault Quarter",
-    summary: "Heist Night. Timed vault rounds inside platform caps.",
+    summary: "Heist Night. Best of 5. Secret orders, then the reveal.",
     status: "live",
     href: "/games/heist-night",
     station: "Vault Bank",
@@ -41,7 +41,7 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "trading-village",
     name: "Trading Village",
-    summary: "Mock perps and stocks. Funding, PnL, and a leaderboard wall.",
+    summary: "Live Hyperliquid perps. Funding, P&L, and a leaderboard wall.",
     status: "live",
     href: "/village",
     station: "Trading Floor",
@@ -65,6 +65,15 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
     station: "Lobby",
     color: "#a85a32",
   },
+  {
+    id: "oracle-plaza",
+    name: "Season Hall",
+    summary: "The season board and the matches the arena has played.",
+    status: "live",
+    href: "#season-hall",
+    station: "Season Hall",
+    color: "#c4a36c",
+  },
 ];
 
 /** glTF meters from apps/web/public/models/layout.json. Y is up, so z is the file's third value. */
@@ -74,6 +83,7 @@ export const ROOM_XZ: Record<string, [number, number]> = {
   "trading-village": [46, 14],
   "war-room": [12, 40],
   "skin-forge": [-38, -24],
+  "oracle-plaza": [20, -10],
 };
 
 /**
@@ -86,6 +96,7 @@ export const DISTRICT_FOOTPRINT: Record<string, DistrictFootprint> = {
   "trading-village": { hx: 9.0, hz: 8.2, height: 14.0 },
   "war-room": { hx: 8.8, hz: 8.0, height: 13.5 },
   "skin-forge": { hx: 9.0, hz: 8.2, height: 12.5 },
+  "oracle-plaza": { hx: 9.0, hz: 8.2, height: 12.5 },
 };
 
 /** South face of each building. Agents use this when a room opens or closes. */
@@ -95,6 +106,7 @@ export const BUILDING_DOOR: Record<string, [number, number]> = {
   "trading-village": [46, 17.4],
   "war-room": [12, 43.4],
   "skin-forge": [-38, -20.6],
+  "oracle-plaza": [20, -6.6],
 };
 
 const ROOF_NAME: Record<string, string> = {
@@ -103,6 +115,7 @@ const ROOF_NAME: Record<string, string> = {
   "trading-village": "TRADING VILLAGE",
   "war-room": "WAR ROOM",
   "skin-forge": "LOBBY",
+  "oracle-plaza": "HALL",
 };
 
 export function roofLabel(id: string) {
@@ -172,22 +185,17 @@ export const FACE_SHOT: CameraShot = { eye: [0.15, 3.55 / 1.5, 3.4 / 1.5], aim: 
 
 export const WALK_SHOT: CameraShot = { eye: [0, 2.4 / 1.5, 14 / 1.5], aim: [0, 2.2 / 1.5, 0], fov: 42 };
 
-/**
- * Inside the authored room. The shell runs x ±7.2, z ±6.2, ceiling y 4.4.
- * The eye sits south of center, clear of the door lintel and the side walls.
- */
-function insideRoom(x: number, z: number): CameraShot {
-  return { eye: [x + 0.15, 1.62, z + 4.35], aim: [x - 0.15, 1.4, z - 2.6], fov: 50 };
-}
-
 export const INTERIOR_SHOTS: Record<string, CameraShot> = {
-  "vault-quarter": insideRoom(-42, 18),
-  "trading-village": insideRoom(46, 14),
-  "war-room": insideRoom(12, 40),
+  // Center of the shell, clear of the south wall, aimed at the board.
+  "vault-quarter": { eye: [-42, 2.05, 20.6], aim: [-42, 1.7, 12.2], fov: 52 },
+  "trading-village": { eye: [46, 2.5, 16.8], aim: [46, 2.3, 8.4], fov: 52 },
+  "war-room": { eye: [12, 2.05, 42.6], aim: [12, 1.75, 34.2], fov: 52 },
   // Wide enough that the four signs and the crew sit inside both 1280×800 and a phone.
-  "skin-forge": { eye: [-38, 2.4, -18.4], aim: [-38, 2.75, -28.6], fov: 46 },
+  "skin-forge": { eye: [-38, 1.85, -21.6], aim: [-38, 1.7, -27.4], fov: 48 },
   // The hanging board sits above the standard eye. This aim keeps the whole scoreboard in the 1280×800 frame.
-  "cup-stadium": { eye: [-7.85, 1.7, -37.65], aim: [-8.15, 2.35, -44.2], fov: 48 },
+  "cup-stadium": { eye: [-8, 2.1, -39.4], aim: [-8, 1.7, -44.6], fov: 50 },
+  // Same forge shell as the lobby, so the eye uses that shell's doorway, not the generic room shot.
+  "oracle-plaza": { eye: [20, 1.85, -7.6], aim: [20, 1.7, -13.4], fov: 48 },
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -197,6 +205,7 @@ const CAMERA_PARK: Record<string, [number, number]> = {
   "war-room": [6, 56],
   "skin-forge": [-44, -8],
   "cup-stadium": [-14, -18],
+  "oracle-plaza": [14, 4],
 };
 
 /** Front lawn, close enough that the facade fills the frame. */
@@ -206,6 +215,7 @@ export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
   "war-room": { eye: [12, 6.5, 56], aim: [12, 3.2, 40], fov: 40 },
   "skin-forge": { eye: [-38, 6, -8], aim: [-38, 2.8, -22], fov: 42 },
   "cup-stadium": { eye: [-8, 7, -26], aim: [-8, 3, -40], fov: 40 },
+  "oracle-plaza": { eye: [20, 6.5, 8], aim: [20, 3.2, -8], fov: 42 },
 };
 
 /** Authored path for the opening. The first shot stays on the road, outside every shell. */
@@ -280,39 +290,66 @@ export function interiorPose(roomId: string, index: number, time: number, busy: 
     const t = along / 0.7;
     const a = world(from);
     const b = world(to);
-    return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, rot, clip: "walk" as const, visible: true };
+    return { x: a.x + (b.x - a.x) * t, y: 0, z: a.z + (b.z - a.z) * t, rot, clip: "walk" as const, visible: true };
+  }
+  const station = ROOM_STATIONS[roomId]?.[index % (ROOM_STATIONS[roomId]?.length || 1)];
+  if (station) {
+    return { x: ox + station[0], y: station[1], z: oz + station[2], rot, clip: "idle" as const, visible: true };
   }
   const stood = world(to);
-  return { x: stood.x, z: stood.z, rot, clip: "idle" as const, visible: true };
+  return { x: stood.x, y: 0, z: stood.z, rot, clip: "idle" as const, visible: true };
 }
+
+/**
+ * Local meters inside the room shell. Y is the surface an agent stands on.
+ * Stadium rows are the bench tiers. Village desks are floor stations beside the desk, not on top of it.
+ */
+export const ROOM_STATIONS: Record<string, Array<[number, number, number]>> = {
+  "cup-stadium": [
+    [-1.34, 0.53, -3.74],
+    [0.36, 0.53, -3.74],
+    [-2.19, 0.93, -4.59],
+  ],
+  "trading-village": [
+    [0.2, 0, -2.1],
+    [3.8, 0, -2.1],
+    [-2.0, 0, -4.0],
+  ],
+  "war-room": [[3.4, 0, 0.6]],
+};
 
 /** Crew standing inside a room. Coordinates are world meters, clear of the entry camera. */
 export const INTERIOR_CAST: Record<string, CastPose[]> = {
   // World meters. Flank the boards; the frame audit rejects anyone on a screen or under 3 m.
   "vault-quarter": [
-    { index: 0, x: -43.3, z: 13.1, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 9, x: -41.85, z: 13.65, rot: Math.PI, speed: 0, clip: "celebrate" },
-    { index: 1, x: -40.6, z: 13.0, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 0, x: -43.3, z: 16.2, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: -41.4, z: 16.7, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 2, x: -40.2, z: 16.0, rot: Math.PI, speed: 1.1, clip: "walk" },
   ],
   "trading-village": [
-    { index: 2, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 5, x: 44.8, z: 11.6, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 8, x: 47.6, z: 11.4, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 0, x: 41.6, z: 10.8, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 1, x: 44.8, z: 11.6, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 2, x: 47.6, z: 11.4, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "war-room": [
-    { index: 3, x: 9.5, z: 37.55, rot: 0, speed: 1.0, clip: "walk" },
-    { index: 5, x: 11.15, z: 38.15, rot: 0.15, speed: 0, clip: "idle" },
-    { index: 7, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
+    { index: 0, x: 9.5, z: 37.55, rot: 0, speed: 1.0, clip: "walk" },
+    { index: 1, x: 11.15, z: 38.15, rot: 0.15, speed: 0, clip: "idle" },
+    { index: 2, x: 14.7, z: 37.45, rot: -0.2, speed: 0, clip: "celebrate" },
   ],
   "skin-forge": [
-    { index: 4, x: -39.35, z: -26.5, rot: Math.PI, speed: 0, clip: "idle" },
-    { index: 7, x: -38, z: -27.3, rot: Math.PI, speed: 1.1, clip: "walk" },
-    { index: 6, x: -36.65, z: -26.5, rot: Math.PI, speed: 0, clip: "celebrate" },
+    { index: 0, x: -39.35, z: -26.5, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: -38, z: -27.3, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 2, x: -36.65, z: -26.5, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
   "cup-stadium": [
-    { index: 2, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
-    { index: 6, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
-    { index: 8, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
+    { index: 0, x: -10.05, z: -43.7, rot: 0.2, speed: 0, clip: "idle" },
+    { index: 1, x: -5.95, z: -43.55, rot: -0.2, speed: 1.1, clip: "walk" },
+    { index: 2, x: -7.95, z: -44.45, rot: 0.05, speed: 0, clip: "celebrate" },
+  ],
+  "oracle-plaza": [
+    { index: 0, x: 18.6, z: -12.4, rot: Math.PI, speed: 0, clip: "idle" },
+    { index: 1, x: 20, z: -13.1, rot: Math.PI, speed: 1.1, clip: "walk" },
+    { index: 2, x: 21.4, z: -12.4, rot: Math.PI, speed: 0, clip: "celebrate" },
   ],
 };
 
@@ -356,6 +393,30 @@ export const WALK_LOOP: Array<[number, number]> = [
   [12, 56],
   [-42, 34],
 ];
+
+const PAD_ROOMS = ["vault-quarter", "cup-stadium", "trading-village", "war-room", "skin-forge", "oracle-plaza"];
+
+/**
+ * Stand on the pad in front of a door, on the south lip outside the volume.
+ * One agent per door, then the next door. Inside the volume the body is hidden
+ * and only the name tag shows.
+ */
+export function padStand(index: number) {
+  const slot = index % PAD_ROOMS.length;
+  const id = PAD_ROOMS[slot];
+  const door = BUILDING_DOOR[id];
+  const origin = ROOM_XZ[id];
+  const footprint = DISTRICT_FOOTPRINT[id];
+  if (!door || !origin || !footprint) return { x: 0, y: 0, z: 0, rot: 0 };
+  const lane = Math.floor(index / PAD_ROOMS.length);
+  const side = lane === 0 ? 0 : (lane % 2 === 0 ? 1 : -1) * Math.ceil(lane / 2) * 0.85;
+  return {
+    x: door[0] + side,
+    y: 0.02,
+    z: door[1] + 1.7,
+    rot: Math.PI,
+  };
+}
 
 export function placeAgent(index: number, time: number, paused: boolean) {
   const phase = index * 1.7;

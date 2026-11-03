@@ -2,6 +2,7 @@
 
 mod agents;
 mod indexer;
+mod limits;
 mod live;
 #[cfg(target_arch = "wasm32")]
 mod live_edge;
@@ -56,6 +57,9 @@ mod edge {
         async fn fetch(&self, mut req: Request) -> Result<Response> {
             if req.method() == Method::Options {
                 return with_cors(Response::empty()?.with_status(204), "text/plain");
+            }
+            if let Some(response) = self.enforce_rate_limit(&req).await? {
+                return Ok(response);
             }
             let path = req.path();
             if req.method() == Method::Post && (path == "/v1/index" || path.ends_with("/v1/index"))
@@ -179,12 +183,10 @@ mod edge {
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
-            let sql = self.state.storage().sql();
-            if ensure_player_sql(&sql).is_ok() {
-                if let Ok(Some(book)) = load_player_book(&sql) {
-                    arena.book = book;
-                }
-            }
+            let before_book = {
+                let sql = self.state.storage().sql();
+                attach_player_book(&sql, &mut arena)?
+            };
             let route_path = route.split('?').next().unwrap_or(route.as_str());
             let policy_target = match (method, route_path) {
                 ("POST", "/v1/agents/me/hyperliquid-link") => {
@@ -257,6 +259,14 @@ mod edge {
                 let _ = crate::live_edge::refresh(&mut arena).await;
                 refreshed = true;
             }
+            let war_secret = self
+                .env
+                .secret("FE2VI_WAR_SECRET")
+                .ok()
+                .map(|value| value.to_string())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            crate::logic::set_request_war_secret(war_secret);
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -268,6 +278,7 @@ mod edge {
                     policy_check: policy_check.as_ref(),
                 },
             );
+            crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
                     status,
@@ -277,10 +288,12 @@ mod edge {
                     fanout,
                     location,
                 } => {
-                    if mutated || refreshed {
-                        let sql = self.state.storage().sql();
-                        let _ = ensure_player_sql(&sql)
-                            .and_then(|_| save_player_book(&sql, &arena.book));
+                    let plan = crate::agents::plan_writes(&before_book, &arena.book);
+                    if mutated || refreshed || !plan.is_empty() {
+                        {
+                            let sql = self.state.storage().sql();
+                            apply_sql_plan(&sql, &plan)?;
+                        }
                         storage.put("arena", &arena).await?;
                     }
                     if let Some(fanout) = fanout {
@@ -333,6 +346,10 @@ mod edge {
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
+            let before_book = {
+                let sql = self.state.storage().sql();
+                attach_player_book(&sql, &mut arena)?
+            };
             let head_block =
                 rpc_call(&rpc, "block", serde_json::json!({"finality": "final"})).await?;
             let head = indexer::block_height(&head_block).unwrap_or(0);
@@ -393,6 +410,11 @@ mod edge {
             let synced = crate::live_edge::refresh(&mut arena).await;
             let policy_revalidated =
                 crate::live_edge::refresh_policies(&self.env, &mut arena).await;
+            let plan = crate::agents::plan_writes(&before_book, &arena.book);
+            {
+                let sql = self.state.storage().sql();
+                apply_sql_plan(&sql, &plan)?;
+            }
             storage.put("arena", &arena).await?;
             let cron_now = worker::Date::now().as_millis() / 1000;
             let _ = storage.put("metric_cron_last", &cron_now).await;
@@ -412,9 +434,11 @@ mod edge {
     fn ensure_player_sql(sql: &worker::SqlStorage) -> Result<()> {
         for statement in [
             "CREATE TABLE IF NOT EXISTS players (agent_id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, owner_contact TEXT, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, wallets_json TEXT NOT NULL DEFAULT '{}', capabilities_json TEXT NOT NULL DEFAULT '[]', skin_id TEXT NOT NULL DEFAULT 'ingot')",
+            "CREATE TABLE IF NOT EXISTS player_tokens (agent_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS player_queue (arena_id TEXT NOT NULL, agent_id TEXT NOT NULL, queued_unix INTEGER NOT NULL, PRIMARY KEY (arena_id, agent_id))",
             "CREATE TABLE IF NOT EXISTS player_matches (match_id TEXT PRIMARY KEY, arena_id TEXT NOT NULL, status TEXT NOT NULL, turn INTEGER NOT NULL, deadline_unix INTEGER NOT NULL, seats_json TEXT NOT NULL, actions_json TEXT NOT NULL, created_unix INTEGER NOT NULL DEFAULT 0, vault_json TEXT NOT NULL DEFAULT 'null')",
-            "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (agent_id, client_request_id))",
+            "CREATE TABLE IF NOT EXISTS player_actions (match_id TEXT NOT NULL, turn INTEGER NOT NULL, agent_id TEXT NOT NULL, action_type TEXT NOT NULL, points INTEGER NOT NULL, unix INTEGER NOT NULL, intent TEXT, outcome TEXT, PRIMARY KEY (match_id, turn, agent_id))",
+            "CREATE TABLE IF NOT EXISTS player_seen (agent_id TEXT NOT NULL, client_request_id TEXT NOT NULL, status INTEGER NOT NULL, body TEXT NOT NULL, match_id TEXT NOT NULL DEFAULT '', created_unix INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent_id, client_request_id))",
             "CREATE TABLE IF NOT EXISTS player_war_claims (agent_id TEXT NOT NULL, challenge_id TEXT NOT NULL, stage TEXT NOT NULL, points INTEGER NOT NULL, unix INTEGER NOT NULL, proof_hash TEXT NOT NULL, intent TEXT, PRIMARY KEY (agent_id, challenge_id))",
             "CREATE TABLE IF NOT EXISTS player_lobby_posts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, topic TEXT NOT NULL, body TEXT NOT NULL, match_id TEXT, unix INTEGER NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, reports_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE TABLE IF NOT EXISTS player_reactions (target_type TEXT NOT NULL, target_id TEXT NOT NULL, viewer_id TEXT NOT NULL, reaction TEXT NOT NULL, unix INTEGER NOT NULL, PRIMARY KEY (target_type, target_id, viewer_id))",
@@ -425,12 +449,60 @@ mod edge {
             "ALTER TABLE players ADD COLUMN wallets_json TEXT NOT NULL DEFAULT '{}'",
             "ALTER TABLE players ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE players ADD COLUMN skin_id TEXT NOT NULL DEFAULT 'ingot'",
+            "ALTER TABLE players ADD COLUMN war_hits_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE player_matches ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE player_matches ADD COLUMN vault_json TEXT NOT NULL DEFAULT 'null'",
             "ALTER TABLE player_lobby_posts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE player_lobby_posts ADD COLUMN reports_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE player_seen ADD COLUMN match_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_seen ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
+        }
+        Ok(())
+    }
+
+    fn sql_count(sql: &worker::SqlStorage, table: &str) -> Result<i64> {
+        #[derive(serde::Deserialize)]
+        struct Count {
+            n: i64,
+        }
+        let query = format!("SELECT COUNT(*) AS n FROM {table}");
+        let count: Count = sql
+            .exec(&query, None::<Vec<worker::SqlStorageValue>>)?
+            .one()?;
+        Ok(count.n)
+    }
+
+    fn attach_player_book(
+        sql: &worker::SqlStorage,
+        arena: &mut ArenaState,
+    ) -> Result<crate::agents::PlayerBook> {
+        ensure_player_sql(sql)?;
+        if let Some(book) = load_player_book(sql)? {
+            arena.book = book;
+        }
+        let mut before = arena.book.clone();
+        migration_baseline(sql, &mut before)?;
+        Ok(before)
+    }
+
+    /// Rows that still live only in the old columns are cleared on the
+    /// baseline so the next plan inserts them once into the new tables.
+    fn migration_baseline(
+        sql: &worker::SqlStorage,
+        before: &mut crate::agents::PlayerBook,
+    ) -> Result<()> {
+        if sql_count(sql, "player_tokens")? == 0 {
+            for player in &mut before.players {
+                player.token_hash.clear();
+                player.token_prefix.clear();
+            }
+        }
+        if sql_count(sql, "player_actions")? == 0 {
+            for play in &mut before.matches {
+                play.actions.clear();
+            }
         }
         Ok(())
     }
@@ -463,6 +535,14 @@ mod edge {
             wallets_json: String,
             capabilities_json: String,
             skin_id: String,
+            #[serde(default)]
+            war_hits_json: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct TokenRow {
+            agent_id: String,
+            token_hash: String,
+            token_prefix: String,
         }
         #[derive(serde::Deserialize)]
         struct QueueRow {
@@ -481,6 +561,17 @@ mod edge {
             actions_json: String,
             created_unix: i64,
             vault_json: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct ActionRow {
+            match_id: String,
+            turn: i64,
+            agent_id: String,
+            action_type: String,
+            points: i64,
+            unix: i64,
+            intent: Option<String>,
+            outcome: Option<String>,
         }
         #[derive(serde::Deserialize)]
         struct WarClaimRow {
@@ -518,8 +609,20 @@ mod edge {
             client_request_id: String,
             status: i64,
             body: String,
+            match_id: String,
+            created_unix: i64,
         }
-        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
+        let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
+        let tokens = sql
+            .exec(
+                "SELECT agent_id, token_hash, token_prefix FROM player_tokens",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<TokenRow>()?;
+        let mut token_by_agent = std::collections::HashMap::new();
+        for row in tokens {
+            token_by_agent.insert(row.agent_id, (row.token_hash, row.token_prefix));
+        }
         let queue = sql
             .exec(
                 "SELECT arena_id, agent_id, queued_unix FROM player_queue",
@@ -527,6 +630,23 @@ mod edge {
             )?
             .to_array::<QueueRow>()?;
         let matches = sql.exec("SELECT match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix, vault_json FROM player_matches", None::<Vec<worker::SqlStorageValue>>)?.to_array::<MatchRow>()?;
+        let actions = sql.exec("SELECT match_id, turn, agent_id, action_type, points, unix, intent, outcome FROM player_actions", None::<Vec<worker::SqlStorageValue>>)?.to_array::<ActionRow>()?;
+        let mut actions_by_match: std::collections::HashMap<String, Vec<crate::agents::Played>> =
+            std::collections::HashMap::new();
+        for row in actions {
+            actions_by_match
+                .entry(row.match_id)
+                .or_default()
+                .push(crate::agents::Played {
+                    agent_id: row.agent_id,
+                    turn: row.turn as u32,
+                    action_type: row.action_type,
+                    points: u32::try_from(row.points.max(0)).unwrap_or(0),
+                    unix: row.unix.max(0) as u64,
+                    intent: row.intent,
+                    outcome: row.outcome,
+                });
+        }
         let war_claims = sql
             .exec(
                 "SELECT agent_id, challenge_id, stage, points, unix, proof_hash, intent FROM player_war_claims",
@@ -547,26 +667,33 @@ mod edge {
             .to_array::<ReactionRow>()?;
         let seen = sql
             .exec(
-                "SELECT agent_id, client_request_id, status, body FROM player_seen",
+                "SELECT agent_id, client_request_id, status, body, match_id, created_unix FROM player_seen",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<SeenRow>()?;
         Ok(Some(crate::agents::PlayerBook {
             players: players
                 .into_iter()
-                .map(|row| crate::agents::Player {
-                    agent_id: row.agent_id,
-                    handle: row.handle,
-                    name: row.name,
-                    description: row.description,
-                    owner_contact: row.owner_contact,
-                    token_hash: row.token_hash,
-                    token_prefix: row.token_prefix,
-                    status: row.status,
-                    created_unix: row.created_unix as u64,
-                    wallets: serde_json::from_str(&row.wallets_json).unwrap_or_default(),
-                    capabilities: serde_json::from_str(&row.capabilities_json).unwrap_or_default(),
-                    skin_id: row.skin_id,
+                .map(|row| {
+                    let (token_hash, token_prefix) = token_by_agent
+                        .remove(&row.agent_id)
+                        .unwrap_or((row.token_hash, row.token_prefix));
+                    crate::agents::Player {
+                        agent_id: row.agent_id,
+                        handle: row.handle,
+                        name: row.name,
+                        description: row.description,
+                        owner_contact: row.owner_contact,
+                        token_hash,
+                        token_prefix,
+                        status: row.status,
+                        created_unix: row.created_unix.max(0) as u64,
+                        wallets: serde_json::from_str(&row.wallets_json).unwrap_or_default(),
+                        capabilities: serde_json::from_str(&row.capabilities_json)
+                            .unwrap_or_default(),
+                        skin_id: row.skin_id,
+                        war_hits: serde_json::from_str(&row.war_hits_json).unwrap_or_default(),
+                    }
                 })
                 .collect(),
             queue: queue
@@ -574,21 +701,29 @@ mod edge {
                 .map(|row| crate::agents::Queued {
                     arena_id: row.arena_id,
                     agent_id: row.agent_id,
-                    queued_unix: row.queued_unix as u64,
+                    queued_unix: row.queued_unix.max(0) as u64,
                 })
                 .collect(),
             matches: matches
                 .into_iter()
-                .map(|row| crate::agents::PlayMatch {
-                    match_id: row.match_id,
-                    arena_id: row.arena_id,
-                    status: row.status,
-                    turn: row.turn as u32,
-                    deadline_unix: row.deadline_unix as u64,
-                    seats: serde_json::from_str(&row.seats_json).unwrap_or_default(),
-                    actions: serde_json::from_str(&row.actions_json).unwrap_or_default(),
-                    created_unix: row.created_unix as u64,
-                    vault: serde_json::from_str(&row.vault_json).unwrap_or(None),
+                .map(|row| {
+                    let mut actions = serde_json::from_str(&row.actions_json).unwrap_or_default();
+                    if let Some(rows) = actions_by_match.remove(&row.match_id) {
+                        if !rows.is_empty() {
+                            actions = rows;
+                        }
+                    }
+                    crate::agents::PlayMatch {
+                        match_id: row.match_id,
+                        arena_id: row.arena_id,
+                        status: row.status,
+                        turn: row.turn.max(0) as u32,
+                        deadline_unix: row.deadline_unix.max(0) as u64,
+                        seats: serde_json::from_str(&row.seats_json).unwrap_or_default(),
+                        actions,
+                        created_unix: row.created_unix.max(0) as u64,
+                        vault: serde_json::from_str(&row.vault_json).unwrap_or(None),
+                    }
                 })
                 .collect(),
             war_claims: war_claims
@@ -598,7 +733,7 @@ mod edge {
                     challenge_id: row.challenge_id,
                     stage: row.stage,
                     points: u32::try_from(row.points.max(0)).unwrap_or(0),
-                    unix: row.unix as u64,
+                    unix: row.unix.max(0) as u64,
                     proof_hash: row.proof_hash,
                     intent: row.intent,
                 })
@@ -612,7 +747,7 @@ mod edge {
                     topic: row.topic,
                     body: row.body,
                     match_id: row.match_id,
-                    unix: row.unix as u64,
+                    unix: row.unix.max(0) as u64,
                     hidden: row.hidden != 0,
                     reports: serde_json::from_str(&row.reports_json).unwrap_or_default(),
                 })
@@ -624,7 +759,7 @@ mod edge {
                     target_id: row.target_id,
                     viewer_id: row.viewer_id,
                     reaction: row.reaction,
-                    unix: row.unix as u64,
+                    unix: row.unix.max(0) as u64,
                 })
                 .collect(),
             seen: seen
@@ -634,29 +769,85 @@ mod edge {
                     client_request_id: row.client_request_id,
                     status: row.status as u16,
                     body: row.body,
+                    match_id: row.match_id,
+                    created_unix: row.created_unix.max(0) as u64,
                 })
                 .collect(),
         }))
     }
 
-    fn save_player_book(sql: &worker::SqlStorage, book: &crate::agents::PlayerBook) -> Result<()> {
-        for table in [
-            "players",
-            "player_queue",
-            "player_matches",
-            "player_seen",
-            "player_war_claims",
-            "player_lobby_posts",
-            "player_reactions",
-        ] {
+    fn apply_sql_plan(sql: &worker::SqlStorage, plan: &crate::agents::SqlPlan) -> Result<()> {
+        for (match_id, turn, agent_id) in &plan.delete_actions {
             sql.exec(
-                &format!("DELETE FROM {table}"),
-                None::<Vec<worker::SqlStorageValue>>,
+                "DELETE FROM player_actions WHERE match_id = ? AND turn = ? AND agent_id = ?",
+                Some(vec![
+                    match_id.clone().into(),
+                    (*turn as i64).into(),
+                    agent_id.clone().into(),
+                ]),
             )?;
         }
-        for player in &book.players {
+        for match_id in &plan.delete_match_ids {
             sql.exec(
-                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "DELETE FROM player_actions WHERE match_id = ?",
+                Some(vec![match_id.clone().into()]),
+            )?;
+            sql.exec(
+                "DELETE FROM player_matches WHERE match_id = ?",
+                Some(vec![match_id.clone().into()]),
+            )?;
+        }
+        for (arena_id, agent_id) in &plan.delete_queue {
+            sql.exec(
+                "DELETE FROM player_queue WHERE arena_id = ? AND agent_id = ?",
+                Some(vec![arena_id.clone().into(), agent_id.clone().into()]),
+            )?;
+        }
+        for (agent_id, request_id) in &plan.delete_seen {
+            sql.exec(
+                "DELETE FROM player_seen WHERE agent_id = ? AND client_request_id = ?",
+                Some(vec![agent_id.clone().into(), request_id.clone().into()]),
+            )?;
+        }
+        for (agent_id, challenge_id) in &plan.delete_war {
+            sql.exec(
+                "DELETE FROM player_war_claims WHERE agent_id = ? AND challenge_id = ?",
+                Some(vec![agent_id.clone().into(), challenge_id.clone().into()]),
+            )?;
+        }
+        for id in &plan.delete_lobby {
+            sql.exec(
+                "DELETE FROM player_lobby_posts WHERE id = ?",
+                Some(vec![id.clone().into()]),
+            )?;
+        }
+        for (target_type, target_id, viewer_id) in &plan.delete_reactions {
+            sql.exec(
+                "DELETE FROM player_reactions WHERE target_type = ? AND target_id = ? AND viewer_id = ?",
+                Some(vec![
+                    target_type.clone().into(),
+                    target_id.clone().into(),
+                    viewer_id.clone().into(),
+                ]),
+            )?;
+        }
+        for agent_id in &plan.delete_player_ids {
+            sql.exec(
+                "DELETE FROM player_tokens WHERE agent_id = ?",
+                Some(vec![agent_id.clone().into()]),
+            )?;
+            sql.exec(
+                "DELETE FROM players WHERE agent_id = ?",
+                Some(vec![agent_id.clone().into()]),
+            )?;
+        }
+        for player in &plan.upsert_players {
+            let wallets = serde_json::to_string(&player.wallets).unwrap_or_else(|_| "{}".into());
+            let capabilities =
+                serde_json::to_string(&player.capabilities).unwrap_or_else(|_| "[]".into());
+            let war_hits = serde_json::to_string(&player.war_hits).unwrap_or_else(|_| "[]".into());
+            sql.exec(
+                "INSERT INTO players (agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET handle = excluded.handle, name = excluded.name, description = excluded.description, owner_contact = excluded.owner_contact, token_hash = excluded.token_hash, token_prefix = excluded.token_prefix, status = excluded.status, created_unix = excluded.created_unix, wallets_json = excluded.wallets_json, capabilities_json = excluded.capabilities_json, skin_id = excluded.skin_id, war_hits_json = excluded.war_hits_json",
                 Some(vec![
                     player.agent_id.clone().into(),
                     player.handle.clone().into(),
@@ -667,15 +858,24 @@ mod edge {
                     player.token_prefix.clone().into(),
                     player.status.clone().into(),
                     (player.created_unix as i64).into(),
-                    serde_json::to_string(&player.wallets).unwrap_or_else(|_| "{}".into()).into(),
-                    serde_json::to_string(&player.capabilities).unwrap_or_else(|_| "[]".into()).into(),
+                    wallets.into(),
+                    capabilities.into(),
                     player.skin_id.clone().into(),
+                    war_hits.into(),
+                ]),
+            )?;
+            sql.exec(
+                "INSERT INTO player_tokens (agent_id, token_hash, token_prefix) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET token_hash = excluded.token_hash, token_prefix = excluded.token_prefix",
+                Some(vec![
+                    player.agent_id.clone().into(),
+                    player.token_hash.clone().into(),
+                    player.token_prefix.clone().into(),
                 ]),
             )?;
         }
-        for seat in &book.queue {
+        for seat in &plan.upsert_queue {
             sql.exec(
-                "INSERT INTO player_queue (arena_id, agent_id, queued_unix) VALUES (?, ?, ?)",
+                "INSERT INTO player_queue (arena_id, agent_id, queued_unix) VALUES (?, ?, ?) ON CONFLICT(arena_id, agent_id) DO UPDATE SET queued_unix = excluded.queued_unix",
                 Some(vec![
                     seat.arena_id.clone().into(),
                     seat.agent_id.clone().into(),
@@ -683,25 +883,56 @@ mod edge {
                 ]),
             )?;
         }
-        for play in &book.matches {
+        for play in &plan.upsert_matches {
+            let seats = serde_json::to_string(&play.seats).unwrap_or_else(|_| "[]".into());
+            let actions = serde_json::to_string(&play.actions).unwrap_or_else(|_| "[]".into());
+            let vault = serde_json::to_string(&play.vault).unwrap_or_else(|_| "null".into());
             sql.exec(
-                "INSERT INTO player_matches (match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix, vault_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO player_matches (match_id, arena_id, status, turn, deadline_unix, seats_json, actions_json, created_unix, vault_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET arena_id = excluded.arena_id, status = excluded.status, turn = excluded.turn, deadline_unix = excluded.deadline_unix, seats_json = excluded.seats_json, actions_json = excluded.actions_json, created_unix = excluded.created_unix, vault_json = excluded.vault_json",
                 Some(vec![
                     play.match_id.clone().into(),
                     play.arena_id.clone().into(),
                     play.status.clone().into(),
                     (play.turn as i64).into(),
                     (play.deadline_unix as i64).into(),
-                    serde_json::to_string(&play.seats).unwrap_or_else(|_| "[]".into()).into(),
-                    serde_json::to_string(&play.actions).unwrap_or_else(|_| "[]".into()).into(),
+                    seats.into(),
+                    actions.into(),
                     (play.created_unix as i64).into(),
-                    serde_json::to_string(&play.vault).unwrap_or_else(|_| "null".into()).into(),
+                    vault.into(),
                 ]),
             )?;
         }
-        for claim in &book.war_claims {
+        for (match_id, action) in &plan.upsert_actions {
             sql.exec(
-                "INSERT INTO player_war_claims (agent_id, challenge_id, stage, points, unix, proof_hash, intent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO player_actions (match_id, turn, agent_id, action_type, points, unix, intent, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id, turn, agent_id) DO UPDATE SET action_type = excluded.action_type, points = excluded.points, unix = excluded.unix, intent = excluded.intent, outcome = excluded.outcome",
+                Some(vec![
+                    match_id.clone().into(),
+                    (action.turn as i64).into(),
+                    action.agent_id.clone().into(),
+                    action.action_type.clone().into(),
+                    (action.points as i64).into(),
+                    (action.unix as i64).into(),
+                    action.intent.clone().into(),
+                    action.outcome.clone().into(),
+                ]),
+            )?;
+        }
+        for seen in &plan.upsert_seen {
+            sql.exec(
+                "INSERT INTO player_seen (agent_id, client_request_id, status, body, match_id, created_unix) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id, client_request_id) DO UPDATE SET status = excluded.status, body = excluded.body, match_id = excluded.match_id, created_unix = excluded.created_unix",
+                Some(vec![
+                    seen.agent_id.clone().into(),
+                    seen.client_request_id.clone().into(),
+                    (seen.status as i64).into(),
+                    seen.body.clone().into(),
+                    seen.match_id.clone().into(),
+                    (seen.created_unix as i64).into(),
+                ]),
+            )?;
+        }
+        for claim in &plan.upsert_war {
+            sql.exec(
+                "INSERT INTO player_war_claims (agent_id, challenge_id, stage, points, unix, proof_hash, intent) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id, challenge_id) DO UPDATE SET stage = excluded.stage, points = excluded.points, unix = excluded.unix, proof_hash = excluded.proof_hash, intent = excluded.intent",
                 Some(vec![
                     claim.agent_id.clone().into(),
                     claim.challenge_id.clone().into(),
@@ -713,9 +944,10 @@ mod edge {
                 ]),
             )?;
         }
-        for post in &book.lobby {
+        for post in &plan.upsert_lobby {
+            let reports = serde_json::to_string(&post.reports).unwrap_or_else(|_| "[]".into());
             sql.exec(
-                "INSERT INTO player_lobby_posts (id, agent_id, kind, topic, body, match_id, unix, hidden, reports_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO player_lobby_posts (id, agent_id, kind, topic, body, match_id, unix, hidden, reports_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind, topic = excluded.topic, body = excluded.body, match_id = excluded.match_id, unix = excluded.unix, hidden = excluded.hidden, reports_json = excluded.reports_json",
                 Some(vec![
                     post.id.clone().into(),
                     post.agent_id.clone().into(),
@@ -724,14 +956,14 @@ mod edge {
                     post.body.clone().into(),
                     post.match_id.clone().into(),
                     (post.unix as i64).into(),
-                    (post.hidden as i64).into(),
-                    serde_json::to_string(&post.reports).unwrap_or_else(|_| "[]".into()).into(),
+                    (i64::from(post.hidden)).into(),
+                    reports.into(),
                 ]),
             )?;
         }
-        for reaction in &book.reactions {
+        for reaction in &plan.upsert_reactions {
             sql.exec(
-                "INSERT INTO player_reactions (target_type, target_id, viewer_id, reaction, unix) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO player_reactions (target_type, target_id, viewer_id, reaction, unix) VALUES (?, ?, ?, ?, ?) ON CONFLICT(target_type, target_id, viewer_id) DO UPDATE SET reaction = excluded.reaction, unix = excluded.unix",
                 Some(vec![
                     reaction.target_type.clone().into(),
                     reaction.target_id.clone().into(),
@@ -739,12 +971,6 @@ mod edge {
                     reaction.reaction.clone().into(),
                     (reaction.unix as i64).into(),
                 ]),
-            )?;
-        }
-        for seen in &book.seen {
-            sql.exec(
-                "INSERT INTO player_seen (agent_id, client_request_id, status, body) VALUES (?, ?, ?, ?)",
-                Some(vec![seen.agent_id.clone().into(), seen.client_request_id.clone().into(), (seen.status as i64).into(), seen.body.clone().into()]),
             )?;
         }
         Ok(())
@@ -828,11 +1054,163 @@ mod edge {
         with_cors(response, "application/json")
     }
 
+    impl SpectatorFeed {
+        async fn enforce_rate_limit(&self, req: &Request) -> Result<Option<Response>> {
+            let method = match req.method() {
+                Method::Get => "GET",
+                Method::Post => "POST",
+                Method::Delete => "DELETE",
+                Method::Put => "PUT",
+                Method::Patch => "PATCH",
+                Method::Options => return Ok(None),
+                _ => "OTHER",
+            };
+            let authorization = req.headers().get("authorization")?;
+            let ip = req.headers().get("cf-connecting-ip")?.unwrap_or_default();
+            match crate::limits::classify(method, &req.path(), authorization.as_deref(), &ip) {
+                crate::limits::LimitPlan::Exempt => Ok(None),
+                crate::limits::LimitPlan::Register { ip } => self.limit_register(&ip).await,
+                crate::limits::LimitPlan::Binding {
+                    name,
+                    key,
+                    retry_after,
+                } => self.limit_binding(name, &key, retry_after).await,
+            }
+        }
+
+        async fn limit_register(&self, ip: &str) -> Result<Option<Response>> {
+            let now = worker::Date::now().as_millis() / 1000;
+            let open = {
+                let sql = self.state.storage().sql();
+                ensure_rate_sql(&sql)?;
+                register_slot_open(&sql, ip, now)?
+            };
+            if let Some(retry_after) = open {
+                return Ok(Some(rate_limited(retry_after)?));
+            }
+            if let Some(response) = self
+                .limit_binding(
+                    crate::limits::REGISTER_BINDING,
+                    ip,
+                    crate::limits::REGISTER_BURST_PERIOD_SECS,
+                )
+                .await?
+            {
+                return Ok(Some(response));
+            }
+            let sql = self.state.storage().sql();
+            note_register(&sql, ip, now)?;
+            Ok(None)
+        }
+
+        async fn limit_binding(
+            &self,
+            name: &str,
+            key: &str,
+            retry_after: u64,
+        ) -> Result<Option<Response>> {
+            let known = crate::limits::BINDINGS
+                .iter()
+                .any(|row| row.0 == name && row.1 > 0 && row.2 == retry_after);
+            if !known {
+                return limiter_unavailable();
+            }
+            let limiter = match self.env.rate_limiter(name) {
+                Ok(limiter) => limiter,
+                Err(_) => return limiter_unavailable(),
+            };
+            match limiter.limit(key.to_string()).await {
+                Ok(outcome) if outcome.success => Ok(None),
+                Ok(_) => Ok(Some(rate_limited(retry_after)?)),
+                Err(_) => limiter_unavailable(),
+            }
+        }
+    }
+
+    fn rate_limited(retry_after: u64) -> Result<Response> {
+        let mut response =
+            Response::ok(r#"{"error":"rate_limited","message":"Too many requests."}"#)?
+                .with_status(429);
+        response
+            .headers_mut()
+            .set("Retry-After", &retry_after.to_string())?;
+        with_cors(response, "application/json")
+    }
+
+    fn limiter_unavailable() -> Result<Option<Response>> {
+        let response = Response::ok(
+            r#"{"error":"unavailable","message":"The rate limiter is not available."}"#,
+        )?
+        .with_status(503);
+        Ok(Some(with_cors(response, "application/json")?))
+    }
+
+    fn ensure_rate_sql(sql: &worker::SqlStorage) -> Result<()> {
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS rate_register (ip TEXT NOT NULL, bucket INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (ip, bucket))",
+            None::<Vec<worker::SqlStorageValue>>,
+        )?;
+        Ok(())
+    }
+
+    fn register_slot_open(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<Option<u64>> {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            n: i64,
+        }
+        let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        let day = (now / crate::limits::REGISTER_DAY_SECS) as i64;
+        sql.exec(
+            "DELETE FROM rate_register WHERE bucket < ?",
+            Some(vec![(bucket - 1).into()]),
+        )?;
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS rate_register_day (ip TEXT NOT NULL, bucket INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (ip, bucket))",
+            None::<Vec<worker::SqlStorageValue>>,
+        )?;
+        let hour_rows = sql
+            .exec(
+                "SELECT n FROM rate_register WHERE ip = ? AND bucket = ?",
+                Some(vec![ip.to_string().into(), bucket.into()]),
+            )?
+            .to_array::<Row>()?;
+        let day_rows = sql
+            .exec(
+                "SELECT n FROM rate_register_day WHERE ip = ? AND bucket = ?",
+                Some(vec![ip.to_string().into(), day.into()]),
+            )?
+            .to_array::<Row>()?;
+        let hour_n = hour_rows.first().map(|row| row.n).unwrap_or(0);
+        let day_n = day_rows.first().map(|row| row.n).unwrap_or(0);
+        if day_n >= crate::limits::REGISTER_PER_DAY as i64 {
+            return Ok(Some(crate::limits::register_day_retry(now)));
+        }
+        if hour_n >= crate::limits::REGISTER_PER_HOUR as i64 {
+            return Ok(Some(crate::limits::register_retry_after(now)));
+        }
+        Ok(None)
+    }
+
+    fn note_register(sql: &worker::SqlStorage, ip: &str, now: u64) -> Result<()> {
+        let bucket = (now / crate::limits::REGISTER_WINDOW_SECS) as i64;
+        let day = (now / crate::limits::REGISTER_DAY_SECS) as i64;
+        sql.exec(
+            "INSERT INTO rate_register (ip, bucket, n) VALUES (?, ?, 1) ON CONFLICT(ip, bucket) DO UPDATE SET n = n + 1",
+            Some(vec![ip.to_string().into(), bucket.into()]),
+        )?;
+        sql.exec(
+            "INSERT INTO rate_register_day (ip, bucket, n) VALUES (?, ?, 1) ON CONFLICT(ip, bucket) DO UPDATE SET n = n + 1",
+            Some(vec![ip.to_string().into(), day.into()]),
+        )?;
+        Ok(())
+    }
+
     fn with_cors(mut response: Response, content_type: &str) -> Result<Response> {
         let headers = response.headers_mut();
         headers.set("content-type", content_type)?;
         headers.set("access-control-allow-origin", "*")?;
-        headers.set("access-control-allow-methods", "GET, POST, OPTIONS")?;
+        headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")?;
+        headers.set("access-control-expose-headers", "Retry-After")?;
         headers.set(
             "access-control-allow-headers",
             "content-type, authorization",

@@ -1,28 +1,28 @@
 import type { Metadata } from "next";
-import { Chakra_Petch, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { SkipForward } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { SiteNav } from "@/components/SiteNav";
 import { UiSound } from "@/components/UiSound";
 import "./globals.css";
 
-const display = Chakra_Petch({
-  subsets: ["latin"],
-  weight: ["600", "700"],
+const display = localFont({
+  src: [
+    { path: "../public/fonts/ChakraPetch-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "../public/fonts/ChakraPetch-Bold.ttf", weight: "700", style: "normal" },
+  ],
   variable: "--font-display",
   display: "swap",
 });
 
-const body = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const body = localFont({
+  src: [{ path: "../public/fonts/Inter-Medium.ttf", weight: "500", style: "normal" }],
   variable: "--font-body",
   display: "swap",
 });
 
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const mono = localFont({
+  src: [{ path: "../public/fonts/JetBrainsMono-Medium.ttf", weight: "500", style: "normal" }],
   variable: "--font-mono",
   display: "swap",
 });
