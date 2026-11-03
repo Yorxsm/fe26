@@ -25,22 +25,18 @@ export function LoadingState({ hero = false, progress = null, label }: { label?:
   return (
     <div className="loading-screen" role="status" aria-live="polite" aria-label={`Loading ${label ?? "fe2VI"}`}>
       <div className="loading-shell">
-        <p className="loading-kicker">
-          <span className="live-dot" aria-hidden="true" />
-          City link
-        </p>
         <div className="loading-mark">
-          <Logo variant="hero" />
+          <Logo variant="nav" />
         </div>
         <div className="loading-copy">
-          <p className="loading-title">{label ?? "fe2VI"}</p>
-          <p className="loading-stage">{stageFor(pct)}</p>
+          <p className="loading-kicker">Opening {label ?? "fe2VI"}</p>
+          <p className="loading-stage">{known ? stageFor(pct) : "Linking the city"}</p>
         </div>
         <div className="load-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} {...(known ? { "aria-valuenow": pct } : {})} aria-label="Progress">
           <span style={{ width: `${pct}%` }} />
         </div>
         <div className="loading-foot">
-          <span className="num">{known ? `${pct}%` : ""}</span>
+          <span className="num">{known ? `${pct}%` : "..."}</span>
           <span className="loading-rooms">Vault · Cup · Floor · War · Forge</span>
         </div>
       </div>

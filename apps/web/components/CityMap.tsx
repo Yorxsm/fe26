@@ -338,6 +338,8 @@ type Rig = {
   enablePan: boolean;
   minPolarAngle: number;
   maxPolarAngle: number;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
 };
 
 const aim = new THREE.Vector3();
@@ -355,8 +357,8 @@ const GROUND_CAMERA_Y = 1.2;
 const CAMERA_RADIUS = 0.55;
 const INTERIOR_HX = 6.4;
 const INTERIOR_HZ = 5.6;
-const INTERIOR_MIN_DISTANCE = 3.2;
-const INTERIOR_MAX_DISTANCE = 7.5;
+const INTERIOR_MIN_DISTANCE = 2.8;
+const INTERIOR_MAX_DISTANCE = 14;
 
 function detectQuality(): QualityTier {
   if (typeof window === "undefined") return "medium";
@@ -1984,6 +1986,18 @@ function CameraDriver({
   const interiorOffset = useRef(new THREE.Vector3());
   const snapInside = useRef(false);
   const overviewLatched = useRef(false);
+
+  useEffect(() => {
+    if (!controls || !focusId || frameMode !== "in") return;
+    const room = DISTRICTS.find((district) => district.id === focusId);
+    if (!room) return;
+    const clamp = () => {
+      if (latched.current !== focusId) return;
+      clampInteriorCamera(camera.position, room);
+    };
+    controls.addEventListener("change", clamp);
+    return () => controls.removeEventListener("change", clamp);
+  }, [camera, controls, focusId, frameMode]);
   useEffect(() => {
     const move = (event: PointerEvent) => {
       pointer.current.x = event.clientX / window.innerWidth * 2 - 1;
@@ -2230,22 +2244,45 @@ function CameraDriver({
           aim.set(room.x, 1.7, room.z - 2);
           fovTarget.current = 50;
         }
+        if (latched.current === focusId) {
+          rig.enabled = true;
+          rig.enablePan = false;
+          rig.minDistance = INTERIOR_MIN_DISTANCE;
+          rig.maxDistance = INTERIOR_MAX_DISTANCE;
+          rig.minPolarAngle = 0.45;
+          rig.maxPolarAngle = 1.56;
+          renderShot.on = false;
+          const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
+          probe.focusId = focusId;
+          probe.camera = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+          return;
+        }
         const blend = snapInside.current || reduce.current ? 1 : 1 - Math.exp(-delta * 8);
         if (snapInside.current) snapInside.current = false;
         rig.target.lerp(aim, blend);
         camera.position.lerp(eye, blend);
-        if (camera.position.distanceTo(eye) < 0.35) {
+        const arrived = camera.position.distanceTo(eye) < 0.35;
+        if (arrived) {
           camera.position.copy(eye);
           rig.target.copy(aim);
           latched.current = focusId;
+          rig.enabled = true;
+          rig.enablePan = false;
+          rig.minDistance = INTERIOR_MIN_DISTANCE;
+          rig.maxDistance = INTERIOR_MAX_DISTANCE;
+          rig.minPolarAngle = 0.45;
+          rig.maxPolarAngle = 1.56;
+          controls?.update();
         }
         camera.lookAt(rig.target);
         dampFov(camera, fovTarget.current, delta, reduce.current);
-        renderShot.on = true;
-        renderShot.eye.copy(eye);
-        renderShot.aim.copy(aim);
-        renderShot.fov = fovTarget.current ?? 50;
-        rig.enabled = false;
+        renderShot.on = !arrived;
+        if (!arrived) {
+          renderShot.eye.copy(eye);
+          renderShot.aim.copy(aim);
+          renderShot.fov = fovTarget.current ?? 50;
+        }
+        if (!arrived) rig.enabled = false;
         const probe = ((window as unknown as { __fe2viRoom?: Record<string, unknown> }).__fe2viRoom ??= {});
         probe.focusId = focusId;
         probe.camera = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
@@ -2963,7 +3000,7 @@ export default function CityMap({
       <Grade shot={openInterior ? "interior" : focusId || mode === "cutscene" ? "hero" : "overview"} quality={quality} />
       <OrbitControls
         makeDefault
-        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street && !(frameMode === "in" && Boolean(focusId))}
+        enabled={followIndex === null && mode !== "cutscene" && !lineup && !street}
         enablePan
         enableZoom
         enableRotate

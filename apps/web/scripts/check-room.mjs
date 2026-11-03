@@ -471,6 +471,40 @@ for (let attempt = 0; attempt < 24; attempt += 1) {
 }
 await delay(3000);
 const after = await grab("after");
+let roomDrag = 0;
+if (clicked?.focusId) {
+  const roomStart = clicked.camera;
+  const spot = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const canvas = document.querySelector("canvas");
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      for (const [u, v] of [[0.5, 0.5], [0.42, 0.48], [0.58, 0.55]]) {
+        const x = rect.left + rect.width * u;
+        const y = rect.top + rect.height * v;
+        if (document.elementFromPoint(x, y) === canvas) return { x, y };
+      }
+      return null;
+    })()`,
+    returnByValue: true,
+  });
+  const origin = spot.result?.value;
+  if (origin) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: origin.x, y: origin.y, buttons: 0 });
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: origin.x, y: origin.y, button: "left", buttons: 1, clickCount: 1 });
+    for (let step = 1; step <= 6; step += 1) {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: origin.x - step * 50, y: origin.y, button: "left", buttons: 1 });
+      await delay(30);
+    }
+    await delay(250);
+    const roomEnd = await send("Runtime.evaluate", { expression: `window.__fe2viRoom?.camera ?? null`, returnByValue: true });
+    const end = roomEnd.result?.value;
+    if (roomStart && end) {
+      roomDrag = Math.hypot(end.x - roomStart.x, end.y - roomStart.y, end.z - roomStart.z);
+    }
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: origin.x - 300, y: origin.y, button: "left", buttons: 0, clickCount: 1 });
+  }
+}
 const slugById = {
   "oracle-plaza": "hall",
   "war-room": "war",
@@ -514,6 +548,7 @@ console.log(JSON.stringify({
   direct: { meshes, camera, focusId: direct?.focusId ?? null },
   click: { meshes: clickMeshes, camera: clickCamera, focusId: clicked?.focusId ?? null },
   pixels: { changed: Number(changed.toFixed(2)), versusLink: Number(versusLink.toFixed(2)), drag: Number((dragFraction * 100).toFixed(1)) },
+  roomDrag: Number(roomDrag.toFixed(2)),
 }));
 if (meshes < 1 || !inside || !clickInside) {
   console.error("Room rendered empty or the camera stayed outside");
@@ -528,6 +563,10 @@ if (!before || !after || changed < 12) {
 }
 if (dragFraction < 0.1) {
   console.error(`A drag changed ${(dragFraction * 100).toFixed(1)}% of the overview`);
+  process.exit(1);
+}
+if (roomDrag < 0.15) {
+  console.error(`An interior drag moved the camera ${roomDrag.toFixed(2)}`);
   process.exit(1);
 }
 if (before.band && darkFraction(before.band) > 0.4) {

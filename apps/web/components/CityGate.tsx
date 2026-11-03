@@ -14,7 +14,6 @@ import { MarkdownDoc } from "@/components/MarkdownDoc";
 import { LobbySignList, RoomHud, type RoomMatch, type WarClaimRow } from "@/components/RoomHud";
 import {
   ArrowLeft,
-  ArrowRight,
   Compass,
   DoorOpen,
   Eye,
@@ -28,7 +27,6 @@ import {
   RotateCw,
   ScrollText,
   Send,
-  SkipForward,
   Stamp,
   Users,
   Video,
@@ -43,11 +41,9 @@ import { apiBase } from "@/lib/protocol";
 import { defaultSkin } from "@/lib/skin";
 import { fixtureEvents } from "@/lib/fixtures";
 import {
-  CUTSCENE,
   EMPTY_SAVE,
   QUEST_DEFS,
   TUTORIAL,
-  VANTAGE_IDS,
   loadSpectator,
   saveSpectator,
   type SpectatorSave,
@@ -58,27 +54,7 @@ const CityMap = dynamic(() => import("@/components/CityMap"), {
   loading: () => <LoadingState label="the city" hero />,
 });
 
-type Phase = "boot" | "title" | "cutscene" | "vantage" | "dispatch" | "city";
-
-function TypeLine({ text }: { text: string }) {
-  const [count, setCount] = useState(1);
-  useEffect(() => {
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) {
-      setCount(text.length);
-      return;
-    }
-    const started = performance.now();
-    setCount(1);
-    const id = window.setInterval(() => {
-      const next = Math.min(text.length, Math.max(1, Math.round((performance.now() - started) / 32)));
-      setCount(next);
-      if (next >= text.length) window.clearInterval(id);
-    }, 32);
-    return () => window.clearInterval(id);
-  }, [text]);
-  return <h2 className="caption">{text.slice(0, count)}</h2>;
-}
+type Phase = "boot" | "title" | "dispatch" | "city";
 
 function webglAvailable() {
   try {
@@ -137,7 +113,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const [webgl, setWebgl] = useState(true);
   const [save, setSave] = useState<SpectatorSave>(EMPTY_SAVE);
   const [paused, setPaused] = useState(false);
-  const [beat, setBeat] = useState(0);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [shotLock, setShotLock] = useState(false);
   const [hotspot, setHotspot] = useState<string | null>(null);
@@ -354,7 +329,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
         readyTimer = window.setTimeout(() => {
           setMapReady(true);
           window.dispatchEvent(new Event("fe2vi-playable"));
-        }, 1200);
+        }, 450);
         return;
       }
       frame = window.requestAnimationFrame(drain);
@@ -389,7 +364,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }, [showGames, hintsOpen, questOpen]);
 
   useEffect(() => {
-    if (phase === "cutscene" || phase === "vantage") audio.theme();
     if (phase === "city") audio.city();
   }, [phase]);
 
@@ -412,14 +386,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  useEffect(() => {
-    if (phase !== "cutscene") return;
-    const cues = ["quest", "heist", "trade", "breach", "rank", "forge"] as const;
-    audio.swell(beat);
-    const cue = cues[beat];
-    if (cue) audio.sting(cue);
-  }, [beat, phase]);
 
   function commit(next: SpectatorSave) {
     setSave(next);
@@ -505,7 +471,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     setNote(`${visitors[index]?.name ?? "Agent"} is in frame. You are watching, not playing.`);
   }
 
-  const mode = phase === "cutscene" ? "cutscene" : phase === "city" || focusId ? "play" : "orbit";
+  const mode = phase === "city" || focusId ? "play" : "orbit";
   const cast = visitors;
   const lines = useMemo(() => {
     const slug = focusId ? ROOM_SLUG[focusId] : "";
@@ -520,7 +486,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
     return out;
   }, [matches, focusId, visitors]);
   const followed = followIndex === null ? null : cast[followIndex];
-  const vantages = DISTRICTS.filter((district) => (VANTAGE_IDS as readonly string[]).includes(district.id));
 
   if (phase !== "boot" && !webgl) {
     return (
@@ -558,12 +523,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
         <div id="pick-flash" className="pick-flash" hidden />
         <div className="city-stage">
           <div className="city-frame">
-            {phase === "cutscene" && beat === 0 && (
-              <div className="cine-sound">
-                <AudioHud live={soundLive} />
-              </div>
-            )}
-            {(phase === "vantage" || phase === "city") && (
+            {phase === "city" && (
             <header className={phase === "city" && frameMode === "in" && focusId && ["vault-quarter", "trading-village", "war-room", "skin-forge", "cup-stadium", "oracle-plaza"].includes(focusId) ? "hud-chrome room-frame" : "hud-chrome"}>
               <div className="hud-tl ui-in">
                 <a
@@ -804,7 +764,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               <CityMap
                 paused={paused}
                 mode={mode}
-                beat={beat}
+                beat={0}
                 focusId={focusId}
                 followIndex={phase === "city" ? followIndex : null}
                 frameMode={frameMode}
@@ -844,7 +804,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                       onClick={() => {
                         audio.unlock();
                         setSoundLive(true);
-                        setPhase("cutscene");
+                        enterCity(null);
                       }}
                     >
                       <Eye aria-hidden="true" strokeWidth={1.75} />
@@ -862,53 +822,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 </div>
               </div>
             )}
-            {phase === "cutscene" && (
-              <div className="cutscene letterbox" data-screen="cutscene">
-                <article className="lower-third ui-in" key={beat}>
-                  <p className="label">
-                    {CUTSCENE[beat].kicker} · {beat + 1} / {CUTSCENE.length}
-                  </p>
-                  <TypeLine text={CUTSCENE[beat].caption} />
-                  <p className="caption-detail">{CUTSCENE[beat].detail}</p>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => (beat + 1 >= CUTSCENE.length ? enterCity("skin-forge") : setBeat((value) => value + 1))}
-                  >
-                    {beat + 1 >= CUTSCENE.length ? (
-                      <>
-                        <DoorOpen aria-hidden="true" strokeWidth={1.75} />
-                        Enter the lobby
-                      </>
-                    ) : (
-                      <>
-                        <ArrowRight aria-hidden="true" strokeWidth={1.75} />
-                        Next
-                      </>
-                    )}
-                  </button>
-                </article>
-              </div>
-            )}
-            {phase === "vantage" && (
-              <div className="vantage" data-screen="vantage">
-                <h2>Pick your vantage</h2>
-                <p>You watch. Agents keep playing in the district you pick.</p>
-                <div className="vantage-grid">
-                  {vantages.map((district) => (
-                    <button key={district.id} type="button" onClick={() => enterCity(district.id)}>
-                      <MapPin aria-hidden="true" strokeWidth={1.75} />
-                      <strong>{district.name}</strong>
-                      <span>{district.summary}</span>
-                    </button>
-                  ))}
-                </div>
-                <button type="button" className="btn-quiet" onClick={() => enterCity(null)}>
-                  <Eye aria-hidden="true" strokeWidth={1.75} />
-                  Stay on the overview
-                </button>
-              </div>
-            )}
             {phase === "dispatch" && (
               <div className="dispatch" data-screen="dispatch">
                 <MarkdownDoc source={onboarding} />
@@ -919,16 +832,6 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   </button>
                 </div>
               </div>
-            )}
-            {phase === "cutscene" && (
-              <button
-                type="button"
-                className="btn btn-ghost skip-corner"
-                onClick={() => setPhase("vantage")}
-              >
-                <SkipForward aria-hidden="true" strokeWidth={1.75} />
-                Skip
-              </button>
             )}
           </div>
           {phase === "city" && (
