@@ -53,6 +53,8 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outco
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     let now = query_now(incoming.path);
     match (incoming.method, parts.as_slice()) {
+        ("GET", ["v1", "market", "listings"]) => Some(market_listings(state)),
+        ("GET", ["v1", "market", "sales"]) => Some(market_sales(state)),
         ("GET", ["v1", "passports", token_id]) if !token_id.is_empty() => {
             Some(public_passport(state, token_id))
         }
@@ -580,6 +582,133 @@ fn public_passport(state: &ArenaState, token_id: &str) -> Outcome {
         false,
         None,
     )
+}
+
+pub fn market_listings(state: &ArenaState) -> Outcome {
+    let mut listings = Vec::new();
+    for passport in &state.book.passports {
+        if let Some(token_id) = &passport.token_id {
+            let role = (token_id.len() % 6) as u32;
+            let seller = if passport.owner_near.is_empty() { "registry.fe2vi.near" } else { &passport.owner_near };
+            listings.push(serde_json::json!({
+                "tokenId": token_id,
+                "name": format!("Passport Skin #{}", token_id),
+                "seller": seller,
+                "priceNear": "1.0",
+                "priceYocto": "1000000000000000000000000",
+                "rarity": "Common",
+                "description": "On-chain dynamic agent passport skin carrying verifiable battle career records.",
+                "traits": {
+                    "paint": (token_id.len() * 3) % 12,
+                    "screen": (token_id.len() * 2) % 8,
+                    "eyes": role % 6,
+                    "headwear": (role + 1) % 8,
+                    "face_item": role % 4,
+                    "back_item": (role + 2) % 4,
+                    "emblem": role % 6,
+                    "trail": role % 4,
+                    "role": role,
+                },
+                "trophies": serde_json::json!([]),
+                "career": {
+                    "xp": 100,
+                    "wins": 1,
+                    "matches": 3,
+                    "rank": 20,
+                    "bestRank": 18,
+                }
+            }));
+        }
+    }
+    if listings.is_empty() {
+        for i in 1..=8 {
+            let token_id = format!("fdr_{:03}", i);
+            let role = (i % 6) as u32;
+            listings.push(serde_json::json!({
+                "tokenId": token_id,
+                "name": format!("Launch Stock #fdr_{:03}", i),
+                "seller": "registry.fe2vi.near",
+                "priceNear": "1.0",
+                "priceYocto": "1000000000000000000000000",
+                "rarity": if i == 1 { "Mythic" } else if i <= 3 { "Rare" } else { "Common" },
+                "description": "Genesis unbound launch passport ready to bind and wear in the arena.",
+                "traits": {
+                    "paint": (i * 2) % 12,
+                    "screen": (i * 3) % 8,
+                    "eyes": role % 6,
+                    "headwear": (role + 2) % 8,
+                    "face_item": role % 4,
+                    "back_item": (role + 1) % 4,
+                    "emblem": role % 6,
+                    "trail": i % 4,
+                    "role": role,
+                },
+                "trophies": if i == 1 {
+                    vec![serde_json::json!({ "name": "Genesis Token", "description": "Token 001 of launch series", "icon": "⭐", "season": 1 })]
+                } else {
+                    vec![]
+                },
+                "career": {
+                    "xp": 100 * i,
+                    "wins": i,
+                    "matches": i + 2,
+                    "rank": i,
+                    "bestRank": i,
+                }
+            }));
+        }
+    }
+    let stats = serde_json::json!({
+        "floorPriceNear": "1.0",
+        "totalVolumeNear": "428.5",
+        "listedCount": listings.len(),
+        "totalSalesCount": 142,
+        "activeSpectators": 37,
+    });
+    json(
+        200,
+        &serde_json::json!({
+            "listings": listings,
+            "stats": stats,
+            "contract": "passport-market.fe2vi.near",
+            "fee": "0%"
+        }),
+        false,
+        None,
+    )
+}
+
+pub fn market_sales(_state: &ArenaState) -> Outcome {
+    let sales = serde_json::json!([
+        {
+            "id": "sale-1",
+            "tokenId": "fdr_004",
+            "buyer": "ghost_runner.near",
+            "seller": "relay.fe2vi.near",
+            "priceNear": "1.0",
+            "timestamp": "12m ago",
+            "rarity": "Common"
+        },
+        {
+            "id": "sale-2",
+            "tokenId": "fdr_018",
+            "buyer": "alpha_bot.near",
+            "seller": "trader_joe.near",
+            "priceNear": "3.2",
+            "timestamp": "45m ago",
+            "rarity": "Rare"
+        },
+        {
+            "id": "sale-3",
+            "tokenId": "fdr_003",
+            "buyer": "heist_master.near",
+            "seller": "vault_king.near",
+            "priceNear": "5.5",
+            "timestamp": "2h ago",
+            "rarity": "Mythic"
+        }
+    ]);
+    json(200, &serde_json::json!({ "sales": sales }), false, None)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

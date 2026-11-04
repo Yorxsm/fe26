@@ -58,10 +58,24 @@ export function AgentScreen() {
             {typeof agent.points === "number" ? ` · ${agent.points} ${agent.points === 1 ? "point" : "points"}` : ""}
           </p>
           {agent.description ? <p>{agent.description}</p> : null}
+          <div className="stamps" style={{ margin: "0.5rem 0" }}>
+            <span className="stamp neutral" style={{ fontSize: "0.8rem" }}>
+              Runtime: <strong>IronClaw</strong>
+            </span>
+            <span className="stamp neutral" style={{ fontSize: "0.8rem" }}>
+              Inference: <strong>NEAR AI Cloud</strong>
+            </span>
+            <span className="stamp neutral" style={{ fontSize: "0.8rem" }}>
+              Non-Custodial
+            </span>
+          </div>
           {agent.capabilities?.length ? <p className="meta">Capabilities: {agent.capabilities.join(", ")}</p> : null}
           {agent.skin ? (
             <p className="meta">
-              Skin · <Link href="/forge">{agent.skin.name}</Link> · {agent.skin.rarity}
+              Skin · <Link href="/forge">{agent.skin.name}</Link> · {agent.skin.rarity} ·{" "}
+              <Link href="/market" style={{ color: "var(--forge)", fontWeight: 600 }}>
+                Inspect on Market
+              </Link>
               <span
                 aria-hidden="true"
                 style={{

@@ -244,6 +244,8 @@ function Screen({
   sign,
   status = "",
   tone = "green",
+  href,
+  onClick,
 }: {
   position: [number, number, number];
   title: string;
@@ -253,6 +255,8 @@ function Screen({
   sign?: BoardSign;
   status?: string;
   tone?: BoardRow["tone"];
+  href?: string;
+  onClick?: () => void;
 }) {
   const key = sign ? `${sign}|${status}|${tone}` : `${title}|${rows.map((row) => `${row.label}:${row.value ?? ""}:${row.tone ?? ""}`).join("|")}`;
   const [width, height] = size;
@@ -300,7 +304,30 @@ function Screen({
         <boxGeometry args={[width + 0.18, height + 0.18, 0.08]} />
         <meshStandardMaterial color="#2c2e32" metalness={0.78} roughness={0.38} />
       </mesh>
-      <mesh position={[0, 0, 0.02]} renderOrder={2}>
+      <mesh
+        position={[0, 0, 0.02]}
+        renderOrder={2}
+        onPointerOver={(e) => {
+          if (href || onClick) {
+            e.stopPropagation();
+            document.body.style.cursor = "pointer";
+          }
+        }}
+        onPointerOut={() => {
+          if (href || onClick) {
+            document.body.style.cursor = "auto";
+          }
+        }}
+        onClick={(e) => {
+          if (onClick) {
+            e.stopPropagation();
+            onClick();
+          } else if (href) {
+            e.stopPropagation();
+            window.location.href = href;
+          }
+        }}
+      >
         <planeGeometry args={[width, height]} />
         <meshBasicMaterial map={map} color="#ffffff" toneMapped={false} />
       </mesh>
@@ -366,16 +393,16 @@ function RoomBoards({ id }: { id: string }) {
         { label: "FORMAT", value: "BEST OF 5" },
       ];
   const quotes = mockQuotes(now ?? 0);
-  const screen = (name: string, rows: BoardRow[]) => {
+  const screen = (name: string, rows: BoardRow[], href?: string) => {
     const board = placed(id, name);
     if (!board) return null;
-    return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} />;
+    return <Screen key={name} position={board.at} size={board.size} title={name} rows={rows} href={href} />;
   };
   if (id === "vault-quarter") {
     return (
       <>
-        {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }])}
-        {screen("SEASON", seasonRows)}
+        {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }], "/games/heist-night")}
+        {screen("SEASON", seasonRows, "/leaderboard")}
       </>
     );
   }
@@ -389,6 +416,7 @@ function RoomBoards({ id }: { id: string }) {
             value: (row.mark / 1_000_000).toFixed(2),
             tone: row.pnlMicros >= 0 ? "green" : "orange",
           })),
+          "/village",
         )}
         {screen(
           "PNL",
@@ -397,6 +425,7 @@ function RoomBoards({ id }: { id: string }) {
             value: (row.pnlMicros / 1_000_000).toFixed(2),
             tone: row.pnlMicros >= 0 ? "green" : "orange",
           })),
+          "/market",
         )}
       </>
     );
@@ -404,14 +433,14 @@ function RoomBoards({ id }: { id: string }) {
   if (id === "war-room") {
     return (
       <>
-        {screen("CONTRACT", [{ label: "", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" }])}
-        {screen("WEB", [{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }])}
-        {screen("CRYPTO", [{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }])}
+        {screen("CONTRACT", [{ label: "", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" }], "/war-room")}
+        {screen("WEB", [{ label: "", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "orange" }], "/war-room")}
+        {screen("CRYPTO", [{ label: "", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" }], "/war-room")}
         {screen("SCORE", [
           { label: "CONTRACT", value: `${CHALLENGES[0]?.points ?? 0}`, tone: "orange" },
           { label: "WEB", value: `${CHALLENGES[1]?.points ?? 0}`, tone: "green" },
           { label: "CRYPTO", value: `${CHALLENGES[2]?.points ?? 0}`, tone: "orange" },
-        ])}
+        ], "/war-room")}
         <HoloMap />
       </>
     );
@@ -420,8 +449,8 @@ function RoomBoards({ id }: { id: string }) {
     const signRoom: Record<string, string> = { vault: "vault", cup: "cup", floor: "village", war: "war" };
     return (
       <>
-        {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }])}
-        {screen("SEASON", seasonRows)}
+        {screen("HALL", [clockRow, { label: "VAULT", value: "HEIST" }, { label: "FLOOR", value: "PERPS" }, { label: "WAR", value: "SANDBOX" }], "/market")}
+        {screen("SEASON", seasonRows, "/leaderboard")}
         {FRAME_BOARDS["skin-forge"].filter((board) => board.sign).map((board) => {
           const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
           const status = !slot
@@ -429,6 +458,16 @@ function RoomBoards({ id }: { id: string }) {
             : slot.live && slot.kind === "season"
               ? "Open all season"
               : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
+          const href =
+            board.sign === "vault"
+              ? "/games/heist-night"
+              : board.sign === "cup"
+                ? "/games/trading-cup"
+                : board.sign === "floor"
+                  ? "/market"
+                  : board.sign === "war"
+                    ? "/war-room"
+                    : undefined;
           return (
             <Screen
               key={board.name}
@@ -438,6 +477,7 @@ function RoomBoards({ id }: { id: string }) {
               sign={board.sign}
               status={status}
               tone={slot?.live ? "green" : "orange"}
+              href={href}
             />
           );
         })}
@@ -448,8 +488,8 @@ function RoomBoards({ id }: { id: string }) {
     const signRoom: Record<string, string> = { vault: "vault", cup: "cup", floor: "village", war: "war" };
     return (
       <>
-        {screen("HALL", [clockRow, { label: "SEASON", value: "BOARD" }, { label: "MATCHES", value: "LIVE" }])}
-        {screen("SEASON", seasonRows)}
+        {screen("HALL", [clockRow, { label: "SEASON", value: "BOARD" }, { label: "MATCHES", value: "LIVE" }], "/leaderboard")}
+        {screen("SEASON", seasonRows, "/leaderboard")}
         {FRAME_BOARDS["oracle-plaza"].filter((board) => board.sign).map((board) => {
           const slot = rooms[signRoom[board.sign ?? ""] ?? ""];
           const status = !slot
@@ -457,6 +497,16 @@ function RoomBoards({ id }: { id: string }) {
             : slot.live && slot.kind === "season"
               ? "Open all season"
               : `${slot.live ? "LIVE" : "NEXT"} ${formatCountdown(slot.secs)}`;
+          const href =
+            board.sign === "vault"
+              ? "/games/heist-night"
+              : board.sign === "cup"
+                ? "/games/trading-cup"
+                : board.sign === "floor"
+                  ? "/market"
+                  : board.sign === "war"
+                    ? "/war-room"
+                    : undefined;
           return (
             <Screen
               key={board.name}
@@ -466,6 +516,7 @@ function RoomBoards({ id }: { id: string }) {
               sign={board.sign}
               status={status}
               tone={slot?.live ? "green" : "orange"}
+              href={href}
             />
           );
         })}

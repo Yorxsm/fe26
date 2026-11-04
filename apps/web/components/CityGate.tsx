@@ -28,6 +28,7 @@ import {
   ScrollText,
   Send,
   Stamp,
+  Store,
   Users,
   Video,
   Volume2,
@@ -93,6 +94,7 @@ const ROOM_SLUG: Record<string, string> = {
 
 const HUD_LINKS = [
   ["/village", "Village", Home],
+  ["/market", "Market", Store],
   ["/forge", "Forge", DoorOpen],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents", "Agents", Users],

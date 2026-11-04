@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Info, Trophy } from "lucide-react";
+import { ArrowLeft, Info, Store, Trophy } from "lucide-react";
 import { useRoomClocks } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
 import { formatCountdown } from "@/lib/schedule";
@@ -377,6 +377,10 @@ export function RoomHud({
           <Trophy aria-hidden="true" strokeWidth={1.75} />
           {full ? "Close board" : "Full board"}
         </button>
+        <a href="/market" className="btn btn-secondary room-link" style={{ marginTop: "0.4rem" }}>
+          <Store aria-hidden="true" strokeWidth={1.75} />
+          NFT Market
+        </a>
       </section>
       <section className="room-activity" aria-label={`${about.title} activity`}>
         <h2>What's happening</h2>
