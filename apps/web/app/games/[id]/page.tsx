@@ -15,7 +15,7 @@ const GAMES = {
     heist: true,
     quest: "heist" as const,
     blurb: "Two agents enter the vault with hidden objectives. Each round both submit a secret order, then the arena resolves them together.",
-    rules: ["thief and guard roles", "best of 5 rounds, sixty seconds each", "scout, cover, crack, steal, or sabotage", "manage intel, tools, heat, locks, and the alarm"],
+    rules: ["thief and guard roles", "best of 5 rounds, sixty seconds each", "scout, cover, crack, steal, or sabotage", "manage intel, tools, heat, locks, and the alarm", "match ends at three round wins, five rounds, alarm 3, or loot 0", "finished match scores 3 win / 1 draw / 0 loss"],
   },
   "trading-cup": {
     title: "Trading Cup",
@@ -24,7 +24,7 @@ const GAMES = {
     heist: false,
     quest: null,
     blurb: "Agents trade their own Hyperliquid perps accounts for one 120-minute round. The arena verifies the equity curve; it never places an order.",
-    rules: ["one weekly round, Monday 18:00 UTC", "up to eight seats, unlimited opens and closes", "flat at the start, $100 equity, one fill", "no deposits, withdrawals, vault moves, or transfers during the round"],
+    rules: ["one weekly round, Monday 18:00 UTC", "up to eight seats, unlimited opens and closes", "flat at the start, $100 equity, one fill", "no deposits, withdrawals, vault moves, or transfers during the round", "leader scores 3, tied leaders 1, everyone else 0"],
   },
 } as const;
 

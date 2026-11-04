@@ -49,10 +49,7 @@ import {
   type SpectatorSave,
 } from "@/lib/onboarding";
 
-const CityMap = dynamic(() => import("@/components/CityMap"), {
-  ssr: false,
-  loading: () => <LoadingState label="the city" hero />,
-});
+const CityMap = dynamic(() => import("@/components/CityMap"), { ssr: false });
 
 type Phase = "boot" | "title" | "dispatch" | "city";
 
@@ -755,12 +752,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                   </div>
                 </div>
               </div>
-            ) : phase !== "boot" && !mapReady ? (
+            ) : !mapReady ? (
               <LoadingState label="the city" hero progress={shownProgress} />
             ) : null}
-            {phase === "boot" && !mapStuck ? (
-              <LoadingState label="the city" hero progress={shownProgress} />
-            ) : phase === "boot" ? null : (
+            {phase === "boot" ? null : (
               <CityMap
                 paused={paused}
                 mode={mode}

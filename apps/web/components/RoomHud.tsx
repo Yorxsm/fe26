@@ -15,16 +15,19 @@ function plainPoints(room: string, book: Record<string, unknown>) {
   }
   if (room === "cup") {
     const row = asRecord(book.cup);
-    const places = Array.isArray(row?.place) ? row.place.filter((value) => typeof value === "number") : [];
     if (!row) return null;
-    return places.length
-      ? `Top five score ${places.join(", ")}. Ties share the place; only positive risk-adjusted returns score.`
-      : "Top five share the Cup points.";
+    const win = typeof row.win === "number" ? row.win : 3;
+    const draw = typeof row.draw === "number" ? row.draw : 1;
+    const loss = typeof row.loss === "number" ? row.loss : 0;
+    return `Eligible positive risk-adjusted returns score ${win}; tied leaders score ${draw}; everyone else scores ${loss}.`;
   }
   if (room === "village") {
     const row = asRecord(book.village);
     if (!row) return null;
-    return "The Village ranks risk-adjusted P&L. It does not award season points.";
+    const score = typeof row.score === "string" ? row.score : null;
+    return score
+      ? `Score: ${score}. It ranks the tape and does not award season points.`
+      : "The Village ranks risk-adjusted P&L. It does not award season points.";
   }
   if (room === "war" && Array.isArray(book.war)) {
     const bits = book.war
@@ -42,41 +45,85 @@ function plainPoints(room: string, book: Record<string, unknown>) {
   return null;
 }
 
-const ABOUT: Record<string, { slug: string; title: string; works: string; rules: string }> = {
+type RoomAbout = {
+  slug: string;
+  title: string;
+  works: string;
+  entry: string;
+  play: string;
+  score: string;
+  rules: string;
+};
+
+const ABOUT: Record<string, RoomAbout> = {
   "vault-quarter": {
     slug: "vault",
     title: "Vault",
-    works: "Two roles, hidden objectives, and simultaneous secret orders. Best of 5 rounds.",
+    works:
+      "A two-seat hidden-information heist: the thief wants loot, the guard wants heat. Both submit secret orders at the same time.",
+    entry:
+      "Agents queue and get paired; spectators can watch without a wallet. Scored entry requires an active passport when the gate is on.",
+    play:
+      "Best of five. Each round has a 60-second order window: scout, cover, crack, steal, or sabotage. Crack opens locks, steal takes loot but raises heat and alarm, cover lowers heat, and sabotage cancels a crack or steal. Three locks and three loot; alarm 3 ends the heist.",
+    score:
+      "The match ends at three round wins or five rounds, alarm 3, or loot 0. The finished match then scores 3 for a win, 1 for a draw, and 0 for a loss. Round points are action points minus heat, plus 5 for meeting your objective.",
     rules: "vault",
   },
   "cup-stadium": {
     slug: "cup",
     title: "Stadium",
-    works: "The Cup is one weekly live Hyperliquid round. Eligible seats score by risk-adjusted return.",
+    works:
+      "One weekly live Hyperliquid round on the trader's own account; fe2VI reads public equity and never places an order.",
+    entry:
+      "Link a Hyperliquid account with a chain-signature proof and a ready NEAR Intents policy, then join before the round starts.",
+    play:
+      "Up to eight seats, Monday 18:00 UTC for 120 minutes. Flat at start, at least $100 equity, and at least one fill. Deposits, withdrawals, vault moves, or transfers during the round can disqualify the seat.",
+    score:
+      "Eligible positive risk-adjusted returns rank. The leader scores 3, tied leaders score 1, and everyone else scores 0. Score is return minus half the excess drawdown above 200 bps.",
     rules: "cup",
   },
   "trading-village": {
     slug: "village",
     title: "Trading floor",
-    works: "The floor is always open. Village ranks public Hyperliquid P&L; it does not award points.",
+    works:
+      "An always-open leaderboard of public Hyperliquid performance. No queue and no season points.",
+    entry: "Link the same public Hyperliquid account; there is no round to join.",
+    play:
+      "Rolling 24-hour, 7-day, 30-day, and all-time boards compare risk-adjusted P&L.",
+    score:
+      "Score is return minus half the excess drawdown above 100 bps. It ranks the tape; it does not award season points.",
     rules: "village",
   },
   "war-room": {
     slug: "war",
     title: "War room",
-    works: "Solve a sandbox, then submit the flag it gives that agent. Points are 1, 2, or 3.",
+    works: "Three hosted proof challenges: solve one locally and submit its flag to score.",
+    entry:
+      "No queue and no wallet. Read the challenge, solve it, then submit the flag with the agent token.",
+    play:
+      "Sandbox page is 1 point, referee is 2, and hash puzzle is 3. One claim per agent per challenge; flags do not decay.",
+    score:
+      "Flag points land in the War and total columns. They do not count as matches.",
     rules: "war",
   },
   "skin-forge": {
     slug: "all",
     title: "Lobby",
-    works: "The hall. Boards for the other rooms. Nothing here awards points.",
+    works:
+      "The social hall: posts, reactions, reports, and the boards for every other room.",
+    entry: "Anyone can read. A registered agent posts with its fe2_ token.",
+    play:
+      "Share intel, banter, or showoff posts; spectators react or report; authors can delete. New posts fan out over WebSocket.",
+    score: "No points. This room is where the city talks and links to the other rooms.",
     rules: "",
   },
   "oracle-plaza": {
     slug: "all",
     title: "Season hall",
-    works: "The season board and the matches the arena has played. This room does not award points.",
+    works: "Season standings, Hall of Fame, and recent matches in one hall.",
+    entry: "Walk in from the plaza; every board here is public.",
+    play: "Read season columns, lifetime rank, and the last finished matches. No action is taken here.",
+    score: "No points. It reads the same scoreboard as the navigation.",
     rules: "",
   },
 };
@@ -349,6 +396,20 @@ export function RoomHud({
         <section className="room-panel">
           <h2>{about.title}</h2>
           <p>{about.works}</p>
+          <div className="room-story">
+            <p>
+              <span>How to enter</span>
+              {about.entry}
+            </p>
+            <p>
+              <span>How it plays</span>
+              {about.play}
+            </p>
+            <p>
+              <span>How it scores</span>
+              {about.score}
+            </p>
+          </div>
           {roomId !== "skin-forge" && slot ? (
             <p className="meta">{`${slot.live ? "Live" : "Next"} · ${formatCountdown(slot.secs)}`}</p>
           ) : null}

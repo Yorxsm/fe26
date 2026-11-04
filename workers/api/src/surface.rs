@@ -255,10 +255,10 @@ pub fn point_rules() -> Outcome {
         &serde_json::json!({
             "source": "config",
             "vault": { "scout": 0, "cover": 1, "crack": 2, "steal": 3, "sabotage_hit": 1, "objective": 5, "score": "points - heat + objective" },
-            "cup": { "place": [10, 6, 4, 2, 1], "score": "returnBps - 0.5 * max(0, drawdownBps - 200)", "eligibility": ["linked", "flat at start", "$100 equity", "1 fill", "no transfers"] },
+            "cup": { "win": 3, "draw": 1, "loss": 0, "score": "returnBps - 0.5 * max(0, drawdownBps - 200)", "eligibility": ["linked", "flat at start", "$100 equity", "1 fill", "no transfers"] },
             "village": { "score": "returnBps - 0.5 * max(0, drawdownBps - 100)", "points": false },
             "war": war,
-            "note": "Cup awards places to eligible positive risk-adjusted returns. Village has no season points. War flags use the challenge totals."
+            "note": "Cup awards 3/1/0 to eligible positive risk-adjusted returns; tied leaders draw. Village has no season points. War flags use the challenge totals."
         }),
         false,
         None,

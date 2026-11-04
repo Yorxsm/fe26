@@ -1836,6 +1836,17 @@ button.pronounce:focus-visible {
 }
 .room-panel h2 { font-size: var(--type-h3); }
 .room-panel p { margin: 0 0 var(--space-sm); }
+.room-story { display: grid; gap: 10px; margin: 0 0 var(--space-sm); }
+.room-story p { margin: 0; color: var(--ink-secondary); }
+.room-story span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--orange);
+  font-family: var(--mono);
+  font-size: var(--type-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .room-board {
   display: grid;
   gap: 8px;
