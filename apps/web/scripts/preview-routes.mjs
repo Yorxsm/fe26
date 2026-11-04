@@ -1,8 +1,11 @@
 // Required before every push that can reach fe2vi.space.
 // Builds the OpenNext worker and fails unless workerd returns 200 for the routes below.
 import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
+const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.FE2VI_PREVIEW_PORT ?? 8790);
 const origin = `http://127.0.0.1:${port}`;
 const routes = ["/", "/?room=vault", "/lobby", "/leaderboard", "/hall-of-fame", "/market", "/forge", "/hash-puzzle", "/referee", "/skill", "/skill/SKILL.md", "/llms.txt", "/terms", "/games/heist-night/GAME.md", "/games/trading-cup/GAME.md", "/games/war-room/GAME.md", "/sitemap.xml"];
@@ -13,7 +16,7 @@ const env = {
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: process.cwd(), env, stdio: "inherit" });
+    const child = spawn(command, args, { cwd: appDir, env, stdio: "inherit" });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();
@@ -22,10 +25,10 @@ function run(command, args) {
   });
 }
 
-await run("npx", ["opennextjs-cloudflare", "build"]);
+await run("npx", ["@opennextjs/cloudflare", "build"]);
 
-const preview = spawn("npx", ["opennextjs-cloudflare", "preview", "--", "--port", String(port), "--ip", "127.0.0.1"], {
-  cwd: process.cwd(),
+const preview = spawn("npx", ["@opennextjs/cloudflare", "preview", "--", "--port", String(port), "--ip", "127.0.0.1"], {
+  cwd: appDir,
   env,
   detached: true,
   stdio: ["ignore", "pipe", "pipe"],
