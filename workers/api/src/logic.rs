@@ -37,6 +37,10 @@ pub struct ArenaState {
     pub book: crate::agents::PlayerBook,
     #[serde(default)]
     pub live: crate::live::LiveBook,
+    #[serde(skip)]
+    pub passport_gate: crate::passport::PassportGate,
+    #[serde(skip)]
+    pub passport_mint: bool,
 }
 
 impl Default for ArenaState {
@@ -53,6 +57,8 @@ impl Default for ArenaState {
             grants: Vec::new(),
             book: crate::agents::PlayerBook::default(),
             live: crate::live::LiveBook::default(),
+            passport_gate: crate::passport::PassportGate::default(),
+            passport_mint: true,
         }
     }
 }
@@ -78,7 +84,7 @@ pub struct FeedEvent {
     pub game_id: String,
     pub kind: String,
     pub summary: String,
-    /// True only when this worker read the log from a testnet RPC response.
+    /// True only when this worker read the log from a mainnet RPC response.
     #[serde(default)]
     pub verified: bool,
     #[serde(default = "relay_source")]
@@ -161,6 +167,9 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
     if let Some(outcome) = crate::live::dispatch_live(state, incoming) {
         return outcome;
     }
+    if let Some(outcome) = crate::passport::dispatch(state, incoming) {
+        return outcome;
+    }
     if let Some(outcome) = crate::agents::dispatch_player(state, incoming) {
         return outcome;
     }
@@ -169,7 +178,7 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ("GET", ["health"]) | ("GET", ["v1", "health"]) => http(
             200,
             "application/json",
-            r#"{"ok":true,"network":"testnet"}"#.into(),
+            r#"{"ok":true,"network":"mainnet"}"#.into(),
             false,
             None,
         ),
@@ -447,7 +456,7 @@ fn trust(state: &ArenaState, game: &StoredGame) -> Trust {
             || game.rules.template_id == TEMPLATE_CUP,
         delisted: game.delisted,
         creator_text: "untrusted",
-        network: "testnet",
+        network: "mainnet",
         relay: "unverified",
     }
 }
@@ -458,7 +467,7 @@ fn agent_view(state: &ArenaState, agent: &StoredAgent) -> serde_json::Value {
         "revoked": agent.revoked,
         "allowed_methods": agent.allowed_methods,
         "platform_caps": state.caps,
-        "network": "testnet",
+        "network": "mainnet",
         "relay": "unverified",
         "note": "Caps shown here are the platform caps. A game cannot raise them. Revocation on this relay is unverified until you read the registry view.",
     })

@@ -1,5 +1,5 @@
 //! Venue adapters for the village tape. The mock is the default.
-//! A mainnet host is refused. No adapter in this crate opens a socket.
+//! A testnet host is refused. No adapter in this crate opens a socket.
 
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +7,7 @@ use crate::price::simulated_price_micros;
 
 pub const HYPERLIQUID_TESTNET_INFO: &str = "https://api.hyperliquid-testnet.xyz/info";
 pub const HYPERLIQUID_MAINNET_INFO: &str = "https://api.hyperliquid.xyz/info";
+pub const HYPERLIQUID_INFO: &str = HYPERLIQUID_MAINNET_INFO;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quote {
@@ -87,10 +88,10 @@ pub fn venue_notes() -> &'static [VenueNote] {
     ]
 }
 
-/// Reject a mainnet info host. The testnet host is the only remote this crate names.
-pub fn refuse_mainnet(url: &str) -> Result<(), &'static str> {
-    if url == HYPERLIQUID_MAINNET_INFO || url.contains("://api.hyperliquid.xyz") {
-        return Err("mainnet venue refused");
+/// Reject a testnet info host. Production reads use the mainnet host.
+pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
+    if url.contains("hyperliquid-testnet") {
+        return Err("testnet venue refused");
     }
     Ok(())
 }
@@ -100,14 +101,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mock_is_the_default_and_mainnet_is_refused() {
+    fn mock_is_the_default_and_testnet_is_refused() {
         let venue = default_venue();
         assert_eq!(venue.network(), "mock");
         let quotes = venue.quotes(1_793_116_800);
         assert_eq!(quotes.len(), 4);
         assert!(quotes.iter().any(|quote| quote.kind == "stock"));
-        assert!(refuse_mainnet(HYPERLIQUID_MAINNET_INFO).is_err());
-        assert!(refuse_mainnet(HYPERLIQUID_TESTNET_INFO).is_ok());
+        assert!(refuse_testnet(HYPERLIQUID_TESTNET_INFO).is_err());
+        assert!(refuse_testnet(HYPERLIQUID_MAINNET_INFO).is_ok());
         assert!(venue_notes().iter().all(|note| !note.wired));
     }
 }

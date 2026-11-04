@@ -9,15 +9,17 @@ mod live_edge;
 mod logic;
 #[cfg(target_arch = "wasm32")]
 mod markets;
+mod passport;
 mod skins;
 mod surface;
 mod vault;
 
-pub use indexer::{apply_chain_events, refuse_mainnet};
+pub use indexer::{apply_chain_events, refuse_testnet};
 pub use logic::{dispatch, ingest_allowed, ArenaState, Incoming, Outcome};
 
 #[cfg(target_arch = "wasm32")]
 mod edge {
+    use base64::Engine as _;
     use worker::*;
 
     use crate::indexer;
@@ -183,11 +185,40 @@ mod edge {
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
+            let gate = self
+                .env
+                .var("FE2VI_PASSPORT_GATE")
+                .ok()
+                .map(|value| value.to_string());
+            arena.passport_gate = crate::passport::PassportGate::parse(gate.as_deref());
+            arena.passport_mint = self
+                .env
+                .var("FE2VI_PASSPORT_MINT")
+                .ok()
+                .map(|value| {
+                    !matches!(
+                        value.to_string().trim().to_ascii_lowercase().as_str(),
+                        "off" | "false" | "0"
+                    )
+                })
+                .unwrap_or(true);
             let before_book = {
                 let sql = self.state.storage().sql();
                 attach_player_book(&sql, &mut arena)?
             };
             let route_path = route.split('?').next().unwrap_or(route.as_str());
+            if route_path.starts_with("/v1/internal/passport") {
+                let key = self
+                    .env
+                    .var("FE2VI_PASSPORT_RELAY_KEY")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+                let presented = authorization.clone().unwrap_or_default();
+                if key.trim().is_empty() || presented != format!("Bearer {key}") {
+                    return with_cors(Response::empty()?.with_status(404), "text/plain");
+                }
+            }
             let policy_target = match (method, route_path) {
                 ("POST", "/v1/agents/me/hyperliquid-link") => {
                     let authorized = crate::agents::authed_id(
@@ -266,6 +297,39 @@ mod edge {
                 .map(|value| value.to_string())
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
+            if method == "GET" {
+                if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
+                    if !token_id.is_empty()
+                        && !token_id.contains('/')
+                        && !arena
+                            .book
+                            .passports
+                            .iter()
+                            .any(|passport| passport.token_id.as_deref() == Some(token_id))
+                    {
+                        match passport_chain_view(&self.env, token_id).await {
+                            Ok(Some(view)) => {
+                                let body = crate::passport::chain_passport_json(token_id, &view)
+                                    .to_string();
+                                return with_cors(
+                                    Response::ok(body)?.with_status(200),
+                                    "application/json",
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(_) => {
+                                return with_cors(
+                                    Response::ok(
+                                        r#"{"error":"passport_lookup_unavailable","message":"Could not read the passport contract. Try again."}"#,
+                                    )?
+                                    .with_status(503),
+                                    "application/json",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             crate::logic::set_request_war_secret(war_secret);
             let outcome = dispatch(
                 &mut arena,
@@ -337,10 +401,10 @@ mod edge {
                 .var("FE2VI_RPC_URL")
                 .ok()
                 .map(|value| value.to_string())
-                .unwrap_or_else(|| "https://rpc.testnet.near.org".to_string());
-            if indexer::refuse_mainnet(&rpc).is_err() {
+                .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
+            if indexer::refuse_testnet(&rpc).is_err() {
                 return with_cors(
-                    Response::ok(r#"{"ok":false,"error":"mainnet rpc refused"}"#)?.with_status(400),
+                    Response::ok(r#"{"ok":false,"error":"testnet rpc refused"}"#)?.with_status(400),
                     "application/json",
                 );
             }
@@ -424,7 +488,7 @@ mod edge {
                 "indexed_height": arena.indexed_height,
                 "live_synced": synced,
                 "policy_revalidated": policy_revalidated,
-                "network": "testnet",
+                "network": "mainnet",
             })
             .to_string();
             with_cors(Response::ok(body)?, "application/json")
@@ -442,6 +506,8 @@ mod edge {
             "CREATE TABLE IF NOT EXISTS player_war_claims (agent_id TEXT NOT NULL, challenge_id TEXT NOT NULL, stage TEXT NOT NULL, points INTEGER NOT NULL, unix INTEGER NOT NULL, proof_hash TEXT NOT NULL, intent TEXT, PRIMARY KEY (agent_id, challenge_id))",
             "CREATE TABLE IF NOT EXISTS player_lobby_posts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, topic TEXT NOT NULL, body TEXT NOT NULL, match_id TEXT, unix INTEGER NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, reports_json TEXT NOT NULL DEFAULT '[]')",
             "CREATE TABLE IF NOT EXISTS player_reactions (target_type TEXT NOT NULL, target_id TEXT NOT NULL, viewer_id TEXT NOT NULL, reaction TEXT NOT NULL, unix INTEGER NOT NULL, PRIMARY KEY (target_type, target_id, viewer_id))",
+            "CREATE TABLE IF NOT EXISTS player_passports (passport_id TEXT PRIMARY KEY, token_id TEXT UNIQUE, agent_id TEXT NOT NULL, owner_near TEXT NOT NULL, creator_near TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, updated_unix INTEGER NOT NULL, last_sync_seq INTEGER NOT NULL DEFAULT 0)",
+            "CREATE TABLE IF NOT EXISTS player_passport_jobs (job_id TEXT PRIMARY KEY, kind TEXT NOT NULL, passport_id TEXT NOT NULL, agent_id TEXT NOT NULL, owner_near TEXT NOT NULL, agent_near TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_unix INTEGER NOT NULL, updated_unix INTEGER NOT NULL)",
         ] {
             sql.exec(statement, None::<Vec<worker::SqlStorageValue>>)?;
         }
@@ -612,6 +678,31 @@ mod edge {
             match_id: String,
             created_unix: i64,
         }
+        #[derive(serde::Deserialize)]
+        struct PassportRow {
+            passport_id: String,
+            token_id: Option<String>,
+            agent_id: String,
+            owner_near: String,
+            creator_near: String,
+            status: String,
+            created_unix: i64,
+            updated_unix: i64,
+            last_sync_seq: i64,
+        }
+        #[derive(serde::Deserialize)]
+        struct PassportJobRow {
+            job_id: String,
+            kind: String,
+            passport_id: String,
+            agent_id: String,
+            owner_near: String,
+            agent_near: String,
+            status: String,
+            attempts: i64,
+            created_unix: i64,
+            updated_unix: i64,
+        }
         let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let tokens = sql
             .exec(
@@ -671,6 +762,18 @@ mod edge {
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<SeenRow>()?;
+        let passports = sql
+            .exec(
+                "SELECT passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq FROM player_passports",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<PassportRow>()?;
+        let passport_jobs = sql
+            .exec(
+                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix FROM player_passport_jobs",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<PassportJobRow>()?;
         Ok(Some(crate::agents::PlayerBook {
             players: players
                 .into_iter()
@@ -773,6 +876,35 @@ mod edge {
                     created_unix: row.created_unix.max(0) as u64,
                 })
                 .collect(),
+            passports: passports
+                .into_iter()
+                .map(|row| crate::agents::Passport {
+                    passport_id: row.passport_id,
+                    token_id: row.token_id,
+                    agent_id: row.agent_id,
+                    owner_near: row.owner_near,
+                    creator_near: row.creator_near,
+                    status: row.status,
+                    created_unix: row.created_unix.max(0) as u64,
+                    updated_unix: row.updated_unix.max(0) as u64,
+                    last_sync_seq: row.last_sync_seq.max(0) as u64,
+                })
+                .collect(),
+            passport_jobs: passport_jobs
+                .into_iter()
+                .map(|row| crate::agents::PassportJob {
+                    job_id: row.job_id,
+                    kind: row.kind,
+                    passport_id: row.passport_id,
+                    agent_id: row.agent_id,
+                    owner_near: row.owner_near,
+                    agent_near: row.agent_near,
+                    status: row.status,
+                    attempts: u32::try_from(row.attempts.max(0)).unwrap_or(0),
+                    created_unix: row.created_unix.max(0) as u64,
+                    updated_unix: row.updated_unix.max(0) as u64,
+                })
+                .collect(),
         }))
     }
 
@@ -829,6 +961,18 @@ mod edge {
                     target_id.clone().into(),
                     viewer_id.clone().into(),
                 ]),
+            )?;
+        }
+        for passport_id in &plan.delete_passport_ids {
+            sql.exec(
+                "DELETE FROM player_passports WHERE passport_id = ?",
+                Some(vec![passport_id.clone().into()]),
+            )?;
+        }
+        for job_id in &plan.delete_passport_job_ids {
+            sql.exec(
+                "DELETE FROM player_passport_jobs WHERE job_id = ?",
+                Some(vec![job_id.clone().into()]),
             )?;
         }
         for agent_id in &plan.delete_player_ids {
@@ -973,6 +1117,39 @@ mod edge {
                 ]),
             )?;
         }
+        for row in &plan.upsert_passports {
+            sql.exec(
+                "INSERT INTO player_passports (passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(passport_id) DO UPDATE SET token_id = excluded.token_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, creator_near = excluded.creator_near, status = excluded.status, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, last_sync_seq = excluded.last_sync_seq",
+                Some(vec![
+                    row.passport_id.clone().into(),
+                    row.token_id.clone().into(),
+                    row.agent_id.clone().into(),
+                    row.owner_near.clone().into(),
+                    row.creator_near.clone().into(),
+                    row.status.clone().into(),
+                    (row.created_unix as i64).into(),
+                    (row.updated_unix as i64).into(),
+                    (row.last_sync_seq as i64).into(),
+                ]),
+            )?;
+        }
+        for row in &plan.upsert_passport_jobs {
+            sql.exec(
+                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix",
+                Some(vec![
+                    row.job_id.clone().into(),
+                    row.kind.clone().into(),
+                    row.passport_id.clone().into(),
+                    row.agent_id.clone().into(),
+                    row.owner_near.clone().into(),
+                    row.agent_near.clone().into(),
+                    row.status.clone().into(),
+                    (row.attempts as i64).into(),
+                    (row.created_unix as i64).into(),
+                    (row.updated_unix as i64).into(),
+                ]),
+            )?;
+        }
         Ok(())
     }
 
@@ -985,9 +1162,9 @@ mod edge {
                     .map(|value| value.to_string())
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| match name {
-                        "FE2VI_FACTORY_ID" => "factory.fe2vi.testnet".to_string(),
-                        "FE2VI_REGISTRY_ID" => "registry.fe2vi.testnet".to_string(),
-                        _ => "heist.fe2vi.testnet".to_string(),
+                        "FE2VI_FACTORY_ID" => "factory.fe2vi.near".to_string(),
+                        "FE2VI_REGISTRY_ID" => "registry.fe2vi.near".to_string(),
+                        _ => "heist.fe2vi.near".to_string(),
                     })
             })
             .collect()
@@ -1015,6 +1192,54 @@ mod edge {
         let mut response = Fetch::Request(request).send().await?;
         let text = response.text().await?;
         serde_json::from_str(&text).map_err(|err| Error::RustError(err.to_string()))
+    }
+
+    async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
+        let rpc = env
+            .var("FE2VI_RPC_URL")
+            .ok()
+            .map(|value| value.to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
+        indexer::refuse_testnet(&rpc).map_err(|message| Error::RustError(message.to_string()))?;
+        let account_id = env
+            .var("FE2VI_PASSPORT_ID")
+            .ok()
+            .map(|value| value.to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "passport.fe2vi.near".to_string());
+        let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
+            .map_err(|err| Error::RustError(err.to_string()))?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(args);
+        let response = rpc_call(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "view",
+                "finality": "final",
+                "account_id": account_id,
+                "method_name": "passport",
+                "args_base64": encoded,
+            }),
+        )
+        .await?;
+        if !response["result"]["error"].is_null() {
+            return Ok(None);
+        }
+        let Some(rows) = response["result"]["result"].as_array() else {
+            return Ok(None);
+        };
+        let bytes: Vec<u8> = rows
+            .iter()
+            .filter_map(serde_json::Value::as_u64)
+            .map(|value| value as u8)
+            .collect();
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|err| Error::RustError(err.to_string()))
     }
 
     fn socket_tag(game_id: &str) -> String {

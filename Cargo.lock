@@ -783,6 +783,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 name = "fe2vi-api"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "fe2vi-core",
  "fe2vi-intents",
  "fe2vi-market",
@@ -1937,6 +1938,22 @@ dependencies = [
  "num-traits",
  "rand 0.8.8",
  "serde",
+]
+
+[[package]]
+name = "passport"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "near-sdk",
+]
+
+[[package]]
+name = "passport-market"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "near-sdk",
 ]
 
 [[package]]

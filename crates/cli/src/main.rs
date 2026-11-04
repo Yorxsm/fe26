@@ -1,5 +1,5 @@
-//! Testnet-only CLI. Signing keys are read from the environment, never from
-//! the repository. With no key, every command prints the transaction it would
+//! Mainnet CLI. Signing keys are read from the environment, never from the
+//! repository. With no key, every command prints the transaction it would
 //! submit and does not broadcast.
 
 mod tx;
@@ -9,17 +9,20 @@ use std::time::Duration;
 
 use base64::Engine;
 use clap::{Parser, Subcommand};
-use fe2vi_core::{default_platform_caps, MIN_AGENT_DEPOSIT_YOCTO};
+use fe2vi_core::{default_platform_caps, MIN_AGENT_DEPOSIT_YOCTO, ONE_NEAR};
 use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS};
 
 use crate::tx::SignedCall;
 
-const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
-const DEFAULT_REGISTRY: &str = "registry.fe2vi.testnet";
-const DEFAULT_HEIST: &str = "heist.fe2vi.testnet";
+const DEFAULT_RPC: &str = "https://rpc.mainnet.near.org";
+const DEFAULT_REGISTRY: &str = "registry.fe2vi.near";
+const DEFAULT_HEIST: &str = "heist.fe2vi.near";
+const DEFAULT_PASSPORT: &str = "passport.fe2vi.near";
+const DEFAULT_PASSPORT_MARKET: &str = "passport-market.fe2vi.near";
+const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
 
 #[derive(Parser, Debug)]
-#[command(name = "fe2vi", about = "fe2VI arena tools for NEAR testnet")]
+#[command(name = "fe2vi", about = "fe2VI arena tools for NEAR mainnet")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -35,6 +38,90 @@ enum IntentsCommand {
         game: String,
         #[arg(long)]
         agent: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PassportCommand {
+    /// Registry mints a passport and binds it to an agent id.
+    Mint {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Registry binds an unbound passport to an agent id.
+    Bind {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Owner unbinds the agent from their passport.
+    Unbind {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Claim mint/bind jobs from the API and broadcast them as the registry.
+    Relay {
+        #[arg(long)]
+        once: bool,
+    },
+    /// Mint launch stock to one owner and list each token on the market.
+    Seed {
+        #[arg(long, default_value_t = 100)]
+        count: u32,
+        /// Price in NEAR. Defaults to 1 NEAR.
+        #[arg(long, default_value = "1")]
+        price: String,
+        /// Owner and creator of every launch passport. Defaults to FE2VI_ACCOUNT_ID.
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long, default_value = "fdr")]
+        prefix: String,
+        #[arg(long, default_value_t = 1)]
+        start: u32,
+        #[arg(long)]
+        mint_only: bool,
+        #[arg(long)]
+        list_only: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Approve the market to list one passport at a fixed NEAR price.
+    List {
+        #[arg(long)]
+        token_id: String,
+        /// Price in NEAR. Defaults to 1 NEAR.
+        #[arg(long, default_value = "1")]
+        price: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Cancel a market listing. The signer must be the seller.
+    Cancel {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Buy a listed passport from the market. The signer is the buyer.
+    Buy {
+        #[arg(long)]
+        token_id: String,
+        /// Price in NEAR. Defaults to 1 NEAR.
+        #[arg(long, default_value = "1")]
+        price: String,
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -57,6 +144,11 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Mint, bind, or unbind a passport. The signer must be the registry or owner.
+    Passport {
+        #[command(subcommand)]
+        action: PassportCommand,
+    },
     /// Show the Intents policy sketch. Does not call the network or print a secret.
     Intents {
         #[command(subcommand)]
@@ -78,7 +170,10 @@ struct Config {
     signer_secret: Option<String>,
     registry_id: String,
     heist_id: String,
+    passport_id: String,
+    passport_market_id: String,
     api_url: Option<String>,
+    relay_key: Option<String>,
 }
 
 fn main() {
@@ -104,7 +199,14 @@ fn config_from_env() -> Config {
         registry_id: std::env::var("FE2VI_REGISTRY_ID")
             .unwrap_or_else(|_| DEFAULT_REGISTRY.to_string()),
         heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
+        passport_id: std::env::var("FE2VI_PASSPORT_ID")
+            .unwrap_or_else(|_| DEFAULT_PASSPORT.to_string()),
+        passport_market_id: std::env::var("FE2VI_PASSPORT_MARKET_ID")
+            .unwrap_or_else(|_| DEFAULT_PASSPORT_MARKET.to_string()),
         api_url: std::env::var("FE2VI_API_URL")
+            .ok()
+            .filter(|value| !value.is_empty()),
+        relay_key: std::env::var("FE2VI_PASSPORT_RELAY_KEY")
             .ok()
             .filter(|value| !value.is_empty()),
     }
@@ -142,16 +244,52 @@ fn intents(action: IntentsCommand) -> Result<String, String> {
     }
 }
 
-fn assert_testnet(rpc_url: &str) -> Result<(), String> {
-    if rpc_url.to_ascii_lowercase().contains("mainnet") {
-        Err("refusing mainnet RPC; fe2VI foundation is testnet-only".into())
+fn assert_mainnet(rpc_url: &str) -> Result<(), String> {
+    if rpc_url.to_ascii_lowercase().contains("testnet") {
+        Err("refusing testnet RPC; fe2VI launches on mainnet".into())
     } else {
         Ok(())
     }
 }
 
+fn near_to_yocto(value: &str) -> Result<u128, String> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') {
+        return Err("price must be a positive NEAR amount".into());
+    }
+    let (whole, frac) = match value.split_once('.') {
+        Some((whole, frac)) => (whole, frac),
+        None => (value, ""),
+    };
+    if frac.len() > 24
+        || !whole.chars().all(|c| c.is_ascii_digit())
+        || !frac.chars().all(|c| c.is_ascii_digit())
+    {
+        return Err("price must be a decimal NEAR amount".into());
+    }
+    let whole: u128 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().map_err(|_| "price overflow")?
+    };
+    let mut padded = frac.to_string();
+    while padded.len() < 24 {
+        padded.push('0');
+    }
+    let frac: u128 = if padded.is_empty() {
+        0
+    } else {
+        padded.parse().map_err(|_| "price overflow")?
+    };
+    whole
+        .checked_mul(ONE_NEAR)
+        .and_then(|v| v.checked_add(frac))
+        .filter(|v| *v > 0)
+        .ok_or_else(|| "price overflow".to_string())
+}
+
 fn run(config: &Config, command: Command) -> Result<String, String> {
-    assert_testnet(&config.rpc_url)?;
+    assert_mainnet(&config.rpc_url)?;
     match command {
         Command::RegisterAgent {
             name,
@@ -181,9 +319,408 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
                 50_000_000_000_000,
             )
         }
+        Command::Passport { action } => match action {
+            PassportCommand::Mint {
+                token_id,
+                owner,
+                agent_id,
+                dry_run,
+            } => {
+                let args = serde_json::json!({
+                    "token_id": token_id,
+                    "owner": owner,
+                    "agent_id": agent_id,
+                });
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_id,
+                    "mint",
+                    &args,
+                    PASSPORT_MINT_DEPOSIT_YOCTO,
+                    80_000_000_000_000,
+                )
+            }
+            PassportCommand::Bind {
+                token_id,
+                agent_id,
+                dry_run,
+            } => {
+                let args = serde_json::json!({ "token_id": token_id, "agent_id": agent_id });
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_id,
+                    "bind",
+                    &args,
+                    0,
+                    50_000_000_000_000,
+                )
+            }
+            PassportCommand::Unbind { token_id, dry_run } => {
+                let args = serde_json::json!({ "token_id": token_id });
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_id,
+                    "unbind",
+                    &args,
+                    0,
+                    50_000_000_000_000,
+                )
+            }
+            PassportCommand::Seed {
+                count,
+                price,
+                owner,
+                prefix,
+                start,
+                mint_only,
+                list_only,
+                dry_run,
+            } => seed(
+                config,
+                count,
+                &price,
+                owner.as_deref(),
+                &prefix,
+                start,
+                mint_only,
+                list_only,
+                dry_run,
+            ),
+            PassportCommand::List {
+                token_id,
+                price,
+                dry_run,
+            } => {
+                let price = near_to_yocto(&price)?;
+                let msg = serde_json::to_string(&serde_json::json!({
+                    "market_type": "sale",
+                    "price": price.to_string(),
+                    "ft_token_id": "near",
+                }))
+                .map_err(|err| err.to_string())?;
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_id,
+                    "nft_approve",
+                    &serde_json::json!({
+                        "token_id": token_id,
+                        "account_id": config.passport_market_id,
+                        "msg": msg,
+                    }),
+                    PASSPORT_MINT_DEPOSIT_YOCTO,
+                    50_000_000_000_000,
+                )
+            }
+            PassportCommand::Cancel { token_id, dry_run } => submit(
+                config,
+                dry_run,
+                &config.passport_market_id,
+                "cancel",
+                &serde_json::json!({ "token_id": token_id }),
+                0,
+                30_000_000_000_000,
+            ),
+            PassportCommand::Buy {
+                token_id,
+                price,
+                dry_run,
+            } => {
+                let price = near_to_yocto(&price)?;
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_market_id,
+                    "buy",
+                    &serde_json::json!({ "token_id": token_id }),
+                    price,
+                    80_000_000_000_000,
+                )
+            }
+            PassportCommand::Relay { once } => relay(config, once),
+        },
         Command::Intents { action } => intents(action),
         Command::Watch { game_id, once } => watch(config, &game_id, once),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seed(
+    config: &Config,
+    count: u32,
+    price: &str,
+    owner: Option<&str>,
+    prefix: &str,
+    start: u32,
+    mint_only: bool,
+    list_only: bool,
+    dry_run: bool,
+) -> Result<String, String> {
+    if mint_only && list_only {
+        return Err("--mint-only and --list-only are mutually exclusive".into());
+    }
+    if count == 0 {
+        return Err("count must be positive".into());
+    }
+    if !dry_run {
+        config
+            .signer_secret
+            .as_deref()
+            .ok_or("FE2VI_SIGNER_SECRET_KEY is required to broadcast")?;
+        config
+            .account_id
+            .as_deref()
+            .ok_or("FE2VI_ACCOUNT_ID is required to broadcast")?;
+    }
+    let owner = owner
+        .map(str::to_string)
+        .or_else(|| config.account_id.clone())
+        .ok_or("--owner or FE2VI_ACCOUNT_ID is required")?;
+    let price_yocto = near_to_yocto(price)?;
+    let ids: Vec<String> = (0..count)
+        .map(|offset| format!("{prefix}_{:03}", start.saturating_add(offset)))
+        .collect();
+    let mint_batches = ids.chunks(25).count();
+    let total_deposit = PASSPORT_MINT_DEPOSIT_YOCTO.saturating_mul(u128::from(count));
+    if dry_run {
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "network": "mainnet",
+            "dry_run": true,
+            "passport_id": config.passport_id,
+            "market_id": config.passport_market_id,
+            "owner": owner,
+            "count": count,
+            "price_near": price,
+            "price_yocto": price_yocto.to_string(),
+            "token_ids": if count <= 10 { serde_json::json!(ids) } else {
+                serde_json::json!({ "first": ids.first(), "last": ids.last() })
+            },
+            "mint_batches": if list_only { 0 } else { mint_batches },
+            "mint_deposit_yocto": total_deposit.to_string(),
+            "listing_deposit_yocto": if mint_only {
+                "0".to_string()
+            } else {
+                PASSPORT_MINT_DEPOSIT_YOCTO
+                    .saturating_mul(u128::from(count))
+                    .to_string()
+            },
+            "approvals": if mint_only { 0 } else { count },
+        }))
+        .unwrap_or_else(|_| "{}".into()));
+    }
+    let mut minted = 0u32;
+    let mut listed = 0u32;
+    if !list_only {
+        for chunk in ids.chunks(25) {
+            let deposit = PASSPORT_MINT_DEPOSIT_YOCTO.saturating_mul(chunk.len() as u128);
+            let args = serde_json::json!({
+                "token_ids": chunk,
+                "owner": owner,
+            });
+            submit(
+                config,
+                false,
+                &config.passport_id,
+                "mint_unbound_batch",
+                &args,
+                deposit,
+                300_000_000_000_000,
+            )?;
+            minted = minted.saturating_add(chunk.len() as u32);
+        }
+    }
+    if !mint_only {
+        let msg = serde_json::to_string(&serde_json::json!({
+            "market_type": "sale",
+            "price": price_yocto.to_string(),
+            "ft_token_id": "near",
+        }))
+        .map_err(|err| err.to_string())?;
+        for token_id in &ids {
+            let args = serde_json::json!({
+                "token_id": token_id,
+                "account_id": config.passport_market_id,
+                "msg": msg,
+            });
+            submit(
+                config,
+                false,
+                &config.passport_id,
+                "nft_approve",
+                &args,
+                PASSPORT_MINT_DEPOSIT_YOCTO,
+                50_000_000_000_000,
+            )?;
+            listed = listed.saturating_add(1);
+        }
+    }
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "network": "mainnet",
+        "broadcast": true,
+        "owner": owner,
+        "minted": minted,
+        "listed": listed,
+        "price_near": price,
+        "price_yocto": price_yocto.to_string(),
+        "market_id": config.passport_market_id,
+    }))
+    .unwrap_or_else(|_| "{}".into()))
+}
+
+fn relay(config: &Config, once: bool) -> Result<String, String> {
+    let api = config
+        .api_url
+        .as_deref()
+        .ok_or("FE2VI_API_URL is required to relay")?
+        .trim_end_matches('/')
+        .to_string();
+    let key = config
+        .relay_key
+        .as_deref()
+        .ok_or("FE2VI_PASSPORT_RELAY_KEY is required to relay")?;
+    let client = reqwest::blocking::Client::new();
+    loop {
+        let claimed = api_post(
+            &client,
+            &format!("{api}/v1/internal/passport/jobs/claim"),
+            key,
+            &serde_json::json!({ "limit": 10 }),
+        )?;
+        let jobs = claimed["jobs"].as_array().cloned().unwrap_or_default();
+        if jobs.is_empty() {
+            if once {
+                return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                    "ok": true,
+                    "processed": 0,
+                }))
+                .unwrap_or_else(|_| "{}".into()));
+            }
+            thread::sleep(Duration::from_secs(5));
+            continue;
+        }
+        let mut processed = 0_u64;
+        let mut failed = 0_u64;
+        for job in &jobs {
+            let job_id = job["jobId"].as_str().unwrap_or_default();
+            let kind = job["kind"].as_str().unwrap_or_default();
+            let token_id = job["tokenId"].as_str().unwrap_or_default();
+            let owner = job["ownerNear"].as_str().unwrap_or_default();
+            let agent_id = job["agentId"].as_str().unwrap_or_default();
+            let result = match kind {
+                "mint" => submit(
+                    config,
+                    false,
+                    &config.passport_id,
+                    "mint",
+                    &serde_json::json!({
+                        "token_id": token_id,
+                        "owner": owner,
+                        "agent_id": agent_id,
+                    }),
+                    PASSPORT_MINT_DEPOSIT_YOCTO,
+                    80_000_000_000_000,
+                ),
+                "bind" => match nft_owner(config, token_id) {
+                    Ok(on_chain) if on_chain == owner => submit(
+                        config,
+                        false,
+                        &config.passport_id,
+                        "bind",
+                        &serde_json::json!({ "token_id": token_id, "agent_id": agent_id }),
+                        0,
+                        50_000_000_000_000,
+                    ),
+                    Ok(on_chain) => Err(format!(
+                        "owner mismatch for {token_id}: chain owner is {on_chain}, job owner is {owner}"
+                    )),
+                    Err(err) => Err(err),
+                },
+                "unbind" => {
+                    Err("unbind needs the owner's wallet signature, not the registry".into())
+                }
+                other => Err(format!("unknown passport job kind: {other}")),
+            };
+            let (status, tx_hash, error, token) = match result {
+                Ok(output) => {
+                    let receipt: serde_json::Value =
+                        serde_json::from_str(&output).unwrap_or(serde_json::Value::Null);
+                    let hash = receipt["result"]["transaction"]["hash"]
+                        .as_str()
+                        .map(str::to_string);
+                    if receipt["broadcast"].as_bool().unwrap_or(false) {
+                        processed += 1;
+                        ("done", hash, None, token_id.to_string())
+                    } else {
+                        failed += 1;
+                        (
+                            "failed",
+                            None,
+                            Some("relay did not broadcast".to_string()),
+                            token_id.to_string(),
+                        )
+                    }
+                }
+                Err(err) => {
+                    failed += 1;
+                    ("failed", None, Some(err), token_id.to_string())
+                }
+            };
+            let mut complete = serde_json::json!({
+                "status": status,
+                "tokenId": token,
+            });
+            if let Some(hash) = tx_hash {
+                complete["txHash"] = serde_json::json!(hash);
+            }
+            if let Some(error) = error {
+                complete["error"] = serde_json::json!(error);
+            }
+            if let Err(err) = api_post(
+                &client,
+                &format!("{api}/v1/internal/passport/jobs/{job_id}/complete"),
+                key,
+                &complete,
+            ) {
+                eprintln!("complete {job_id} failed: {err}");
+            }
+        }
+        let summary = serde_json::json!({
+            "ok": failed == 0,
+            "processed": processed,
+            "failed": failed,
+        });
+        if once {
+            return Ok(serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "{}".into()));
+        }
+        println!(
+            "{}",
+            serde_json::to_string(&summary).unwrap_or_else(|_| "{}".into())
+        );
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn api_post(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    key: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(url)
+        .bearer_auth(key)
+        .json(body)
+        .send()
+        .map_err(|err| format!("api request failed: {err}"))?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}: {text}"));
+    }
+    serde_json::from_str(&text).map_err(|err| format!("api body: {err}"))
 }
 
 fn submit(
@@ -196,7 +733,7 @@ fn submit(
     gas: u64,
 ) -> Result<String, String> {
     let mut preview = serde_json::json!({
-        "network": "testnet",
+        "network": "mainnet",
         "rpc_url": config.rpc_url,
         "account_id": config.account_id,
         "receiver_id": receiver_id,
@@ -275,6 +812,38 @@ fn chain_head(rpc_url: &str, account_id: &str, secret: &str) -> Result<(u64, Str
     Ok((nonce, hash))
 }
 
+fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
+    let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
+        .map_err(|err| err.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(args);
+    let response = rpc(
+        &config.rpc_url,
+        "query",
+        serde_json::json!({
+            "request_type": "view",
+            "finality": "final",
+            "account_id": config.passport_id,
+            "method_name": "nft_token",
+            "args_base64": encoded,
+        }),
+    )?;
+    if !response["result"]["error"].is_null() {
+        return Err(format!("nft_token: {}", response["result"]["error"]));
+    }
+    let bytes = response["result"]["result"]
+        .as_array()
+        .ok_or("nft_token: missing result")?
+        .iter()
+        .map(|value| value.as_u64().unwrap_or_default() as u8)
+        .collect::<Vec<u8>>();
+    let token: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|err| format!("nft_token body: {err}"))?;
+    token["owner_id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "nft_token: missing owner_id".to_string())
+}
+
 fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -350,10 +919,19 @@ mod tests {
     use near_primitives::transaction::SignedTransaction;
 
     #[test]
-    fn refuses_mainnet() {
-        let err = assert_testnet("https://rpc.mainnet.near.org").unwrap_err();
-        assert!(err.contains("testnet-only"));
-        assert_testnet("https://rpc.testnet.near.org").unwrap();
+    fn refuses_testnet() {
+        let err = assert_mainnet("https://rpc.testnet.near.org").unwrap_err();
+        assert!(err.contains("mainnet"));
+        assert_mainnet("https://rpc.mainnet.near.org").unwrap();
+    }
+
+    #[test]
+    fn parses_near_prices_exactly() {
+        assert_eq!(near_to_yocto("1").unwrap(), ONE_NEAR);
+        assert_eq!(near_to_yocto("0.5").unwrap(), ONE_NEAR / 2);
+        assert!(near_to_yocto("0").is_err());
+        assert!(near_to_yocto("-1").is_err());
+        assert!(near_to_yocto("1.0000000000000000000000001").is_err());
     }
 
     #[test]

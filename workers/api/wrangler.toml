@@ -43,12 +43,20 @@ namespace_id = "1003"
 simple = { limit = 300, period = 60 }
 
 [vars]
-FE2VI_NETWORK = "testnet"
-FE2VI_RPC_URL = "https://rpc.testnet.near.org"
-FE2VI_FACTORY_ID = "factory.fe2vi.testnet"
-FE2VI_REGISTRY_ID = "registry.fe2vi.testnet"
-FE2VI_HEIST_ID = "heist.fe2vi.testnet"
-# Deployed to api.fe2vi.space (see routes above). Testnet only.
+FE2VI_NETWORK = "mainnet"
+FE2VI_RPC_URL = "https://rpc.mainnet.near.org"
+FE2VI_FACTORY_ID = "factory.fe2vi.near"
+FE2VI_REGISTRY_ID = "registry.fe2vi.near"
+FE2VI_HEIST_ID = "heist.fe2vi.near"
+FE2VI_PASSPORT_ID = "passport.fe2vi.near"
+FE2VI_PASSPORT_MARKET_ID = "passport-market.fe2vi.near"
+# off | warn | on. Keep off until legacy agents have passports.
+FE2VI_PASSPORT_GATE = "off"
+# Launch stock is pre-minted and listed at 1 NEAR. Agents buy, not mint.
+FE2VI_PASSPORT_MINT = "off"
+# FE2VI_PASSPORT_RELAY_KEY is a secret: `wrangler secret put FE2VI_PASSPORT_RELAY_KEY`.
+# The CLI relay uses the same value in its environment.
+# Deployed to api.fe2vi.space (see routes above). Mainnet.
 # The Intents partner key is a secret. Do not put it in [vars].
 # It is used only for the read-only policy check at link time. Execution calls stay off.
 FE2VI_INTENTS_LIVE = "0"

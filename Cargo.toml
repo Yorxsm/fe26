@@ -12,6 +12,8 @@ members = [
     "contracts/war-room",
     "contracts/skin-forge",
     "contracts/mock-market",
+    "contracts/passport",
+    "contracts/passport-market",
     "workers/api",
 ]
 

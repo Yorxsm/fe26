@@ -50,8 +50,8 @@ pub use types::{
     TEMPLATE_CUP, TEMPLATE_HEIST,
 };
 pub use venue::{
-    default_venue, refuse_mainnet, venue_notes, MockVenue, Quote, Venue, VenueNote,
-    HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,
+    default_venue, refuse_testnet, venue_notes, MockVenue, Quote, Venue, VenueNote,
+    HYPERLIQUID_INFO, HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,
 };
 pub use village::{
     demo_tape, demo_tape_at, districts, follow, leaderboard, unfollow, District, Fill, FollowEdge,

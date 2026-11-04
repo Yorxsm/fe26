@@ -779,6 +779,9 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
     let Some(link) = state.live.link(&agent_id).cloned() else {
         return fail(
             403,
@@ -1128,6 +1131,18 @@ fn village_rows(state: &ArenaState, window: &str) -> Option<Vec<serde_json::Valu
         .village
         .iter()
         .filter(|row| row.window == key)
+        .filter(|row| {
+            if state.passport_gate != crate::passport::PassportGate::On {
+                return true;
+            }
+            state
+                .book
+                .players
+                .iter()
+                .find(|player| player.handle == row.handle)
+                .map(|player| crate::passport::active_for_agent(state, &player.agent_id))
+                .unwrap_or(false)
+        })
         .collect();
     rows.sort_by(|left, right| {
         right

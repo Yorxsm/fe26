@@ -1,3 +1,5 @@
+> Historical: skins are not part of the passport launch. The current launch uses mainnet passports.
+
 # Skins
 
 A skin is paint. It does not change caps, scoring, or who may act. The mint price is 1 NEAR on testnet, storage included. The registry is the only account that may call `mint_skin`. This repo does not deploy the contract and does not hold keys.

@@ -2,8 +2,10 @@
 # Leave the ingest token empty for an open relay. Every response is labeled unverified.
 # Set a token only in your local file or with `wrangler secret put`. Do not commit it.
 
-FE2VI_NETWORK=testnet
+FE2VI_NETWORK=mainnet
 FE2VI_INGEST_TOKEN=
+# Relay shared secret. Empty disables /v1/internal/passport/*. Set with `wrangler secret put`.
+FE2VI_PASSPORT_RELAY_KEY=
 # Intents partner key is a Wrangler secret, not a var. The Worker uses it only to read policy status.
 # Leave empty here to disable live linking.
 NEAR_INTENTS_AGENT_API_KEY=

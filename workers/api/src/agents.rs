@@ -33,6 +33,43 @@ pub struct PlayerBook {
     pub lobby: Vec<LobbyPost>,
     #[serde(default)]
     pub reactions: Vec<Reaction>,
+    #[serde(default)]
+    pub passports: Vec<Passport>,
+    #[serde(default)]
+    pub passport_jobs: Vec<PassportJob>,
+}
+
+/// Off-chain mirror of one passport NFT. The chain is authoritative; this row
+/// lets the arena gate scored entry points without an RPC call per request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Passport {
+    pub passport_id: String,
+    #[serde(default)]
+    pub token_id: Option<String>,
+    pub agent_id: String,
+    pub owner_near: String,
+    pub creator_near: String,
+    pub status: String,
+    pub created_unix: u64,
+    pub updated_unix: u64,
+    #[serde(default)]
+    pub last_sync_seq: u64,
+}
+
+/// Work queue for the passport relay. Jobs are written by the API and claimed
+/// by the signer; the API never holds a NEAR private key.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PassportJob {
+    pub job_id: String,
+    pub kind: String,
+    pub passport_id: String,
+    pub agent_id: String,
+    pub owner_near: String,
+    pub agent_near: String,
+    pub status: String,
+    pub attempts: u32,
+    pub created_unix: u64,
+    pub updated_unix: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -328,6 +365,9 @@ pub fn registered_rows(
         .players
         .iter()
         .filter_map(|player| {
+            if !crate::passport::scored(state, &player.agent_id) {
+                return None;
+            }
             let scores = room_scores(state, &player.agent_id, now, window);
             let (points, games, wins) = match room {
                 Some(PointRoom::Vault) => (scores.vault, scores.vault_games, scores.vault_wins),
@@ -927,6 +967,9 @@ fn agent_index(state: &ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome
         .players
         .iter()
         .filter_map(|player| {
+            if !crate::passport::scored(state, &player.agent_id) {
+                return None;
+            }
             let scores = room_scores(state, &player.agent_id, now, BoardWindow::All);
             if scores.total == 0 {
                 return None;
@@ -1003,6 +1046,9 @@ fn submit_war(
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
     let body: WarSubmitBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
         Err(_) => return fail(400, "validation_error", "Send proof and clientRequestId."),
@@ -1635,6 +1681,9 @@ fn join_queue(
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
     if state.book.matches.iter().any(|play| {
         play.status == "live"
             && play.arena_id == arena_id
@@ -2039,6 +2088,9 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
     let body: ActionBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
         Err(_) => {
@@ -2939,6 +2991,12 @@ fn openapi() -> String {
             "/v1/accounts/hyperliquid": { "get": { "operationId": "hyperliquidAccount" } },
             "/v1/agents": { "get": { "operationId": "agents" } },
             "/v1/agents/{handle}": { "get": { "operationId": "agent" } },
+            "/v1/agents/me/passport": { "get": { "operationId": "myPassport", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/jobs": { "get": { "operationId": "myPassportJobs", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/mint": { "post": { "operationId": "mintPassport", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/bind": { "post": { "operationId": "bindPassport", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/unbind": { "post": { "operationId": "unbindPassport", "security": [{ "bearer": [] }] } },
+            "/v1/passports/{tokenId}": { "get": { "operationId": "passport" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
             "/v1/arenas/{arenaId}/queue": {
@@ -3017,6 +3075,10 @@ pub struct SqlPlan {
     pub delete_lobby: Vec<String>,
     pub upsert_reactions: Vec<Reaction>,
     pub delete_reactions: Vec<(String, String, String)>,
+    pub upsert_passports: Vec<Passport>,
+    pub delete_passport_ids: Vec<String>,
+    pub upsert_passport_jobs: Vec<PassportJob>,
+    pub delete_passport_job_ids: Vec<String>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -3038,6 +3100,10 @@ impl SqlPlan {
             && self.delete_lobby.is_empty()
             && self.upsert_reactions.is_empty()
             && self.delete_reactions.is_empty()
+            && self.upsert_passports.is_empty()
+            && self.delete_passport_ids.is_empty()
+            && self.upsert_passport_jobs.is_empty()
+            && self.delete_passport_job_ids.is_empty()
     }
 }
 
@@ -3115,6 +3181,16 @@ pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
     });
     plan.upsert_reactions = reactions;
     plan.delete_reactions = deleted_reactions;
+    let (passports, deleted_passports) = diff_by_key(&before.passports, &after.passports, |row| {
+        row.passport_id.clone()
+    });
+    plan.upsert_passports = passports;
+    plan.delete_passport_ids = deleted_passports;
+    let (jobs, deleted_jobs) = diff_by_key(&before.passport_jobs, &after.passport_jobs, |row| {
+        row.job_id.clone()
+    });
+    plan.upsert_passport_jobs = jobs;
+    plan.delete_passport_job_ids = deleted_jobs;
     plan
 }
 

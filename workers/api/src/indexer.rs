@@ -1,5 +1,5 @@
 #![cfg_attr(all(not(test), not(target_arch = "wasm32")), allow(dead_code))]
-//! Host-testable NEAR testnet log reader.
+//! Host-testable NEAR mainnet log reader.
 //!
 //! The worker fetches final blocks, then transaction status, and only then
 //! marks a feed event verified. A public POST never reaches [`apply_chain_events`].
@@ -16,9 +16,9 @@ pub struct ChainEvent {
     pub fingerprint: String,
 }
 
-pub fn refuse_mainnet(url: &str) -> Result<(), &'static str> {
-    if url.to_ascii_lowercase().contains("mainnet") {
-        Err("mainnet rpc refused")
+pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
+    if url.to_ascii_lowercase().contains("testnet") {
+        Err("testnet rpc refused")
     } else {
         Ok(())
     }
@@ -203,9 +203,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mainnet_rpc_is_refused_and_only_chain_logs_verify() {
-        assert!(refuse_mainnet("https://rpc.mainnet.near.org").is_err());
-        assert!(refuse_mainnet("https://rpc.testnet.near.org").is_ok());
+    fn testnet_rpc_is_refused_and_only_chain_logs_verify() {
+        assert!(refuse_testnet("https://rpc.testnet.near.org").is_err());
+        assert!(refuse_testnet("https://rpc.mainnet.near.org").is_ok());
         assert_eq!(plan_heights(0, 20), (13..=20).collect::<Vec<_>>());
         assert_eq!(plan_heights(20, 20), Vec::<u64>::new());
 

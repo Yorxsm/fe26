@@ -1,3 +1,5 @@
+> Historical: this marketplace note predates the passport launch. The live market is `passport-market.fe2vi.near` and the launch price is 1 NEAR.
+
 # Marketplace
 
 fe2VI mints skins on its own `skin-forge` contract. A secondary sale happens on someone else's market. This repo does not deploy a marketplace, does not hold keys, and does not send transactions.
