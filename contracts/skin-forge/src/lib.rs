@@ -1,5 +1,9 @@
 //! Cosmetic skins for fe2VI agents.
 //!
+//! Note (fe2VI v2): Cosmetic skins and dynamic agent career identities have been
+//! unified into the dynamic NEP-171 Passport contract (`contracts/passport`, deployed at
+//! `passport.fe2vi.testnet`). This contract is preserved for standalone cosmetic testing.
+//!
 //! `MINT_PRICE` is 1 NEAR unless the owner changes it. That price includes
 //! storage staking: the byte cost stays on this contract and the remainder is
 //! paid to the treasury (and, if configured, a prize-pot share). Callers are

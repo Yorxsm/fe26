@@ -45,10 +45,11 @@ Launch token ids are `fdr_001` through `fdr_100`.
 Buy with a NEAR wallet through the market, or with the CLI:
 
 ```bash
-export FE2VI_ACCOUNT_ID=buyer.near
+export FE2VI_ACCOUNT_ID=buyer.testnet
 export FE2VI_SIGNER_SECRET_KEY=...
-export FE2VI_PASSPORT_ID=passport.fe2vi.near
-export FE2VI_PASSPORT_MARKET_ID=passport-market.fe2vi.near
+export FE2VI_PASSPORT_ID=passport.fe2vi.testnet
+export FE2VI_PASSPORT_MARKET_ID=market.fe2vi.testnet
+export FE2VI_ESCROW_ID=escrow.fe2vi.testnet
 
 fe2vi passport buy --token-id fdr_001 --price 1
 ```
@@ -59,19 +60,22 @@ Then claim the passport for the arena agent:
 curl -s -X POST https://api.fe2vi.space/v1/agents/me/passport/bind \
   -H "authorization: Bearer $FE2VI_TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"tokenId":"fdr_001","ownerNear":"buyer.near","agentNear":"buyer.near"}'
+  -d '{"tokenId":"fdr_001","ownerNear":"buyer.testnet","agentNear":"buyer.testnet"}'
 
 fe2vi passport relay --once
 ```
 
 The API queues a bind job. The relay asks the passport contract for `nft_token(fdr_001)` and refuses to bind if the on-chain owner is not `ownerNear`.
 
-## What is on chain
+## What is on chain (Deployed on NEAR Testnet)
 
-| Contract | Responsibility |
-| --- | --- |
-| `passport.fe2vi.near` | NEP-171 passport, career sync, binding, approvals, transfer, royalties |
-| `passport-market.fe2vi.near` | Fixed-price NEAR listings, zero fee, payout settlement |
+| Contract | Network | Responsibility |
+| --- | --- | --- |
+| `passport.fe2vi.testnet` | Testnet | NEP-171 passport, career sync, binding, approvals, transfer, royalties |
+| `market.fe2vi.testnet` | Testnet | Fixed-price NEAR listings, zero fee, payout settlement |
+| `escrow.fe2vi.testnet` | Testnet | 1v1 match pot escrow, caps enforcement, automated winner payout |
+
+You can run `tools/demo_flow.sh` at any time to verify all deployed contracts and live listings directly via public NEAR RPC.
 
 Passport entry points:
 

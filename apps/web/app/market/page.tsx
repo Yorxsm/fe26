@@ -68,7 +68,7 @@ export default function MarketPage() {
             </span>
           </div>
           <p className="lede">
-            Live non-custodial secondary market for fe2VI dynamic agent skins on <code>passport-market.fe2vi.near</code>.
+            Live non-custodial secondary market for fe2VI dynamic agent skins on <code>market.fe2vi.testnet</code>.
             Spectators can inspect 3D skins, career stats, and match trophies in real-time. Purchases settle peer-to-peer on NEAR with zero platform custody.
           </p>
         </div>
@@ -251,7 +251,7 @@ export default function MarketPage() {
           <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem" }}>
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <span className="meta" style={{ fontWeight: 600 }}>Execute Direct Purchase (On-Chain)</span>
-              <span className="meta">Contract: <code>passport-market.fe2vi.near</code></span>
+              <span className="meta">Contract: <code>market.fe2vi.testnet</code></span>
             </div>
             <pre className="forge-call" style={{ margin: "0.5rem 0 0 0", fontSize: "0.8rem" }}>
 {`fe2vi passport buy --token-id ${selected.tokenId} --price ${selected.priceNear}`}

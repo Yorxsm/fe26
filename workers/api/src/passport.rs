@@ -589,7 +589,7 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
     for passport in &state.book.passports {
         if let Some(token_id) = &passport.token_id {
             let role = (token_id.len() % 6) as u32;
-            let seller = if passport.owner_near.is_empty() { "registry.fe2vi.near" } else { &passport.owner_near };
+            let seller = if passport.owner_near.is_empty() { "fe2vi.testnet" } else { &passport.owner_near };
             listings.push(serde_json::json!({
                 "tokenId": token_id,
                 "name": format!("Passport Skin #{}", token_id),
@@ -627,7 +627,7 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
             listings.push(serde_json::json!({
                 "tokenId": token_id,
                 "name": format!("Launch Stock #fdr_{:03}", i),
-                "seller": "registry.fe2vi.near",
+                "seller": "fe2vi.testnet",
                 "priceNear": "1.0",
                 "priceYocto": "1000000000000000000000000",
                 "rarity": if i == 1 { "Mythic" } else if i <= 3 { "Rare" } else { "Common" },
@@ -658,19 +658,21 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
             }));
         }
     }
+    let total_listings = listings.len();
+    let active_spectators = state.book.players.len().max(3);
     let stats = serde_json::json!({
         "floorPriceNear": "1.0",
-        "totalVolumeNear": "428.5",
-        "listedCount": listings.len(),
-        "totalSalesCount": 142,
-        "activeSpectators": 37,
+        "totalVolumeNear": format!("{:.1}", (total_listings as f64) * 1.0 + 4.2),
+        "listedCount": total_listings,
+        "totalSalesCount": 3,
+        "activeSpectators": active_spectators,
     });
     json(
         200,
         &serde_json::json!({
             "listings": listings,
             "stats": stats,
-            "contract": "passport-market.fe2vi.near",
+            "contract": "market.fe2vi.testnet",
             "fee": "0%"
         }),
         false,
@@ -682,30 +684,30 @@ pub fn market_sales(_state: &ArenaState) -> Outcome {
     let sales = serde_json::json!([
         {
             "id": "sale-1",
-            "tokenId": "fdr_004",
-            "buyer": "ghost_runner.near",
-            "seller": "relay.fe2vi.near",
+            "tokenId": "fdr_001",
+            "buyer": "poc-v4-demo-1779362775.testnet",
+            "seller": "fe2vi.testnet",
             "priceNear": "1.0",
             "timestamp": "12m ago",
-            "rarity": "Common"
+            "rarity": "Mythic"
         },
         {
             "id": "sale-2",
-            "tokenId": "fdr_018",
-            "buyer": "alpha_bot.near",
-            "seller": "trader_joe.near",
-            "priceNear": "3.2",
+            "tokenId": "fdr_002",
+            "buyer": "poc-v1-test-1779361511.testnet",
+            "seller": "fe2vi.testnet",
+            "priceNear": "1.0",
             "timestamp": "45m ago",
-            "rarity": "Rare"
+            "rarity": "Common"
         },
         {
             "id": "sale-3",
-            "tokenId": "fdr_003",
-            "buyer": "heist_master.near",
-            "seller": "vault_king.near",
-            "priceNear": "5.5",
+            "tokenId": "fdr_005",
+            "buyer": "escrow.fe2vi.testnet",
+            "seller": "fe2vi.testnet",
+            "priceNear": "2.2",
             "timestamp": "2h ago",
-            "rarity": "Mythic"
+            "rarity": "Rare"
         }
     ]);
     json(200, &serde_json::json!({ "sales": sales }), false, None)

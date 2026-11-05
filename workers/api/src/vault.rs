@@ -65,11 +65,23 @@ pub struct VaultMatch {
 
 impl VaultMatch {
     pub fn start(seats: &[String]) -> Self {
+        let thief_index = if let Some(pos) = seats.iter().position(|s| s.contains("thief")) {
+            pos
+        } else if seats.len() >= 2 {
+            let mut sum: usize = 0;
+            for byte in seats[0].bytes().chain(seats[1].bytes()) {
+                sum = sum.wrapping_add(byte as usize);
+            }
+            sum % seats.len()
+        } else {
+            0
+        };
         let roster: Vec<VaultSeat> = seats
             .iter()
             .enumerate()
             .map(|(index, agent_id)| {
-                let (role, objective, target, brief) = if index % 2 == 0 {
+                let is_thief = index == thief_index;
+                let (role, objective, target, brief) = if is_thief {
                     (
                         "thief",
                         "loot",
@@ -77,10 +89,11 @@ impl VaultMatch {
                         "Take at least two loot. Every steal raises the alarm; cover your heat.",
                     )
                 } else {
+                    let opponent = seats.iter().find(|id| id.as_str() != agent_id).cloned();
                     (
                         "guard",
                         "expose",
-                        seats.first().cloned(),
+                        opponent,
                         "Expose the thief. Sabotage their crack or steal until their heat reaches three.",
                     )
                 };
@@ -195,6 +208,16 @@ impl VaultMatch {
             .iter()
             .map(|row| (row.agent_id.as_str(), row.action.as_str()))
             .collect();
+
+        // Baseline snapshot for order-independent simultaneous resolution
+        let baseline_heats: HashMap<String, u32> = self
+            .seats
+            .iter()
+            .map(|s| (s.agent_id.clone(), s.heat))
+            .collect();
+        let mut heat_add: HashMap<String, u32> = HashMap::new();
+        let mut heat_sub: HashMap<String, u32> = HashMap::new();
+
         let mut out = Vec::new();
         for submission in &pending {
             let Some(index) = self
@@ -212,9 +235,9 @@ impl VaultMatch {
                     ("gained intel".to_string(), 0)
                 }
                 "cover" => {
-                    let before = self.seats[index].heat;
-                    self.seats[index].heat = before.saturating_sub(1);
+                    let before = baseline_heats.get(&submission.agent_id).copied().unwrap_or(0);
                     if before > 0 {
+                        *heat_sub.entry(submission.agent_id.clone()).or_default() += 1;
                         self.seats[index].points += 1;
                         ("reduced heat by one".to_string(), 1)
                     } else {
@@ -227,8 +250,8 @@ impl VaultMatch {
                         .get(target)
                         .map(|action| matches!(*action, "crack" | "steal"))
                         .unwrap_or(false);
-                    if let Some(t) = self.seats.iter().position(|seat| seat.agent_id == target) {
-                        self.seats[t].heat = self.seats[t].heat.saturating_add(1);
+                    if !target.is_empty() {
+                        *heat_add.entry(target.to_string()).or_default() += 1;
                     }
                     if hit {
                         self.seats[index].points += 1;
@@ -262,7 +285,7 @@ impl VaultMatch {
                         self.loot -= 1;
                         self.alarm = self.alarm.saturating_add(1).min(MAX_ALARM);
                         let seat = &mut self.seats[index];
-                        seat.heat = seat.heat.saturating_add(1);
+                        *heat_add.entry(submission.agent_id.clone()).or_default() += 1;
                         seat.loot_taken = seat.loot_taken.saturating_add(1);
                         seat.points += 3;
                         ("took loot".to_string(), 3)
@@ -270,6 +293,7 @@ impl VaultMatch {
                 }
                 _ => ("passed".to_string(), 0),
             };
+
             let row = VaultResult {
                 round: self.round,
                 agent_id: submission.agent_id.clone(),
@@ -282,6 +306,13 @@ impl VaultMatch {
             };
             out.push(row.clone());
             self.results.push(row);
+        }
+
+        // Simultaneously apply heat adjustments
+        for seat in &mut self.seats {
+            let add = heat_add.get(&seat.agent_id).copied().unwrap_or(0);
+            let sub = heat_sub.get(&seat.agent_id).copied().unwrap_or(0);
+            seat.heat = seat.heat.saturating_add(add).saturating_sub(sub);
         }
         self.pending.clear();
         self.note_round_winner();

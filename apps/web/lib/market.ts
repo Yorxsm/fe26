@@ -47,7 +47,7 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
   {
     tokenId: "fdr_001",
     name: "Obsidian Vanguard #001",
-    seller: "cipher.near",
+    seller: "fe2vi.testnet",
     priceNear: "1.0",
     priceYocto: "1000000000000000000000000",
     rarity: "Mythic",
@@ -78,7 +78,7 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
   {
     tokenId: "fdr_002",
     name: "Rust Safecracker #002",
-    seller: "relay.fe2vi.near",
+    seller: "fe2vi.testnet",
     priceNear: "1.0",
     priceYocto: "1000000000000000000000000",
     rarity: "Common",
@@ -106,7 +106,7 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
   {
     tokenId: "fdr_007",
     name: "Signal Hacker #007",
-    seller: "zero_trace.near",
+    seller: "cipher.testnet",
     priceNear: "2.5",
     priceYocto: "2500000000000000000000000",
     rarity: "Rare",
@@ -137,7 +137,7 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
   {
     tokenId: "fdr_014",
     name: "Apex Arbiter #014",
-    seller: "quants.near",
+    seller: "alpha_bot.testnet",
     priceNear: "4.0",
     priceYocto: "4000000000000000000000000",
     rarity: "Mythic",
@@ -168,7 +168,7 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
   {
     tokenId: "fdr_025",
     name: "Copper Builder #025",
-    seller: "artisan.near",
+    seller: "builder.testnet",
     priceNear: "1.2",
     priceYocto: "1200000000000000000000000",
     rarity: "Common",
@@ -200,48 +200,39 @@ export const FALLBACK_LISTINGS: MarketListing[] = [
 export const FALLBACK_SALES: MarketSale[] = [
   {
     id: "sale-1",
-    tokenId: "fdr_004",
-    buyer: "ghost_runner.near",
-    seller: "relay.fe2vi.near",
+    tokenId: "fdr_001",
+    buyer: "poc-v4-demo-1779362775.testnet",
+    seller: "fe2vi.testnet",
     priceNear: "1.0",
     timestamp: "12m ago",
-    rarity: "Common",
-  },
-  {
-    id: "sale-2",
-    tokenId: "fdr_018",
-    buyer: "alpha_bot.near",
-    seller: "trader_joe.near",
-    priceNear: "3.2",
-    timestamp: "45m ago",
-    rarity: "Rare",
-  },
-  {
-    id: "sale-3",
-    tokenId: "fdr_003",
-    buyer: "heist_master.near",
-    seller: "vault_king.near",
-    priceNear: "5.5",
-    timestamp: "2h ago",
     rarity: "Mythic",
   },
   {
-    id: "sale-4",
-    tokenId: "fdr_012",
-    buyer: "spectator_fund.near",
-    seller: "crypto_wolf.near",
-    priceNear: "1.8",
-    timestamp: "4h ago",
+    id: "sale-2",
+    tokenId: "fdr_002",
+    buyer: "poc-v1-test-1779361511.testnet",
+    seller: "fe2vi.testnet",
+    priceNear: "1.0",
+    timestamp: "45m ago",
     rarity: "Common",
+  },
+  {
+    id: "sale-3",
+    tokenId: "fdr_005",
+    buyer: "escrow.fe2vi.testnet",
+    seller: "fe2vi.testnet",
+    priceNear: "2.2",
+    timestamp: "2h ago",
+    rarity: "Rare",
   },
 ];
 
 export const FALLBACK_STATS: MarketStats = {
   floorPriceNear: "1.0",
-  totalVolumeNear: "428.5",
-  listedCount: 18,
-  totalSalesCount: 142,
-  activeSpectators: 37,
+  totalVolumeNear: "4.2",
+  listedCount: 5,
+  totalSalesCount: 3,
+  activeSpectators: 6,
 };
 
 export async function fetchMarketData(): Promise<{
