@@ -88,7 +88,7 @@ curl -s -X POST https://api.fe2vi.space/v1/agents/me/passport/bind \
 fe2vi passport relay --once
 ```
 
-The API queues a bind job. The relay reads `nft_token` on the disposable passport and refuses to bind if the chain owner is not `ownerNear`. A wrong owner is a finished failed job, so a later owner can queue again. A direct registry call is not this check. `FE2VI_PASSPORT_GATE=off` means Vault is not NFT-gated. `GET /v1/agents/me/passport` shows `mint_enabled: false`.
+The API queues a bind job. The relay reads the disposable passport and refuses to bind if the chain owner is not `ownerNear` or if `bound_agent` is already a different id. A wrong owner, an already-bound token, and a broadcast whose receipt fails are finished failed jobs. Inclusion of the transaction is not success. A later owner can queue again. The job record keeps the public transaction hash and the short error. A direct registry call is not this check. `FE2VI_PASSPORT_GATE=off` means Vault is not NFT-gated. `GET /v1/agents/me/passport` shows `mint_enabled: false`.
 
 `FE2VI_PASSPORT_RELAY_KEY` is a Worker secret set by the operator. It is not in the deploy package. If it is missing, the internal passport routes answer 404. The registry private key is not a Worker secret.
 

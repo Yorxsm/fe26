@@ -73,6 +73,12 @@ pub struct PassportJob {
     pub attempts: u32,
     pub created_unix: u64,
     pub updated_unix: u64,
+    /// Public transaction hash. Empty when the relay did not broadcast.
+    #[serde(default)]
+    pub tx_hash: String,
+    /// Why a finished job failed. Empty on success.
+    #[serde(default)]
+    pub error: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

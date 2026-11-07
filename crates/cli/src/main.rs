@@ -671,21 +671,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                     PASSPORT_MINT_DEPOSIT_YOCTO,
                     80_000_000_000_000,
                 ),
-                "bind" => match nft_owner(config, token_id) {
-                    Ok(on_chain) if on_chain == owner => submit(
-                        config,
-                        false,
-                        &config.passport_id,
-                        "bind",
-                        &serde_json::json!({ "token_id": token_id, "agent_id": agent_id }),
-                        0,
-                        50_000_000_000_000,
-                    ),
-                    Ok(on_chain) => Err(format!(
-                        "owner mismatch for {token_id}: chain owner is {on_chain}, job owner is {owner}"
-                    )),
-                    Err(err) => Err(err),
-                },
+                "bind" => bind_job(config, token_id, owner, agent_id),
                 "unbind" => {
                     Err("unbind needs the owner's wallet signature, not the registry".into())
                 }
@@ -698,9 +684,21 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                     let hash = receipt["result"]["transaction"]["hash"]
                         .as_str()
                         .map(str::to_string);
-                    if receipt["broadcast"].as_bool().unwrap_or(false) {
+                    if receipt["alreadyBound"].as_bool().unwrap_or(false) {
                         processed += 1;
-                        ("done", hash, None, token_id.to_string())
+                        ("done", None, None, token_id.to_string())
+                    } else if receipt["broadcast"].as_bool().unwrap_or(false) {
+                        if let Some(err) = execution_error(&receipt["result"]) {
+                            failed += 1;
+                            let detail = match &hash {
+                                Some(hash) => format!("execution failed {hash}: {err}"),
+                                None => format!("execution failed: {err}"),
+                            };
+                            ("failed", hash, Some(detail), token_id.to_string())
+                        } else {
+                            processed += 1;
+                            ("done", hash, None, token_id.to_string())
+                        }
                     } else {
                         failed += 1;
                         (
@@ -871,9 +869,149 @@ fn chain_head(rpc_url: &str, account_id: &str, secret: &str) -> Result<(u64, Str
     Ok((nonce, hash))
 }
 
-fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
-    let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
-        .map_err(|err| err.to_string())?;
+fn bind_job(
+    config: &Config,
+    token_id: &str,
+    owner: &str,
+    agent_id: &str,
+) -> Result<String, String> {
+    let view = passport_state(config, token_id)?;
+    let on_chain = view["owner_id"]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "passport: missing owner_id".to_string())?;
+    if on_chain != owner {
+        return Err(format!(
+            "owner mismatch for {token_id}: chain owner is {on_chain}, job owner is {owner}"
+        ));
+    }
+    let bound = view["bound_agent"].as_str().unwrap_or("").trim();
+    if bound == agent_id {
+        return Ok(serde_json::json!({
+            "network": "testnet",
+            "broadcast": false,
+            "alreadyBound": true,
+        })
+        .to_string());
+    }
+    if !bound.is_empty() {
+        return Err(format!("token already bound to {bound}"));
+    }
+    match agent_token(config, agent_id)? {
+        Some(other) if other != token_id => {
+            return Err(format!("agent already bound to {other}"));
+        }
+        _ => {}
+    }
+    submit(
+        config,
+        false,
+        &config.passport_id,
+        "bind",
+        &serde_json::json!({ "token_id": token_id, "agent_id": agent_id }),
+        0,
+        50_000_000_000_000,
+    )
+}
+
+/// `broadcast_tx_commit` returns a JSON-RPC result for a transaction that was
+/// included and then panicked. Inclusion is not success. `None` means the
+/// final status is `SuccessValue` and no receipt failed.
+fn execution_error(outcome: &serde_json::Value) -> Option<String> {
+    let mut failures = Vec::new();
+    collect_status_failure(&outcome["status"], &mut failures);
+    if let Some(receipts) = outcome
+        .get("receipts_outcome")
+        .and_then(|value| value.as_array())
+    {
+        for receipt in receipts {
+            collect_status_failure(&receipt["outcome"]["status"], &mut failures);
+        }
+    }
+    if let Some(message) = failures.into_iter().next() {
+        return Some(message);
+    }
+    if outcome
+        .get("status")
+        .and_then(|status| status.get("SuccessValue"))
+        .is_some()
+    {
+        return None;
+    }
+    Some("execution did not succeed".to_string())
+}
+
+fn collect_status_failure(status: &serde_json::Value, failures: &mut Vec<String>) {
+    if let Some(failure) = status.get("Failure") {
+        failures.push(short_execution_text(failure));
+    }
+}
+
+fn short_execution_text(failure: &serde_json::Value) -> String {
+    let mut found = String::new();
+    find_execution_error(failure, &mut found);
+    if found.is_empty() {
+        found = "failure".to_string();
+    }
+    let mut out = String::new();
+    for ch in found.chars() {
+        if out.len() >= 120 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.' | ':') {
+            out.push(ch);
+        }
+    }
+    if out.is_empty() {
+        "failure".to_string()
+    } else {
+        out
+    }
+}
+
+fn find_execution_error(value: &serde_json::Value, found: &mut String) {
+    if !found.is_empty() {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("ExecutionError").and_then(|item| item.as_str()) {
+                *found = text.to_string();
+                return;
+            }
+            for child in map.values() {
+                find_execution_error(child, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                find_execution_error(child, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn agent_token(config: &Config, agent_id: &str) -> Result<Option<String>, String> {
+    let value = contract_json(
+        config,
+        "agent_token",
+        &serde_json::json!({ "agent_id": agent_id }),
+    )?;
+    match value {
+        serde_json::Value::String(token) if !token.trim().is_empty() => Ok(Some(token)),
+        serde_json::Value::Null => Ok(None),
+        _ => Err("agent_token: unexpected result".into()),
+    }
+}
+
+fn contract_json(
+    config: &Config,
+    method: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_vec(args).map_err(|err| err.to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(args);
     let response = rpc(
         &config.rpc_url,
@@ -882,54 +1020,29 @@ fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
             "request_type": "call_function",
             "finality": "final",
             "account_id": config.passport_id,
-            "method_name": "nft_token",
+            "method_name": method,
             "args_base64": encoded,
         }),
     )?;
     if let Some(err) = response.get("error").filter(|value| !value.is_null()) {
-        return Err(format!("nft_token: {err}"));
+        return Err(format!("{method}: {err}"));
     }
     let bytes = response
         .get("result")
         .and_then(serde_json::Value::as_array)
-        .ok_or("nft_token: missing result")?
+        .ok_or_else(|| format!("{method}: missing result"))?
         .iter()
         .map(|value| value.as_u64().unwrap_or_default() as u8)
         .collect::<Vec<u8>>();
-    let token: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|err| format!("nft_token body: {err}"))?;
-    token["owner_id"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| "nft_token: missing owner_id".to_string())
+    serde_json::from_slice(&bytes).map_err(|err| format!("{method} body: {err}"))
 }
 
 fn passport_state(config: &Config, token_id: &str) -> Result<serde_json::Value, String> {
-    let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
-        .map_err(|err| err.to_string())?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(args);
-    let response = rpc(
-        &config.rpc_url,
-        "query",
-        serde_json::json!({
-            "request_type": "call_function",
-            "finality": "final",
-            "account_id": config.passport_id,
-            "method_name": "passport",
-            "args_base64": encoded,
-        }),
-    )?;
-    if let Some(err) = response.get("error").filter(|value| !value.is_null()) {
-        return Err(format!("passport: {err}"));
-    }
-    let bytes = response
-        .get("result")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("passport: missing result")?
-        .iter()
-        .map(|value| value.as_u64().unwrap_or_default() as u8)
-        .collect::<Vec<u8>>();
-    serde_json::from_slice(&bytes).map_err(|err| format!("passport body: {err}"))
+    contract_json(
+        config,
+        "passport",
+        &serde_json::json!({ "token_id": token_id }),
+    )
 }
 
 fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -1051,6 +1164,28 @@ mod tests {
             }
             _ => panic!("expected a function call"),
         }
+    }
+
+    #[test]
+    fn a_broadcast_receipt_failure_is_not_success() {
+        let failed = serde_json::json!({
+            "status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "Smart contract panicked: token bound"}}}}},
+            "transaction": {"hash": "TxHash111"},
+            "receipts_outcome": [{"outcome": {"status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "Smart contract panicked: token bound"}}}}}}}]
+        });
+        let message = execution_error(&failed).unwrap();
+        assert!(message.contains("token bound"));
+        assert!(!message.contains("ed25519"));
+        let succeeded = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{"outcome": {"status": {"SuccessValue": ""}}}]
+        });
+        assert!(execution_error(&succeeded).is_none());
+        let partial = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{"outcome": {"status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "agent bound"}}}}}}}]
+        });
+        assert!(execution_error(&partial).unwrap().contains("agent bound"));
     }
 
     #[test]

@@ -395,11 +395,62 @@ mod edge {
                 Outcome::Http {
                     status,
                     content_type,
-                    body,
-                    mutated,
+                    mut body,
+                    mut mutated,
                     fanout,
                     location,
                 } => {
+                    if method == "POST" {
+                        if let Some(job_id) = route_path
+                            .strip_prefix("/v1/internal/passport/jobs/")
+                            .and_then(|rest| rest.strip_suffix("/complete"))
+                        {
+                            if !job_id.is_empty()
+                                && !job_id.contains('/')
+                                && arena.book.passport_jobs.iter().any(|job| {
+                                    job.job_id == job_id
+                                        && job.kind == "bind"
+                                        && job.status == "done"
+                                })
+                            {
+                                let token_id = arena
+                                    .book
+                                    .passport_jobs
+                                    .iter()
+                                    .find(|job| job.job_id == job_id)
+                                    .and_then(|job| {
+                                        arena.book.passports.iter().find(|passport| {
+                                            passport.passport_id == job.passport_id
+                                        })
+                                    })
+                                    .and_then(|passport| passport.token_id.clone());
+                                let chain_now = worker::Date::now().as_millis() / 1000;
+                                let changed = match token_id.as_deref() {
+                                    Some(token_id) => {
+                                        match passport_chain_view(&self.env, token_id).await {
+                                            Ok(view) => crate::passport::reject_unconfirmed_bind(
+                                                &mut arena,
+                                                job_id,
+                                                view.as_ref(),
+                                                chain_now,
+                                            ),
+                                            Err(_) => crate::passport::defer_unconfirmed_bind(
+                                                &mut arena, job_id, chain_now,
+                                            ),
+                                        }
+                                    }
+                                    None => crate::passport::reject_unconfirmed_bind(
+                                        &mut arena, job_id, None, chain_now,
+                                    ),
+                                };
+                                if changed {
+                                    body = crate::passport::complete_response(&arena, job_id)
+                                        .to_string();
+                                    mutated = true;
+                                }
+                            }
+                        }
+                    }
                     let plan = crate::agents::plan_writes(&before_book, &arena.book);
                     if mutated || refreshed || !plan.is_empty() {
                         {
@@ -590,6 +641,8 @@ mod edge {
             "ALTER TABLE player_seen ADD COLUMN match_id TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE player_seen ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE player_passports ADD COLUMN career_json TEXT NOT NULL DEFAULT 'null'",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN error TEXT NOT NULL DEFAULT ''",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
         }
@@ -772,6 +825,10 @@ mod edge {
             attempts: i64,
             created_unix: i64,
             updated_unix: i64,
+            #[serde(default)]
+            tx_hash: String,
+            #[serde(default)]
+            error: String,
         }
         let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let tokens = sql
@@ -840,7 +897,7 @@ mod edge {
             .to_array::<PassportRow>()?;
         let passport_jobs = sql
             .exec(
-                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix FROM player_passport_jobs",
+                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error FROM player_passport_jobs",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<PassportJobRow>()?;
@@ -974,6 +1031,8 @@ mod edge {
                     attempts: u32::try_from(row.attempts.max(0)).unwrap_or(0),
                     created_unix: row.created_unix.max(0) as u64,
                     updated_unix: row.updated_unix.max(0) as u64,
+                    tx_hash: row.tx_hash,
+                    error: row.error,
                 })
                 .collect(),
         }))
@@ -1207,7 +1266,7 @@ mod edge {
         }
         for row in &plan.upsert_passport_jobs {
             sql.exec(
-                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix",
+                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, tx_hash = excluded.tx_hash, error = excluded.error",
                 Some(vec![
                     row.job_id.clone().into(),
                     row.kind.clone().into(),
@@ -1219,6 +1278,8 @@ mod edge {
                     (row.attempts as i64).into(),
                     (row.created_unix as i64).into(),
                     (row.updated_unix as i64).into(),
+                    row.tx_hash.clone().into(),
+                    row.error.clone().into(),
                 ]),
             )?;
         }

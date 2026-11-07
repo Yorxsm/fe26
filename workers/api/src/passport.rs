@@ -161,6 +161,8 @@ fn mint(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         attempts: 0,
         created_unix: now,
         updated_unix: now,
+        tx_hash: String::new(),
+        error: String::new(),
     };
     state.book.passports.push(passport.clone());
     state.book.passport_jobs.push(job.clone());
@@ -296,6 +298,8 @@ fn bind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         attempts: 0,
         created_unix: now,
         updated_unix: now,
+        tx_hash: String::new(),
+        error: String::new(),
     };
     let queued_passport = job.passport_id.clone();
     for old in &mut state.book.passport_jobs {
@@ -350,6 +354,8 @@ fn unbind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome 
         attempts: 0,
         created_unix: now,
         updated_unix: now,
+        tx_hash: String::new(),
+        error: String::new(),
     };
     state.book.passport_jobs.push(job.clone());
     json(
@@ -429,8 +435,17 @@ fn complete(state: &mut ArenaState, incoming: &Incoming<'_>, job_id: &str, now: 
     let kind = state.book.passport_jobs[job_index].kind.clone();
     let passport_id = state.book.passport_jobs[job_index].passport_id.clone();
     let done = body.status.as_deref() == Some("done");
+    if let Some(hash) = body
+        .tx_hash
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        state.book.passport_jobs[job_index].tx_hash = hash.to_string();
+    }
     if done {
         state.book.passport_jobs[job_index].status = "done".to_string();
+        state.book.passport_jobs[job_index].error.clear();
         state.book.passport_jobs[job_index].updated_unix = now;
         if let Some(index) = state
             .book
@@ -464,13 +479,10 @@ fn complete(state: &mut ArenaState, incoming: &Incoming<'_>, job_id: &str, now: 
             state.book.passports[index].updated_unix = now;
         }
     } else {
-        let mismatch = body
-            .error
-            .as_deref()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .contains("owner mismatch");
-        let failed = mismatch || state.book.passport_jobs[job_index].attempts >= 5;
+        let message = body.error.clone().unwrap_or_default();
+        state.book.passport_jobs[job_index].error = message.clone();
+        let failed =
+            terminal_job_error(&message) || state.book.passport_jobs[job_index].attempts >= 5;
         state.book.passport_jobs[job_index].status =
             if failed { "failed" } else { "pending" }.to_string();
         state.book.passport_jobs[job_index].updated_unix = now;
@@ -813,7 +825,11 @@ fn passport_json(passport: &Passport) -> serde_json::Value {
         "ownerNear": passport.owner_near,
         "creatorNear": passport.creator_near,
         "status": passport.status,
-        "boundAgent": if passport.agent_id.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(passport.agent_id.clone()) },
+        "boundAgent": if passport.status == "active" && !passport.agent_id.is_empty() {
+            serde_json::Value::String(passport.agent_id.clone())
+        } else {
+            serde_json::Value::Null
+        },
         "lastSyncSeq": passport.last_sync_seq,
         "career": passport.career.clone().unwrap_or(serde_json::Value::Null),
         "createdAt": agents::rfc3339(passport.created_unix),
@@ -887,6 +903,153 @@ pub fn reconcile_passport(passport: &mut Passport, view: &serde_json::Value, now
     changed
 }
 
+fn terminal_job_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("owner mismatch")
+        || message.contains("token already bound")
+        || message.contains("agent already bound")
+        || message.contains("execution failed")
+        || message.contains("chain passport missing")
+}
+
+/// The chain view names the same agent and owner the bind job claimed.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn bind_chain_matches(view: &serde_json::Value, agent_id: &str, owner_near: &str) -> bool {
+    let bound = view
+        .get("bound_agent")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let owner = view
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    !bound.is_empty() && bound == agent_id && owner == owner_near
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn complete_response(state: &ArenaState, job_id: &str) -> serde_json::Value {
+    let job = state
+        .book
+        .passport_jobs
+        .iter()
+        .find(|job| job.job_id == job_id)
+        .cloned();
+    let passport = job.as_ref().and_then(|job| {
+        state
+            .book
+            .passports
+            .iter()
+            .find(|passport| passport.passport_id == job.passport_id)
+            .cloned()
+    });
+    serde_json::json!({
+        "job": job.as_ref().map(|job| job_wire(state, job)),
+        "passport": passport.as_ref().map(passport_json),
+        "txHash": job.as_ref().and_then(|job| if job.tx_hash.is_empty() { None } else { Some(job.tx_hash.clone()) }),
+        "error": job.as_ref().and_then(|job| if job.error.is_empty() { None } else { Some(job.error.clone()) }),
+    })
+}
+
+/// A bind marked done stays done only when the chain view matches the job.
+/// Any other view is a terminal failure. An active row for that agent goes
+/// back to `bind_failed` so a later read does not treat the broadcast as binding.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn reject_unconfirmed_bind(
+    state: &mut ArenaState,
+    job_id: &str,
+    view: Option<&serde_json::Value>,
+    now: u64,
+) -> bool {
+    let Some(job_index) = state
+        .book
+        .passport_jobs
+        .iter()
+        .position(|job| job.job_id == job_id)
+    else {
+        return false;
+    };
+    if state.book.passport_jobs[job_index].kind != "bind"
+        || state.book.passport_jobs[job_index].status != "done"
+    {
+        return false;
+    }
+    let agent_id = state.book.passport_jobs[job_index].agent_id.clone();
+    let owner_near = state.book.passport_jobs[job_index].owner_near.clone();
+    if view.is_some_and(|view| bind_chain_matches(view, &agent_id, &owner_near)) {
+        return false;
+    }
+    let bound = view
+        .and_then(|view| view.get("bound_agent"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let error = if view.is_none() {
+        "chain passport missing".to_string()
+    } else if bound.is_empty() {
+        "execution failed: chain agent is unbound".to_string()
+    } else {
+        format!("token already bound to {bound}")
+    };
+    state.book.passport_jobs[job_index].status = "failed".to_string();
+    state.book.passport_jobs[job_index].error = error;
+    state.book.passport_jobs[job_index].updated_unix = now;
+    let passport_id = state.book.passport_jobs[job_index].passport_id.clone();
+    if let Some(index) = state
+        .book
+        .passports
+        .iter()
+        .position(|passport| passport.passport_id == passport_id)
+    {
+        if state.book.passports[index].agent_id == agent_id
+            && state.book.passports[index].status == "active"
+        {
+            state.book.passports[index].status = "bind_failed".to_string();
+            state.book.passports[index].updated_unix = now;
+        }
+    }
+    true
+}
+
+/// A done bind whose chain read failed is not success. Put the job back so the
+/// relay can check the chain again instead of leaving a false done.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn defer_unconfirmed_bind(state: &mut ArenaState, job_id: &str, now: u64) -> bool {
+    let Some(job_index) = state
+        .book
+        .passport_jobs
+        .iter()
+        .position(|job| job.job_id == job_id)
+    else {
+        return false;
+    };
+    if state.book.passport_jobs[job_index].kind != "bind"
+        || state.book.passport_jobs[job_index].status != "done"
+    {
+        return false;
+    }
+    let agent_id = state.book.passport_jobs[job_index].agent_id.clone();
+    let passport_id = state.book.passport_jobs[job_index].passport_id.clone();
+    state.book.passport_jobs[job_index].status = "pending".to_string();
+    state.book.passport_jobs[job_index].error = "could not confirm bind".to_string();
+    state.book.passport_jobs[job_index].updated_unix = now;
+    if let Some(index) = state
+        .book
+        .passports
+        .iter()
+        .position(|passport| passport.passport_id == passport_id)
+    {
+        if state.book.passports[index].agent_id == agent_id
+            && state.book.passports[index].status == "active"
+        {
+            state.book.passports[index].status = "pending_bind".to_string();
+            state.book.passports[index].updated_unix = now;
+        }
+    }
+    true
+}
+
 fn apply_career_sync(passport: &mut Passport, body: &CompleteBody) {
     if let Some(seq) = body.last_sync_seq {
         if seq < passport.last_sync_seq {
@@ -906,6 +1069,8 @@ fn job_json(job: &PassportJob) -> serde_json::Value {
         "passportId": job.passport_id,
         "status": job.status,
         "attempts": job.attempts,
+        "txHash": if job.tx_hash.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(job.tx_hash.clone()) },
+        "error": if job.error.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(job.error.clone()) },
         "createdAt": agents::rfc3339(job.created_unix),
         "updatedAt": agents::rfc3339(job.updated_unix),
     })
@@ -1249,6 +1414,122 @@ mod tests {
         );
         assert_eq!(status, 200);
         assert_eq!(replay["passport"]["status"], "active");
+    }
+
+    #[test]
+    fn an_execution_failure_is_terminal_and_keeps_the_hash() {
+        let mut state = ArenaState::default();
+        let (agent_id, token) = register(&mut state);
+        let (_, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/passport/bind?now={NOW}"),
+            r#"{"tokenId":"disp_001","ownerNear":"fe2vidisp7a3c.testnet","agentNear":"agent.testnet"}"#,
+            Some(&token),
+        );
+        let job_id = body["job"]["jobId"].as_str().unwrap().to_string();
+        call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":10}"#,
+            None,
+        );
+        let (status, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{job_id}/complete?now={NOW}"),
+            r#"{"status":"failed","error":"execution failed TxHash111: token bound","txHash":"TxHash111"}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(body["job"]["status"], "failed");
+        assert_eq!(body["job"]["txHash"], "TxHash111");
+        assert!(body["job"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("token bound"));
+        assert_eq!(body["passport"]["status"], "bind_failed");
+        assert_eq!(body["passport"]["agentId"], agent_id);
+        assert!(body["passport"]["boundAgent"].is_null());
+        let (_, claimed) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":10}"#,
+            None,
+        );
+        assert!(claimed["jobs"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_done_bind_that_does_not_match_the_chain_is_rejected() {
+        let mut state = ArenaState::default();
+        let (agent_id, token) = register(&mut state);
+        let (_, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/passport/bind?now={NOW}"),
+            r#"{"tokenId":"disp_001","ownerNear":"fe2vidisp7a3c.testnet","agentNear":"agent.testnet"}"#,
+            Some(&token),
+        );
+        let job_id = body["job"]["jobId"].as_str().unwrap().to_string();
+        call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":10}"#,
+            None,
+        );
+        let (_, done) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{job_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"disp_001","txHash":"TxIncluded"}"#,
+            None,
+        );
+        assert_eq!(done["passport"]["status"], "active");
+        let chain = serde_json::json!({
+            "owner_id": "fe2vidisp7a3c.testnet",
+            "bound_agent": "agt_9e8b3aca21535f68"
+        });
+        assert!(reject_unconfirmed_bind(
+            &mut state,
+            &job_id,
+            Some(&chain),
+            NOW + 5
+        ));
+        let body = complete_response(&state, &job_id);
+        assert_eq!(body["job"]["status"], "failed");
+        assert!(body["job"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("agt_9e8b3aca21535f68"));
+        assert_eq!(body["passport"]["status"], "bind_failed");
+        assert_eq!(body["passport"]["agentId"], agent_id);
+        assert!(body["passport"]["boundAgent"].is_null());
+        let (status, me) = call(
+            &mut state,
+            "GET",
+            "/v1/agents/me/passport",
+            "",
+            Some(&token),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(me["passport"]["status"], "bind_failed");
+        let matching = serde_json::json!({
+            "owner_id": "fe2vidisp7a3c.testnet",
+            "bound_agent": agent_id
+        });
+        state.book.passport_jobs[0].status = "done".to_string();
+        state.book.passports[0].status = "active".to_string();
+        assert!(!reject_unconfirmed_bind(
+            &mut state,
+            &job_id,
+            Some(&matching),
+            NOW + 6
+        ));
+        assert_eq!(state.book.passport_jobs[0].status, "done");
     }
 
     #[test]
