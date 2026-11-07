@@ -70,8 +70,20 @@ pub struct VaultMatch {
 #[serde(rename_all = "camelCase")]
 pub struct PotAuthorization {
     pub idempotency_key: String,
-    pub method: String,
-    pub note: String,
+    /// Always false. The API does not move NEAR.
+    #[serde(default)]
+    pub pays: bool,
+    /// True only when `fe2vi_core::resolve_call` accepts, which is the heist `resolve` check.
+    #[serde(default)]
+    pub contract_would_accept_resolve: bool,
+    #[serde(default = "awaiting_contract_view")]
+    pub outcome: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+fn awaiting_contract_view() -> String {
+    "awaiting_contract_view".to_string()
 }
 
 impl VaultMatch {
@@ -527,21 +539,12 @@ impl VaultMatch {
         })
     }
 
-    /// Record one pot authorization for a finished match. A second call keeps the first key.
+    /// Mark a finished match for a contract check. The stored row does not accept `resolve`.
     pub fn seal_pot(&mut self, match_id: &str) {
         if !self.ended || self.pot.is_some() {
             return;
         }
-        let key = if match_id.is_empty() {
-            "pot:pending".to_string()
-        } else {
-            format!("pot:{match_id}")
-        };
-        self.pot = Some(PotAuthorization {
-            idempotency_key: key,
-            method: "resolve".to_string(),
-            note: "One heist resolve for this finished match. The contract refunds the creator when every on-chain score is zero, or when a delisted game has no players. Otherwise it splits the pot by its own action scores. Arena 3/1/0 points are not NEAR amounts.".to_string(),
-        });
+        self.pot = Some(stored_pot(match_id));
     }
 
     pub fn private_json(
@@ -567,6 +570,128 @@ impl VaultMatch {
             });
         }
         value
+    }
+}
+
+fn stored_pot(match_id: &str) -> PotAuthorization {
+    PotAuthorization {
+        idempotency_key: format!("pot:{match_id}"),
+        pays: false,
+        contract_would_accept_resolve: false,
+        outcome: "awaiting_contract_view".to_string(),
+        reason: "The contract view has not been read. A stored match row is not a payout."
+            .to_string(),
+    }
+}
+
+/// Apply `fe2vi_core::resolve_call` to a `get_heist` body. `pays` stays false.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn contract_pot(match_id: &str, heist_json: &str, now_ns: Option<u64>) -> PotAuthorization {
+    let mut pot = stored_pot(match_id);
+    let text = heist_json.trim();
+    if text.is_empty() || text == "null" {
+        pot.outcome = "not_linked".to_string();
+        pot.reason =
+            "get_heist has no game for this match id. A finished Vault match is not a payout."
+                .to_string();
+        return pot;
+    }
+    let Some(resolved) = pull_bool(text, "resolved") else {
+        return unreadable(pot);
+    };
+    let Some(delisted) = pull_bool(text, "delisted") else {
+        return unreadable(pot);
+    };
+    let Some(started_at_ns) = pull_u64(text, "started_at_ns") else {
+        return unreadable(pot);
+    };
+    let Some(duration_seconds) = pull_u64(text, "duration_seconds") else {
+        return unreadable(pot);
+    };
+    let needs_clock = !resolved && !delisted;
+    let now_ns = if needs_clock {
+        match now_ns {
+            Some(now_ns) => now_ns,
+            None => {
+                pot.outcome = "clock_unreadable".to_string();
+                pot.reason = "The heist block clock was not readable, so resolve was not accepted."
+                    .to_string();
+                return pot;
+            }
+        }
+    } else {
+        now_ns.unwrap_or(0)
+    };
+    match fe2vi_core::resolve_call(resolved, delisted, started_at_ns, duration_seconds, now_ns) {
+        Ok(()) => {
+            pot.outcome = "resolve_accepted".to_string();
+            pot.contract_would_accept_resolve = true;
+            pot.reason = "The heist resolve call would be accepted. The contract then refunds the creator or splits by its own action scores. Arena points are not an amount. This response does not move NEAR.".to_string();
+        }
+        Err("already resolved") => {
+            pot.outcome = "already_resolved".to_string();
+            pot.reason = "The heist contract would reject a second resolve with already resolved. That is the payment idempotency. This response does not move NEAR.".to_string();
+        }
+        Err("game still running") => {
+            pot.outcome = "still_running".to_string();
+            pot.reason =
+                "The heist contract would reject resolve with game still running.".to_string();
+        }
+        Err(reason) => {
+            pot.outcome = "resolve_rejected".to_string();
+            pot.reason = reason.to_string();
+        }
+    }
+    pot
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn unreadable(mut pot: PotAuthorization) -> PotAuthorization {
+    pot.outcome = "contract_unreadable".to_string();
+    pot.reason = "The heist view did not include the fields resolve checks.".to_string();
+    pot.contract_would_accept_resolve = false;
+    pot.pays = false;
+    pot
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn replace_pot(body: &str, pot: &PotAuthorization) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_str(body).ok()?;
+    value.pointer("/vault/pot")?;
+    value["vault"]["pot"] = serde_json::to_value(pot).ok()?;
+    serde_json::to_string(&value).ok()
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn pull_u64(text: &str, field: &str) -> Option<u64> {
+    let needle = format!("\"{field}\"");
+    let index = text.find(&needle)?;
+    let rest = text[index + needle.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"').unwrap_or(rest);
+    let digits: String = rest
+        .chars()
+        .take_while(|byte| byte.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn pull_bool(text: &str, field: &str) -> Option<bool> {
+    let needle = format!("\"{field}\"");
+    let index = text.find(&needle)?;
+    let rest = text[index + needle.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -658,10 +783,41 @@ mod tests {
         game.seal_pot("mt_one");
         let pot = game.pot.clone().unwrap();
         assert_eq!(pot.idempotency_key, "pot:mt_one");
-        assert_eq!(pot.method, "resolve");
-        assert!(pot.note.contains("refunds the creator"));
-        assert!(pot.note.contains("not NEAR"));
+        assert!(!pot.pays);
+        assert!(!pot.contract_would_accept_resolve);
+        assert_eq!(pot.outcome, "awaiting_contract_view");
         let public = game.public_json(&handles(&["a", "b"]));
         assert_eq!(public["pot"]["idempotencyKey"], "pot:mt_one");
+        assert_eq!(public["pot"]["pays"], false);
+    }
+
+    #[test]
+    fn the_match_pot_uses_the_heist_resolve_check() {
+        let missing = contract_pot("mt_one", "null", None);
+        assert_eq!(missing.outcome, "not_linked");
+        assert!(!missing.pays);
+        assert!(!missing.contract_would_accept_resolve);
+
+        let live = r#"{"resolved":false,"delisted":false,"started_at_ns":1000,"rules":{"duration_seconds":60}}"#;
+        let running = contract_pot("mt_one", live, Some(1000));
+        assert_eq!(running.outcome, "still_running");
+        assert!(!running.contract_would_accept_resolve);
+
+        let open = contract_pot("mt_one", live, Some(1000 + 60 * 1_000_000_000));
+        assert_eq!(open.outcome, "resolve_accepted");
+        assert!(open.contract_would_accept_resolve);
+        assert!(!open.pays);
+
+        let done = r#"{"resolved":true,"delisted":false,"started_at_ns":1000,"rules":{"duration_seconds":60}}"#;
+        let again = contract_pot("mt_one", done, Some(1000));
+        assert_eq!(again.outcome, "already_resolved");
+        assert_eq!(again.idempotency_key, "pot:mt_one");
+        assert!(!again.pays);
+
+        let delisted = r#"{"resolved":false,"delisted":true,"started_at_ns":1000,"rules":{"duration_seconds":60}}"#;
+        let refund_window = contract_pot("mt_one", delisted, None);
+        assert_eq!(refund_window.outcome, "resolve_accepted");
+        assert!(refund_window.contract_would_accept_resolve);
+        assert!(!refund_window.pays);
     }
 }

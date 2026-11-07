@@ -6,6 +6,7 @@ mod caps;
 mod events;
 mod game_md;
 mod hash;
+mod pot;
 mod price;
 mod score;
 mod scoring;
@@ -32,6 +33,7 @@ pub use game_md::{
     extract_rules_json, game_md_violations, render_game_md, GamePointer, REQUIRED_GAME_MD_PHRASES,
 };
 pub use hash::{canonical_rules_json, pin_hash, valid_pin_hash};
+pub use pot::resolve_call;
 pub use price::{select_price, simulated_price_micros, PriceSource, WRAP_NEAR};
 pub use score::{
     action_price, round_index, score_actions, split_pot, tape_winner, ActionKind, SubmittedAction,

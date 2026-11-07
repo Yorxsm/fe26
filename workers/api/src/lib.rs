@@ -561,6 +561,16 @@ mod edge {
                             .put("metric_errors", &(errors.saturating_add(1)))
                             .await;
                     }
+                    if status == 200 && method == "GET" {
+                        if let Some(match_id) = finished_match_id(route_path) {
+                            if body.contains("awaiting_contract_view") {
+                                let pot = heist_pot(self, match_id).await;
+                                if let Some(next) = crate::vault::replace_pot(&body, &pot) {
+                                    body = next;
+                                }
+                            }
+                        }
+                    }
                     let mut response = Response::ok(body)?.with_status(status);
                     if let Some(location) = location {
                         response.headers_mut().set("Location", &location)?;
@@ -1403,6 +1413,90 @@ mod edge {
         .collect()
     }
 
+    async fn heist_pot(feed: &SpectatorFeed, match_id: &str) -> crate::vault::PotAuthorization {
+        let mut pot = crate::vault::contract_pot(match_id, "null", None);
+        pot.outcome = "not_linked".to_string();
+        let heist = env_string(&feed.env, "FE2VI_HEIST_ID");
+        if heist.is_empty() {
+            pot.outcome = "contract_unconfigured".to_string();
+            pot.reason = "FE2VI_HEIST_ID is empty, so resolve was not accepted.".to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let network = env_string(&feed.env, "FE2VI_NETWORK");
+        let rpc = env_string(&feed.env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            pot.outcome = "contract_unreadable".to_string();
+            pot.reason = message.to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let args = serde_json::json!({ "game_id": match_id });
+        let encoded = match serde_json::to_vec(&args) {
+            Ok(bytes) => base64::engine::general_purpose::STANDARD.encode(bytes),
+            Err(_) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be encoded.".to_string();
+                return pot;
+            }
+        };
+        let (http_status, text) = match rpc_exchange(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": heist,
+                "method_name": "get_heist",
+                "args_base64": encoded,
+            }),
+        )
+        .await
+        {
+            Ok(pair) => pair,
+            Err(_) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be read.".to_string();
+                pot.contract_would_accept_resolve = false;
+                pot.pays = false;
+                return pot;
+            }
+        };
+        if http_status >= 400 {
+            pot.outcome = "contract_unreadable".to_string();
+            pot.reason = "The heist view could not be read.".to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let view = match contract_result_text(&text) {
+            Ok(view) => view,
+            Err(()) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be read.".to_string();
+                pot.contract_would_accept_resolve = false;
+                pot.pays = false;
+                return pot;
+            }
+        };
+        if view.trim() == "null" {
+            return crate::vault::contract_pot(match_id, "null", None);
+        }
+        let resolved = view.contains("\"resolved\":true");
+        let delisted = view.contains("\"delisted\":true");
+        let now_ns = if resolved || delisted {
+            None
+        } else {
+            match heist_block_time(&rpc, &text).await {
+                Some(now_ns) => Some(now_ns),
+                None => return crate::vault::contract_pot(match_id, &view, None),
+            }
+        };
+        crate::vault::contract_pot(match_id, &view, now_ns)
+    }
+
     async fn rpc_view(
         url: &str,
         account_id: &str,
@@ -1553,6 +1647,17 @@ mod edge {
             })),
             Err(failure) => Err(Error::RustError(failure.label())),
         }
+    }
+
+    async fn heist_block_time(rpc: &str, query_text: &str) -> Option<u64> {
+        let hash = pull_json_string(query_text, "block_hash")?;
+        let (status, block) = rpc_exchange(rpc, "block", serde_json::json!({ "block_id": hash }))
+            .await
+            .ok()?;
+        if status >= 400 {
+            return None;
+        }
+        crate::vault::pull_u64(&block, "timestamp")
     }
 
     async fn receipt_block_height(env: &Env, block_hash: &str) -> Result<u64> {
@@ -1910,5 +2015,41 @@ mod edge {
             "content-type, authorization",
         )?;
         Ok(response)
+    }
+
+    fn finished_match_id(path: &str) -> Option<&str> {
+        let rest = path.strip_prefix("/v1/matches/")?;
+        if rest.is_empty() || rest.contains('/') {
+            None
+        } else {
+            Some(rest)
+        }
+    }
+
+    fn contract_result_text(body: &str) -> Result<String, ()> {
+        let value: serde_json::Value = serde_json::from_str(body).map_err(|_| ())?;
+        if value.get("error").is_some_and(|item| !item.is_null()) {
+            return Err(());
+        }
+        let rows = value
+            .pointer("/result/result")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(())?;
+        let bytes: Vec<u8> = rows
+            .iter()
+            .filter_map(serde_json::Value::as_u64)
+            .map(|item| item as u8)
+            .collect();
+        String::from_utf8(bytes).map_err(|_| ())
+    }
+
+    fn pull_json_string(text: &str, field: &str) -> Option<String> {
+        let needle = format!("\"{field}\"");
+        let index = text.find(&needle)?;
+        let rest = text[index + needle.len()..].trim_start();
+        let rest = rest.strip_prefix(':')?.trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
     }
 }

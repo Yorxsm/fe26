@@ -7,9 +7,9 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use fe2vi_core::{
-    action_price, authorize_spend, default_platform_caps, event_json, pin_hash, round_index,
-    score_actions, split_pot, tape_winner, validate_rules, ActionKind, GameRules, PlatformCaps,
-    SpendRequest, SubmittedAction, TEMPLATE_CUP,
+    action_price, authorize_spend, default_platform_caps, event_json, pin_hash, resolve_call,
+    round_index, score_actions, split_pot, tape_winner, validate_rules, ActionKind, GameRules,
+    PlatformCaps, SpendRequest, SubmittedAction, TEMPLATE_CUP,
 };
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
@@ -382,18 +382,15 @@ impl HeistGame {
     /// the creator when nobody joined. A finished game splits by score.
     pub fn resolve(&mut self, game_id: String) {
         let mut game = self.take_game(&game_id);
-        require!(!game.resolved, "already resolved");
         let now = env::block_timestamp();
-        let duration_ns = game
-            .rules
-            .duration_seconds
-            .checked_mul(1_000_000_000)
-            .unwrap_or_else(|| env::panic_str("duration overflow"));
-        if !game.delisted {
-            require!(
-                now >= game.started_at_ns.saturating_add(duration_ns),
-                "game still running"
-            );
+        if let Err(reason) = resolve_call(
+            game.resolved,
+            game.delisted,
+            game.started_at_ns,
+            game.rules.duration_seconds,
+            now,
+        ) {
+            env::panic_str(reason);
         }
         game.resolved = true;
         let payouts = payouts_for(&game);

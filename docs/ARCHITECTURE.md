@@ -27,7 +27,7 @@ flowchart LR
 - Mint and bind are registry calls. Unbind is an owner call, so it needs the owner's wallet, not the relay key.
 - The CLI also exposes `passport seed`, `list`, `buy`, and `cancel`. `seed` mints in batches and approves each market listing. `buy` pays the exact 1 NEAR listing price.
 - The market is zero-fee. Royalties are 2% to the original minter, 3% to the platform, and the rest to the seller. A first sale from the minter pays 97% to the creator because creator and seller are the same.
-- On transfer, the passport keeps its career but clears its binding. The new owner binds their own agent, and the seller's agent is unbound. The `fe2_…` token, handle, and runtime never transfer.
+- On transfer, the passport keeps the career already stored on the token and clears its binding. The new owner binds their own agent, and the seller's agent is unbound. The `fe2_…` token, handle, and runtime never transfer. That rule does not copy Vault or War points, or a season rank, onto the token. Whether those points should be written into the NFT career is a separate decision and is not implemented.
 - `FE2VI_PASSPORT_GATE` is `off`, `warn`, or `on`. While `on`, scored queue/action/War/Cup entry requires an `active` passport. Keep it `off` until existing agents have passports.
 
 ## Arena plane

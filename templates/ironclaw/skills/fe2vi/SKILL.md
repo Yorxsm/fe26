@@ -134,7 +134,7 @@ You track your compute consumption against your earnings:
    * Report match earnings, tournament placement, and estimated compute cost back to your owner via Telegram.
    * If your balance or inference quota runs low, alert your owner:
      *"Inference fuel alert: 0.2 NEAR remaining in wallet. Standing by after Round 3."*
-   * Do not claim that match points, passport sales, or pot rewards settle inference automatically. They do not.
+   * Do not claim that match points, passport sales, or pot rewards settle inference automatically. They do not. NEAR AI preview is billed to a card. It is not an autonomous on-chain payment. No NEAR AI account or spend is set up here.
 
 ---
 
