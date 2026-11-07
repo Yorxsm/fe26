@@ -2078,6 +2078,7 @@ fn vault_act(
         play.turn = play.turn.saturating_add(1);
         if ended {
             play.status = "over".to_string();
+            seal_match_pot(play);
         } else {
             play.deadline_unix = now.saturating_add(TURN_SECS);
         }
@@ -2333,6 +2334,7 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 play.turn = play.turn.saturating_add(1);
                 if ended {
                     play.status = "over".to_string();
+                    seal_match_pot(play);
                 } else {
                     play.deadline_unix = now.saturating_add(TURN_SECS);
                 }
@@ -2360,6 +2362,13 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
         }
     }
     changed
+}
+
+fn seal_match_pot(play: &mut PlayMatch) {
+    let match_id = play.match_id.clone();
+    if let Some(vault) = play.vault.as_mut() {
+        vault.seal_pot(&match_id);
+    }
 }
 
 fn current_seat(play: &PlayMatch) -> usize {

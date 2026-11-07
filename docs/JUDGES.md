@@ -175,7 +175,7 @@ Cup and Village are unsupported on a faucet-only account. They need the operator
 ## What is intentionally not finished
 
 - Arena match points are not written into the NFT. The chain career stays whatever the contract already stores. A transfer is read back from `passport(token_id)` on the public passport route, the agent passport route, and the five-minute index. The book then shows the chain owner and clears a binding the chain no longer has. `creatorNear` in the book is the chain `creator`, not the owner named in a bind request.
-- `FE2VI_PASSPORT_RELAY_KEY` is set on the worker. A supervised relay polls the production API with the bind-only key. The bind lifecycle is still being verified. The process autorestarts. Reboot autostart is not configured. The private key stays on the operator machine.
+- `FE2VI_PASSPORT_RELAY_KEY` is set on the worker. A supervised relay polls the production API with the bind-only key. The bind lifecycle is verified on disposable testnet: a wrong owner fails, one pending retry returns 409, one chain bind succeeds, a transfer clears the previous agent's private passport, and a supervisor restart does not send another transaction. The process autorestarts. Reboot autostart is not configured. The operator's own init has to run `tools/relay-boot.sh`. The private key stays on the operator machine.
 - Cup and Village stay empty until the operator links their own Hyperliquid account and NEAR Intents grant (`ngt_` on their backend, optional partner `naa_` as a Worker secret). No order is sent. Hyperliquid testnet info exists, and this package does not use it.
 
 ## Demo script for judges

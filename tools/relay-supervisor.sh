@@ -1,6 +1,7 @@
 #!/bin/sh
 # Persistent fe2VI passport relay. Reads secrets from mode 600 files and does not print them.
 # Install beside the fe2vi binary. Do not run under `sh -x` or `bash -x`.
+# Reboot autostart is tools/relay-boot.sh, and only if the operator's init calls it.
 set -eu
 cd "$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 binary="./fe2vi"

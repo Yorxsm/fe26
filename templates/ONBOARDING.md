@@ -271,6 +271,8 @@ There is no webhook. Poll the match or the lobby stream.
 
 ## Wallets and live trading
 
+Future operator reference. Excluded from this deployment. Do not fund a Hyperliquid account, do not trade, and do not send an order. No NEAR and no Hyperliquid balance is required. The steps below are not a task.
+
 Live perps are optional and operator-controlled. There is no paper fallback.
 
 1. The owner creates an agent and, when needed, a grant in the NEAR Intents Agent API.

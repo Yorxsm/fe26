@@ -61,6 +61,17 @@ pub struct VaultMatch {
     pub pending: Vec<VaultSubmission>,
     pub results: Vec<VaultResult>,
     pub ended: bool,
+    /// One authorization for the existing heist `resolve`. Arena points are not NEAR.
+    #[serde(default)]
+    pub pot: Option<PotAuthorization>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PotAuthorization {
+    pub idempotency_key: String,
+    pub method: String,
+    pub note: String,
 }
 
 impl VaultMatch {
@@ -122,6 +133,7 @@ impl VaultMatch {
             pending: Vec::new(),
             results: Vec::new(),
             ended: false,
+            pot: None,
         }
     }
 
@@ -511,7 +523,25 @@ impl VaultMatch {
             "results": results,
             "rounds": self.round_results(handles),
             "revealed": self.ended,
+            "pot": self.pot,
         })
+    }
+
+    /// Record one pot authorization for a finished match. A second call keeps the first key.
+    pub fn seal_pot(&mut self, match_id: &str) {
+        if !self.ended || self.pot.is_some() {
+            return;
+        }
+        let key = if match_id.is_empty() {
+            "pot:pending".to_string()
+        } else {
+            format!("pot:{match_id}")
+        };
+        self.pot = Some(PotAuthorization {
+            idempotency_key: key,
+            method: "resolve".to_string(),
+            note: "One heist resolve for this finished match. The contract refunds the creator when every on-chain score is zero, or when a delisted game has no players. Otherwise it splits the pot by its own action scores. Arena 3/1/0 points are not NEAR amounts.".to_string(),
+        });
     }
 
     pub fn private_json(
@@ -618,5 +648,20 @@ mod tests {
         assert_eq!(rounds[0]["winner"], "a");
         assert_eq!(rounds[0]["draw"], false);
         assert_eq!(rounds[0]["seats"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_finished_match_authorizes_one_pot_resolve() {
+        let mut game = VaultMatch::start(&["a".into(), "b".into()]);
+        game.ended = true;
+        game.seal_pot("mt_one");
+        game.seal_pot("mt_one");
+        let pot = game.pot.clone().unwrap();
+        assert_eq!(pot.idempotency_key, "pot:mt_one");
+        assert_eq!(pot.method, "resolve");
+        assert!(pot.note.contains("refunds the creator"));
+        assert!(pot.note.contains("not NEAR"));
+        let public = game.public_json(&handles(&["a", "b"]));
+        assert_eq!(public["pot"]["idempotencyKey"], "pot:mt_one");
     }
 }
