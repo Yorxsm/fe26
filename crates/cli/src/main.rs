@@ -677,16 +677,17 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 }
                 other => Err(format!("unknown passport job kind: {other}")),
             };
-            let (status, tx_hash, error, token) = match result {
+            let (status, tx_hash, tx_block_hash, error, token) = match result {
                 Ok(output) => {
                     let receipt: serde_json::Value =
                         serde_json::from_str(&output).unwrap_or(serde_json::Value::Null);
                     let hash = receipt["result"]["transaction"]["hash"]
                         .as_str()
                         .map(str::to_string);
+                    let block_hash = receipt_block_hash(&receipt["result"]);
                     if receipt["alreadyBound"].as_bool().unwrap_or(false) {
                         processed += 1;
-                        ("done", None, None, token_id.to_string())
+                        ("done", None, None, None, token_id.to_string())
                     } else if receipt["broadcast"].as_bool().unwrap_or(false) {
                         if let Some(err) = execution_error(&receipt["result"]) {
                             failed += 1;
@@ -694,15 +695,16 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                                 Some(hash) => format!("execution failed {hash}: {err}"),
                                 None => format!("execution failed: {err}"),
                             };
-                            ("failed", hash, Some(detail), token_id.to_string())
+                            ("failed", hash, None, Some(detail), token_id.to_string())
                         } else {
                             processed += 1;
-                            ("done", hash, None, token_id.to_string())
+                            ("done", hash, block_hash, None, token_id.to_string())
                         }
                     } else {
                         failed += 1;
                         (
                             "failed",
+                            None,
                             None,
                             Some("relay did not broadcast".to_string()),
                             token_id.to_string(),
@@ -711,7 +713,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 }
                 Err(err) => {
                     failed += 1;
-                    ("failed", None, Some(err), token_id.to_string())
+                    ("failed", None, None, Some(err), token_id.to_string())
                 }
             };
             let mut complete = serde_json::json!({
@@ -720,6 +722,9 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
             });
             if let Some(hash) = tx_hash {
                 complete["txHash"] = serde_json::json!(hash);
+            }
+            if let Some(hash) = tx_block_hash {
+                complete["txBlockHash"] = serde_json::json!(hash);
             }
             if status == "done" {
                 if let Ok(view) = passport_state(config, &token) {
@@ -918,6 +923,16 @@ fn bind_job(
 /// `broadcast_tx_commit` returns a JSON-RPC result for a transaction that was
 /// included and then panicked. Inclusion is not success. `None` means the
 /// final status is `SuccessValue` and no receipt failed.
+fn receipt_block_hash(outcome: &serde_json::Value) -> Option<String> {
+    outcome
+        .get("receipts_outcome")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|receipts| receipts.last())
+        .and_then(|receipt| receipt.get("block_hash"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
 fn execution_error(outcome: &serde_json::Value) -> Option<String> {
     let mut failures = Vec::new();
     collect_status_failure(&outcome["status"], &mut failures);
@@ -1186,6 +1201,12 @@ mod tests {
             "receipts_outcome": [{"outcome": {"status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "agent bound"}}}}}}}]
         });
         assert!(execution_error(&partial).unwrap().contains("agent bound"));
+        assert_eq!(
+            receipt_block_hash(&serde_json::json!({
+                "receipts_outcome": [{"block_hash": "Ea81qwLjmq9YDNA72X5BJG48LXGw4338145EVf4XJyGv", "outcome": {"status": {"SuccessValue": ""}}}]
+            })).as_deref(),
+            Some("Ea81qwLjmq9YDNA72X5BJG48LXGw4338145EVf4XJyGv")
+        );
     }
 
     #[test]

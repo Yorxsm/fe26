@@ -344,15 +344,9 @@ mod edge {
                                     .map(|token_id| (job.job_id.clone(), token_id))
                             })
                             .collect();
-                        for (job_id, token_id) in pending {
-                            if let Ok(view) = passport_chain_view(&self.env, &token_id).await {
-                                let _ = crate::passport::reject_unconfirmed_bind(
-                                    &mut arena,
-                                    &job_id,
-                                    view.as_ref(),
-                                    chain_now,
-                                );
-                            }
+                        for (_, token_id) in pending {
+                            let _ =
+                                reconcile_token(&self.env, &mut arena, &token_id, chain_now).await;
                         }
                     }
                 }
@@ -394,7 +388,20 @@ mod edge {
                             .any(|passport| passport.token_id.as_deref() == Some(token_id))
                     {
                         match passport_chain_view(&self.env, token_id).await {
-                            Ok(Some(view)) => {
+                            Ok(Some(observed)) => {
+                                let Some(view) = observed.view else {
+                                    return with_cors(
+                                        Response::ok(
+                                            serde_json::json!({
+                                                "error": "not_found",
+                                                "message": "No passport with that token id.",
+                                            })
+                                            .to_string(),
+                                        )?
+                                        .with_status(404),
+                                        "application/json",
+                                    );
+                                };
                                 let body = crate::passport::chain_passport_json(token_id, &view)
                                     .to_string();
                                 return with_cors(
@@ -468,23 +475,59 @@ mod edge {
                                     })
                                     .and_then(|passport| passport.token_id.clone());
                                 let chain_now = worker::Date::now().as_millis() / 1000;
-                                let changed = match token_id.as_deref() {
-                                    Some(token_id) => {
-                                        match passport_chain_view(&self.env, token_id).await {
-                                            Ok(view) => crate::passport::reject_unconfirmed_bind(
-                                                &mut arena,
-                                                job_id,
-                                                view.as_ref(),
-                                                chain_now,
-                                            ),
-                                            Err(_) => crate::passport::defer_unconfirmed_bind(
-                                                &mut arena, job_id, chain_now,
-                                            ),
+                                let block_hash = arena
+                                    .book
+                                    .passport_jobs
+                                    .iter()
+                                    .find(|job| job.job_id == job_id)
+                                    .map(|job| job.tx_block_hash.clone())
+                                    .unwrap_or_default();
+                                if !block_hash.is_empty() {
+                                    if let Ok(height) =
+                                        receipt_block_height(&self.env, &block_hash).await
+                                    {
+                                        if let Some(job) = arena
+                                            .book
+                                            .passport_jobs
+                                            .iter_mut()
+                                            .find(|job| job.job_id == job_id)
+                                        {
+                                            job.tx_block_height = height;
                                         }
                                     }
-                                    None => crate::passport::reject_unconfirmed_bind(
-                                        &mut arena, job_id, None, chain_now,
-                                    ),
+                                }
+                                let changed = match token_id.as_deref() {
+                                    Some(token_id) if !block_hash.is_empty() => {
+                                        match passport_chain_view_at(
+                                            &self.env,
+                                            token_id,
+                                            Some(&block_hash),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Some(observed)) => {
+                                                if observed.block_height > 0 {
+                                                    if let Some(job) = arena
+                                                        .book
+                                                        .passport_jobs
+                                                        .iter_mut()
+                                                        .find(|job| job.job_id == job_id)
+                                                    {
+                                                        job.tx_block_height = observed.block_height;
+                                                    }
+                                                }
+                                                crate::passport::judge_completed_bind(
+                                                    &mut arena,
+                                                    job_id,
+                                                    observed.view.as_ref(),
+                                                    observed.block_height,
+                                                    chain_now,
+                                                )
+                                            }
+                                            Ok(None) | Err(_) => false,
+                                        }
+                                    }
+                                    _ => false,
                                 };
                                 if changed {
                                     body = crate::passport::complete_response(&arena, job_id)
@@ -686,6 +729,8 @@ mod edge {
             "ALTER TABLE player_passports ADD COLUMN career_json TEXT NOT NULL DEFAULT 'null'",
             "ALTER TABLE player_passport_jobs ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE player_passport_jobs ADD COLUMN error TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_block_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_block_height INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
         }
@@ -872,6 +917,10 @@ mod edge {
             tx_hash: String,
             #[serde(default)]
             error: String,
+            #[serde(default)]
+            tx_block_hash: String,
+            #[serde(default)]
+            tx_block_height: i64,
         }
         let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let tokens = sql
@@ -940,7 +989,7 @@ mod edge {
             .to_array::<PassportRow>()?;
         let passport_jobs = sql
             .exec(
-                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error FROM player_passport_jobs",
+                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error, tx_block_hash, tx_block_height FROM player_passport_jobs",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<PassportJobRow>()?;
@@ -1076,6 +1125,8 @@ mod edge {
                     updated_unix: row.updated_unix.max(0) as u64,
                     tx_hash: row.tx_hash,
                     error: row.error,
+                    tx_block_hash: row.tx_block_hash,
+                    tx_block_height: row.tx_block_height.max(0) as u64,
                 })
                 .collect(),
         }))
@@ -1309,7 +1360,7 @@ mod edge {
         }
         for row in &plan.upsert_passport_jobs {
             sql.exec(
-                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, tx_hash = excluded.tx_hash, error = excluded.error",
+                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error, tx_block_hash, tx_block_height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, tx_hash = excluded.tx_hash, error = excluded.error, tx_block_hash = excluded.tx_block_hash, tx_block_height = excluded.tx_block_height",
                 Some(vec![
                     row.job_id.clone().into(),
                     row.kind.clone().into(),
@@ -1323,6 +1374,8 @@ mod edge {
                     (row.updated_unix as i64).into(),
                     row.tx_hash.clone().into(),
                     row.error.clone().into(),
+                    row.tx_block_hash.clone().into(),
+                    (row.tx_block_height as i64).into(),
                 ]),
             )?;
         }
@@ -1425,34 +1478,37 @@ mod edge {
         else {
             return Ok(false);
         };
-        let Some(view) = passport_chain_view(env, token_id).await? else {
+        let Some(observed) = passport_chain_view(env, token_id).await? else {
             return Ok(false);
         };
-        let changed =
-            crate::passport::reconcile_passport(&mut arena.book.passports[index], &view, now);
-        let token_id = token_id.to_string();
-        let job_ids: Vec<String> = arena
-            .book
-            .passport_jobs
-            .iter()
-            .filter(|job| {
-                job.kind == "bind"
-                    && job.status == "done"
-                    && arena.book.passports.iter().any(|passport| {
-                        passport.passport_id == job.passport_id
-                            && passport.token_id.as_deref() == Some(token_id.as_str())
-                    })
-            })
-            .map(|job| job.job_id.clone())
-            .collect();
-        let mut rejected = false;
-        for job_id in job_ids {
-            rejected |= crate::passport::reject_unconfirmed_bind(arena, &job_id, Some(&view), now);
-        }
-        Ok(changed || rejected)
+        let Some(view) = observed.view else {
+            return Ok(false);
+        };
+        let book = &mut arena.book;
+        let changed = crate::passport::reconcile_passport(
+            &mut book.passports[index],
+            &view,
+            now,
+            observed.block_height,
+            &mut book.passport_jobs,
+        );
+        Ok(changed)
     }
 
-    async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
+    struct ObservedPassport {
+        view: Option<serde_json::Value>,
+        block_height: u64,
+    }
+
+    async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<ObservedPassport>> {
+        passport_chain_view_at(env, token_id, None).await
+    }
+
+    async fn passport_chain_view_at(
+        env: &Env,
+        token_id: &str,
+        block_id: Option<&str>,
+    ) -> Result<Option<ObservedPassport>> {
         let network = env_string(env, "FE2VI_NETWORK");
         let rpc = env_string(env, "FE2VI_RPC_URL");
         indexer::allow_chain_rpc(&network, &rpc)
@@ -1466,24 +1522,46 @@ mod edge {
         let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
             .map_err(|err| Error::RustError(err.to_string()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(args);
-        let (status, text) = rpc_exchange(
-            &rpc,
-            "query",
-            serde_json::json!({
-                "request_type": "call_function",
-                "finality": "final",
-                "account_id": account_id,
-                "method_name": "passport",
-                "args_base64": encoded,
-            }),
-        )
-        .await
-        .map_err(|_| Error::RustError("transport".into()))?;
+        let mut params = serde_json::json!({
+            "request_type": "call_function",
+            "account_id": account_id,
+            "method_name": "passport",
+            "args_base64": encoded,
+        });
+        if let Some(block_id) = block_id {
+            params["block_id"] = serde_json::json!(block_id);
+        } else {
+            params["finality"] = serde_json::json!("final");
+        }
+        let (status, text) = rpc_exchange(&rpc, "query", params)
+            .await
+            .map_err(|_| Error::RustError("transport".into()))?;
+        let envelope: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        let block_height = envelope
+            .pointer("/result/block_height")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         match indexer::interpret_rpc_query(status, &text) {
-            Ok(value) if value.is_null() => Ok(None),
-            Ok(value) => Ok(Some(value)),
+            Ok(value) if value.is_null() => Ok(Some(ObservedPassport {
+                view: None,
+                block_height,
+            })),
+            Ok(value) => Ok(Some(ObservedPassport {
+                view: Some(value),
+                block_height,
+            })),
             Err(failure) => Err(Error::RustError(failure.label())),
         }
+    }
+
+    async fn receipt_block_height(env: &Env, block_hash: &str) -> Result<u64> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        indexer::allow_chain_rpc(&network, &rpc)
+            .map_err(|message| Error::RustError(message.to_string()))?;
+        let block = rpc_call(&rpc, "block", serde_json::json!({"block_id": block_hash})).await?;
+        indexer::block_height(&block).ok_or_else(|| Error::RustError("block height missing".into()))
     }
 
     fn socket_tag(game_id: &str) -> String {

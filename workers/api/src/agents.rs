@@ -79,6 +79,12 @@ pub struct PassportJob {
     /// Why a finished job failed. Empty on success.
     #[serde(default)]
     pub error: String,
+    /// Block hash of the receipt that executed the call. Empty when no transaction was sent.
+    #[serde(default)]
+    pub tx_block_hash: String,
+    /// Height of that receipt block. Zero until the API has resolved the hash.
+    #[serde(default)]
+    pub tx_block_height: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
