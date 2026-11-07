@@ -155,6 +155,14 @@ enum Command {
         #[command(subcommand)]
         action: IntentsCommand,
     },
+    /// Submit factory settle_vault for one finished Vault match, then ask the API to read the receipt.
+    /// The signer is FE2VI_SETTLER_SECRET_KEY, not the passport bind key. Without it, this prints the call and does not broadcast.
+    SettleVault {
+        #[arg(long)]
+        match_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Poll the spectator API, or a heist view if no API is configured.
     Watch {
         #[arg(long)]
@@ -165,6 +173,7 @@ enum Command {
     },
 }
 
+#[derive(Clone)]
 struct Config {
     rpc_url: String,
     account_id: Option<String>,
@@ -179,7 +188,12 @@ struct Config {
 
 fn redact_line(text: &str) -> String {
     let mut redacted = text.to_string();
-    for name in ["FE2VI_SIGNER_SECRET_KEY", "FE2VI_PASSPORT_RELAY_KEY"] {
+    for name in [
+        "FE2VI_SIGNER_SECRET_KEY",
+        "FE2VI_PASSPORT_RELAY_KEY",
+        "FE2VI_SETTLER_SECRET_KEY",
+        "FE2VI_SETTLER_KEY",
+    ] {
         if let Ok(value) = std::env::var(name) {
             if value.len() >= 8 {
                 redacted = redacted.replace(&value, "[redacted]");
@@ -483,6 +497,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
             PassportCommand::Relay { once } => relay(config, once),
         },
         Command::Intents { action } => intents(action),
+        Command::SettleVault { match_id, dry_run } => settle_vault(config, &match_id, dry_run),
         Command::Watch { game_id, once } => watch(config, &game_id, once),
     }
 }
@@ -567,7 +582,7 @@ fn seed(
                 "mint_unbound_batch",
                 &args,
                 deposit,
-                300_000_000_000_000,
+                80_000_000_000_000,
             )?;
             minted = minted.saturating_add(chunk.len() as u32);
         }
@@ -608,6 +623,97 @@ fn seed(
         "market_id": config.passport_market_id,
     }))
     .unwrap_or_else(|_| "{}".into()))
+}
+
+fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String, String> {
+    let api = config
+        .api_url
+        .as_deref()
+        .ok_or("FE2VI_API_URL is required")?
+        .trim_end_matches('/')
+        .to_string();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let match_body = api_get(&client, &format!("{api}/v1/matches/{match_id}"))?;
+    let pot = match_body
+        .pointer("/vault/pot")
+        .cloned()
+        .ok_or("match has no vault result")?;
+    let outcome = pot["outcome"].as_str().unwrap_or("");
+    let rule = pot["rule"].as_str().unwrap_or("");
+    if pot["settled"].as_bool().unwrap_or(false) {
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "broadcast": false,
+            "settled": true,
+            "txHash": pot["txHash"],
+            "reason": "already settled",
+        }))
+        .unwrap_or_else(|_| "{}".into()));
+    }
+    if rule != "winner-takes-all" || !matches!(outcome, "win" | "draw" | "cancel") {
+        return Err("match is unmapped or not a vault result; no account was invented".into());
+    }
+    let winner = pot["winner"].as_str().unwrap_or("");
+    if outcome == "win" && winner.is_empty() {
+        return Err("win has no linked account".into());
+    }
+    let factory = std::env::var("FE2VI_FACTORY_ID")
+        .unwrap_or_else(|_| "factory.fe2vidisp7a3c.testnet".into());
+    let args = serde_json::json!({
+        "game_id": match_id,
+        "outcome": outcome,
+        "winner": if outcome == "win" { serde_json::Value::String(winner.into()) } else { serde_json::Value::Null },
+    });
+    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY").ok();
+    let mut settling = config.clone();
+    settling.signer_secret = secret.clone();
+    let submitted = submit(
+        &settling,
+        dry_run || secret.is_none(),
+        &factory,
+        "settle_vault",
+        &args,
+        0,
+        300_000_000_000_000,
+    )?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&submitted).unwrap_or(serde_json::Value::Null);
+    let broadcast = parsed["broadcast"].as_bool().unwrap_or(false);
+    if !broadcast {
+        return Ok(submitted);
+    }
+    let tx_hash = parsed
+        .pointer("/result/transaction/hash")
+        .or_else(|| parsed.pointer("/result/transaction_outcome/id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let bearer = std::env::var("FE2VI_SETTLER_KEY")
+        .map_err(|_| "FE2VI_SETTLER_KEY is required to record the receipt")?;
+    let account = settling.account_id.clone().unwrap_or_default();
+    let recorded = api_post(
+        &client,
+        &format!("{api}/v1/internal/vault/matches/{match_id}/receipt"),
+        &bearer,
+        &serde_json::json!({ "txHash": tx_hash, "senderAccountId": account }),
+    )?;
+    if recorded["settled"].as_bool() != Some(true) {
+        return Err(format!("receipt was not accepted: {recorded}"));
+    }
+    Ok(serde_json::to_string_pretty(&recorded).unwrap_or_else(|_| "{}".into()))
+}
+
+fn api_get(client: &reqwest::blocking::Client, url: &str) -> Result<serde_json::Value, String> {
+    let response = client.get(url).send().map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}: {text}"));
+    }
+    serde_json::from_str(&text).map_err(|err| format!("api body: {err}"))
 }
 
 fn relay(config: &Config, once: bool) -> Result<String, String> {

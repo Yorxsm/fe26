@@ -87,6 +87,14 @@ pub struct PotAuthorization {
     pub winner: String,
     #[serde(default)]
     pub participants: Vec<String>,
+    /// True only after a FINAL `vault_settled` receipt matches this result.
+    #[serde(default)]
+    pub settled: bool,
+    #[serde(default)]
+    pub tx_hash: String,
+    /// Set for a cancel. A win or draw does not use it as a payee.
+    #[serde(default)]
+    pub creator: String,
 }
 
 fn awaiting_contract_view() -> String {
@@ -635,7 +643,131 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         rule: String::new(),
         winner: String::new(),
         participants: Vec::new(),
+        settled: false,
+        tx_hash: String::new(),
+        creator: String::new(),
     }
+}
+
+/// Accept a settlement only when the FINAL receipt pays the recorded result.
+/// A second report of the same transaction returns the same record.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn confirm_vault_receipt(
+    pot: &PotAuthorization,
+    tx_hash: &str,
+    tx_result: &serde_json::Value,
+) -> Result<PotAuthorization, &'static str> {
+    let tx_hash = tx_hash.trim();
+    if tx_hash.is_empty() {
+        return Err("tx hash required");
+    }
+    if pot.settled {
+        return if pot.tx_hash == tx_hash {
+            Ok(pot.clone())
+        } else {
+            Err("already settled")
+        };
+    }
+    if pot.rule != "winner-takes-all"
+        || matches!(
+            pot.outcome.as_str(),
+            "unmapped" | "awaiting_contract_view" | ""
+        )
+    {
+        return Err("match is not ready to settle");
+    }
+    let status = tx_result
+        .pointer("/status")
+        .or_else(|| tx_result.get("status"));
+    let success = status
+        .map(|value| value.get("SuccessValue").is_some() || value.get("successValue").is_some())
+        .unwrap_or(false);
+    if !success {
+        return Err("transaction is not final success");
+    }
+    let event = vault_settled_event(tx_result).ok_or("vault_settled receipt missing")?;
+    let id = event
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let idem = pot.idempotency_key.strip_prefix("pot:").unwrap_or("");
+    if id.is_empty() || id != idem {
+        return Err("receipt is for a different game");
+    }
+    if event.get("outcome").and_then(|value| value.as_str()) != Some(pot.outcome.as_str()) {
+        return Err("receipt outcome does not match the match");
+    }
+    let payouts = event
+        .get("payouts")
+        .and_then(|value| value.as_array())
+        .ok_or("receipt has no payouts")?;
+    let mut got: Vec<(String, u128)> = Vec::new();
+    let mut total = 0_u128;
+    for row in payouts {
+        let account = row
+            .get("account")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let amount = row
+            .get("amount")
+            .and_then(|value| value.as_str())
+            .unwrap_or("0")
+            .parse::<u128>()
+            .map_err(|_| "payout amount is not an integer")?;
+        total = total.saturating_add(amount);
+        got.push((account, amount));
+    }
+    let call = match pot.outcome.as_str() {
+        "win" => fe2vi_core::VaultPotCall::Win {
+            winner: pot.winner.clone(),
+        },
+        "draw" => fe2vi_core::VaultPotCall::Draw,
+        "cancel" => fe2vi_core::VaultPotCall::Cancel,
+        _ => return Err("match is not ready to settle"),
+    };
+    let mut expected = fe2vi_core::vault_pot_shares(total, &pot.creator, &pot.participants, &call)
+        .map_err(|_| "receipt payees do not match the match")?;
+    expected.sort();
+    got.sort();
+    if got != expected {
+        return Err("receipt payees do not match the match");
+    }
+    let mut next = pot.clone();
+    next.settled = true;
+    next.pays = true;
+    next.tx_hash = tx_hash.to_string();
+    next.reason =
+        "FINAL vault_settled receipt matches this result. A replay does not pay again.".to_string();
+    Ok(next)
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn vault_settled_event(tx_result: &serde_json::Value) -> Option<serde_json::Value> {
+    let receipts = tx_result
+        .get("receipts_outcome")
+        .and_then(|value| value.as_array())?;
+    for receipt in receipts {
+        let status = receipt.pointer("/outcome/status")?;
+        if status.get("Failure").is_some() || status.get("failure").is_some() {
+            continue;
+        }
+        let logs = receipt.pointer("/outcome/logs")?.as_array()?;
+        for line in logs {
+            let line = line.as_str()?;
+            let json = line.strip_prefix("EVENT_JSON:")?;
+            let event: serde_json::Value = serde_json::from_str(json).ok()?;
+            if event.get("event").and_then(|value| value.as_str()) != Some("vault_settled") {
+                continue;
+            }
+            return event
+                .get("data")
+                .and_then(|value| value.as_array())
+                .and_then(|rows| rows.first())
+                .cloned();
+        }
+    }
+    None
 }
 
 /// Apply `fe2vi_core::resolve_call` to a `get_heist` body. `pays` stays false.
@@ -876,6 +1008,51 @@ mod tests {
         missing.ended = true;
         missing.seal_vault_result("mt_none", &[("a".into(), 1, None)]);
         assert_eq!(missing.pot.unwrap().outcome, "unmapped");
+    }
+
+    #[test]
+    fn a_receipt_settles_only_the_recorded_payee_and_replay_does_not_change_it() {
+        let mut pot = stored_pot("mt_win");
+        pot.rule = "winner-takes-all".to_string();
+        pot.outcome = "win".to_string();
+        pot.winner = "ann.testnet".to_string();
+        pot.participants = vec!["ann.testnet".into(), "bob.testnet".into()];
+        let tx = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{
+                "outcome": {
+                    "status": {"SuccessValue": ""},
+                    "logs": ["EVENT_JSON:{\"event\":\"vault_settled\",\"data\":[{\"id\":\"mt_win\",\"outcome\":\"win\",\"payouts\":[{\"account\":\"ann.testnet\",\"amount\":\"10\"}]}]}"]
+                }
+            }]
+        });
+        let settled = confirm_vault_receipt(&pot, "tx1", &tx).unwrap();
+        assert!(settled.settled && settled.pays);
+        assert_eq!(settled.tx_hash, "tx1");
+        let again = confirm_vault_receipt(&settled, "tx1", &tx).unwrap();
+        assert_eq!(again, settled);
+        assert_eq!(
+            confirm_vault_receipt(&settled, "tx2", &tx).unwrap_err(),
+            "already settled"
+        );
+        let wrong = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{
+                "outcome": {
+                    "status": {"SuccessValue": ""},
+                    "logs": ["EVENT_JSON:{\"event\":\"vault_settled\",\"data\":[{\"id\":\"mt_win\",\"outcome\":\"win\",\"payouts\":[{\"account\":\"bob.testnet\",\"amount\":\"10\"}]}]}"]
+                }
+            }]
+        });
+        assert_eq!(
+            confirm_vault_receipt(&pot, "tx3", &wrong).unwrap_err(),
+            "receipt payees do not match the match"
+        );
+        pot.outcome = "unmapped".to_string();
+        assert_eq!(
+            confirm_vault_receipt(&pot, "tx4", &tx).unwrap_err(),
+            "match is not ready to settle"
+        );
     }
 
     #[test]

@@ -211,6 +211,34 @@ mod edge {
                 attach_player_book(&sql, &mut arena)?
             };
             let route_path = route.split('?').next().unwrap_or(route.as_str());
+            if method == "POST" {
+                if let Some(match_id) = vault_receipt_match(route_path) {
+                    let key = self
+                        .env
+                        .var("FE2VI_SETTLER_KEY")
+                        .ok()
+                        .map(|value| value.to_string())
+                        .unwrap_or_default();
+                    let presented = authorization.clone().unwrap_or_default();
+                    if key.trim().is_empty() || presented != format!("Bearer {key}") {
+                        return with_cors(Response::empty()?.with_status(404), "text/plain");
+                    }
+                    let (status, response_body, mutated) =
+                        vault_receipt(self, &mut arena, match_id, &body).await?;
+                    if mutated {
+                        let plan = crate::agents::plan_writes(&before_book, &arena.book);
+                        if !plan.is_empty() {
+                            let sql = self.state.storage().sql();
+                            apply_sql_plan(&sql, &plan)?;
+                        }
+                        storage.put("arena", &arena).await?;
+                    }
+                    return with_cors(
+                        Response::ok(response_body)?.with_status(status),
+                        "application/json",
+                    );
+                }
+            }
             if route_path.starts_with("/v1/internal/passport") {
                 let key = self
                     .env
@@ -1413,6 +1441,107 @@ mod edge {
         .collect()
     }
 
+    async fn vault_receipt(
+        feed: &SpectatorFeed,
+        arena: &mut ArenaState,
+        match_id: &str,
+        body: &str,
+    ) -> Result<(u16, String, bool)> {
+        let request: serde_json::Value =
+            serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+        let tx_hash = request
+            .get("txHash")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let sender = request
+            .get("senderAccountId")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let Some(index) = arena
+            .book
+            .matches
+            .iter()
+            .position(|play| play.match_id == match_id)
+        else {
+            return Ok((
+                404,
+                r#"{"error":"not_found","message":"No match with that id."}"#.into(),
+                false,
+            ));
+        };
+        let Some(pot) = arena.book.matches[index]
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.pot.clone())
+        else {
+            return Ok((
+                409,
+                r#"{"error":"not_ready","message":"This match has no vault result."}"#.into(),
+                false,
+            ));
+        };
+        if pot.settled && pot.tx_hash == tx_hash {
+            return Ok((
+                200,
+                serde_json::to_string(&pot).unwrap_or_else(|_| "{}".into()),
+                false,
+            ));
+        }
+        let network = env_string(&feed.env, "FE2VI_NETWORK");
+        let rpc = env_string(&feed.env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            return Ok((
+                503,
+                serde_json::json!({"error":"chain_unavailable","message":message}).to_string(),
+                false,
+            ));
+        }
+        let tx = match rpc_call(
+            &rpc,
+            "EXPERIMENTAL_tx_status",
+            serde_json::json!({
+                "tx_hash": tx_hash,
+                "sender_account_id": sender,
+                "wait_until": "FINAL",
+            }),
+        )
+        .await
+        {
+            Ok(tx) => tx,
+            Err(_) => {
+                return Ok((
+                    503,
+                    r#"{"error":"chain_unavailable","message":"The settlement receipt could not be read."}"#
+                        .into(),
+                    false,
+                ));
+            }
+        };
+        let result = tx.get("result").cloned().unwrap_or(tx);
+        match crate::vault::confirm_vault_receipt(&pot, &tx_hash, &result) {
+            Ok(next) => {
+                if let Some(vault) = arena.book.matches[index].vault.as_mut() {
+                    vault.pot = Some(next.clone());
+                }
+                Ok((
+                    200,
+                    serde_json::to_string(&next).unwrap_or_else(|_| "{}".into()),
+                    true,
+                ))
+            }
+            Err(message) => Ok((
+                409,
+                serde_json::json!({"error":"settlement_rejected","message":message,"settled":false})
+                    .to_string(),
+                false,
+            )),
+        }
+    }
+
     async fn heist_pot(feed: &SpectatorFeed, match_id: &str) -> crate::vault::PotAuthorization {
         let mut pot = crate::vault::contract_pot(match_id, "null", None);
         pot.outcome = "not_linked".to_string();
@@ -2015,6 +2144,16 @@ mod edge {
             "content-type, authorization",
         )?;
         Ok(response)
+    }
+
+    fn vault_receipt_match(path: &str) -> Option<&str> {
+        let rest = path.strip_prefix("/v1/internal/vault/matches/")?;
+        let id = rest.strip_suffix("/receipt")?;
+        if id.is_empty() || id.contains('/') {
+            None
+        } else {
+            Some(id)
+        }
     }
 
     fn finished_match_id(path: &str) -> Option<&str> {

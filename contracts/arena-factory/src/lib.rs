@@ -110,8 +110,9 @@ impl ArenaFactory {
         )
     }
 
-    /// Owner-only. Forwards a Vault result to heist `settle_vault`. The heist
-    /// contract rejects a second settlement. This does not change action-score games.
+    /// Owner-only. This is one operator account, not a trustless proof.
+    /// Forwards a Vault result to heist `settle_vault`. The heist contract
+    /// rejects a second settlement. Heist Night and Cup keep action-score resolve.
     pub fn settle_vault(
         &mut self,
         game_id: String,
