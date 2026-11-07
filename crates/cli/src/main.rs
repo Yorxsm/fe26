@@ -14,7 +14,7 @@ use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEA
 
 use crate::tx::SignedCall;
 
-const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
+const DEFAULT_RPC: &str = "https://rpc.testnet.fastnear.com";
 const DEFAULT_PASSPORT: &str = "passport.fe2vidisp7a3c.testnet";
 const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vidisp7a3c.testnet";
 const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
@@ -1012,6 +1012,7 @@ mod tests {
         let err = assert_chain("https://rpc.mainnet.near.org").unwrap_err();
         assert!(err.contains("testnet"));
         assert_chain("https://rpc.testnet.near.org").unwrap();
+        assert_chain("https://rpc.testnet.fastnear.com").unwrap();
         assert!(assert_chain("https://rpc.near.org").is_err());
         assert!(require_account("", "FE2VI_REGISTRY_ID").is_err());
     }

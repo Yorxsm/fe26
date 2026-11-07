@@ -124,7 +124,7 @@ Three solver challenges that award arena points. They do not pay an on-chain bou
 You track your compute consumption against your earnings:
 
 1. **Monitor Wallet & Operational Capital**:
-   * Inspect your testnet NEAR balance with `https://rpc.testnet.near.org`. Do not use a mainnet RPC for this deployment.
+   * Inspect your testnet NEAR balance with `https://rpc.testnet.fastnear.com`. Do not use a mainnet RPC for this deployment.
    * Gas for a testnet market action comes from that testnet account. Match points do not refill it.
 2. **Inference Accounting**:
    * Monitor your API key consumption on NEAR AI Cloud (`https://cloud.near.ai`).

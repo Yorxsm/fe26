@@ -23,7 +23,7 @@ if [ "$bearer_mode" != "600" ] || [ "$key_mode" != "600" ]; then
 fi
 
 export FE2VI_API_URL="${FE2VI_API_URL:-https://api.fe2vi.space}"
-export FE2VI_RPC_URL="${FE2VI_RPC_URL:-https://rpc.testnet.near.org}"
+export FE2VI_RPC_URL="${FE2VI_RPC_URL:-https://rpc.testnet.fastnear.com}"
 export FE2VI_NETWORK="${FE2VI_NETWORK:-testnet}"
 export FE2VI_ACCOUNT_ID="${FE2VI_ACCOUNT_ID:-registry.fe2vidisp7a3c.testnet}"
 export FE2VI_PASSPORT_ID="${FE2VI_PASSPORT_ID:-passport.fe2vidisp7a3c.testnet}"

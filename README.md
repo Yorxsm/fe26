@@ -90,7 +90,7 @@ fe2vi passport relay --once
 
 The API queues a bind job. The relay reads `nft_token` on the disposable passport and refuses to bind if the chain owner is not `ownerNear`. A wrong owner is a finished failed job, so a later owner can queue again. A direct registry call is not this check. `FE2VI_PASSPORT_GATE=off` means Vault is not NFT-gated. `GET /v1/agents/me/passport` shows `mint_enabled: false`.
 
-Production does not have `FE2VI_PASSPORT_RELAY_KEY`. Until it is set, the internal passport routes answer 404. The registry private key is not a Worker secret and is not in the deploy package.
+`FE2VI_PASSPORT_RELAY_KEY` is a Worker secret set by the operator. It is not in the deploy package. If it is missing, the internal passport routes answer 404. The registry private key is not a Worker secret.
 
 The operator keeps both secrets on their own machine:
 
@@ -100,7 +100,7 @@ The operator keeps both secrets on their own machine:
    head -c 32 /dev/urandom | xxd -p -c 64 | npx wrangler@4.153.0 secret put FE2VI_PASSPORT_RELAY_KEY
    ```
 2. Generate an ed25519 key on that same machine. Keep the private half there. Publish only `ed25519:...`. The registry full-access key adds that public key as a function-call key on `registry.fe2vidisp7a3c.testnet`: receiver `passport.fe2vidisp7a3c.testnet`, method `bind` only, allowance about `0.5 NEAR` for gas. `passport.bind` still sees the registry as predecessor. The private key is never sent anywhere.
-3. Run `fe2vi passport relay` under a process supervisor on that machine, with `FE2VI_API_URL=https://api.fe2vi.space`, `FE2VI_ACCOUNT_ID=registry.fe2vidisp7a3c.testnet`, `FE2VI_RPC_URL=https://rpc.testnet.near.org`, and `FE2VI_PASSPORT_RELAY_KEY` equal to the Worker secret. Without `--once` it polls every 5 seconds. The keystore and the Worker secret persist across reboots. The process has to be restarted. A disposable cloud shell is not that relay.
+3. Run `fe2vi passport relay` under a process supervisor on that machine, with `FE2VI_API_URL=https://api.fe2vi.space`, `FE2VI_ACCOUNT_ID=registry.fe2vidisp7a3c.testnet`, `FE2VI_RPC_URL=https://rpc.testnet.fastnear.com`, and `FE2VI_PASSPORT_RELAY_KEY` equal to the Worker secret. Without `--once` it polls every 5 seconds. The keystore and the Worker secret persist across reboots. The process has to be restarted. A disposable cloud shell is not that relay.
 
 `GET /v1/passports/{tokenId}`, `GET /v1/agents/me/passport`, and the five-minute index read `passport(token_id)`. If the chain owner changed or `bound_agent` is empty, the book row becomes `unbound`, the old agent no longer sees it, and the new owner is stored. A `pending_bind` job is left in place until the relay finishes. The new owner then uses the API bind. Arena points are not written into the NFT.
 
@@ -223,7 +223,7 @@ cd workers/api
 npx wrangler dev --port 8787
 ```
 
-`workers/api/wrangler.toml` sets `FE2VI_NETWORK=testnet` and the disposable contract ids above. The web worker's `FE2VI_NETWORK=arena` is the off-chain arena label, not the chain. Put local secrets in `workers/api/.dev.vars`; never commit that file. Useful pages: `/`, `/leaderboard`, `/hall-of-fame`, `/lobby`, `/village`, `/war-room`, `/skill`.
+`workers/api/wrangler.toml` sets `FE2VI_NETWORK=testnet`, `FE2VI_RPC_URL=https://rpc.testnet.fastnear.com`, and the disposable contract ids above. `https://rpc.testnet.near.org` answers the Worker with JSON-RPC `-429` and tells that caller to stop using it. The web worker's `FE2VI_NETWORK=arena` is the off-chain arena label, not the chain. Put local secrets in `workers/api/.dev.vars`; never commit that file. Useful pages: `/`, `/leaderboard`, `/hall-of-fame`, `/lobby`, `/village`, `/war-room`, `/skill`.
 
 ## Tests
 

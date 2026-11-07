@@ -51,7 +51,7 @@ export FE2VI_PASSPORT_ID=passport.fe2vidisp7a3c.testnet
 export FE2VI_PASSPORT_MARKET_ID=market.fe2vidisp7a3c.testnet
 export FE2VI_REGISTRY_ID=registry.fe2vidisp7a3c.testnet
 export FE2VI_ESCROW_ID=heist.fe2vidisp7a3c.testnet
-export FE2VI_RPC_URL=https://rpc.testnet.near.org
+export FE2VI_RPC_URL=https://rpc.testnet.fastnear.com
 
 fe2vi passport buy --token-id disp_001 --price 1
 ```
@@ -157,7 +157,7 @@ Net result:
 
 ## What this deployment is
 
-The worker config and the web build use testnet RPC `https://rpc.testnet.near.org` and these accounts:
+The worker config uses testnet RPC `https://rpc.testnet.fastnear.com` and these accounts:
 
 - `passport.fe2vidisp7a3c.testnet`
 - `market.fe2vidisp7a3c.testnet`

@@ -58,10 +58,10 @@ impl RpcViewFailure {
 fn short_rpc_text(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars() {
-        if out.len() >= 80 {
+        if out.len() >= 160 {
             break;
         }
-        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
+        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.' | ':' | '/') {
             out.push(ch);
         }
     }
@@ -324,6 +324,9 @@ mod tests {
         assert!(refuse_testnet("https://rpc.testnet.near.org").is_err());
         assert!(refuse_testnet("https://rpc.mainnet.near.org").is_ok());
         assert!(allow_chain_rpc("testnet", "https://rpc.testnet.near.org").is_ok());
+        assert!(allow_chain_rpc("testnet", "https://rpc.testnet.fastnear.com").is_ok());
+        assert!(allow_chain_rpc("testnet", "https://rpc.mainnet.fastnear.com").is_err());
+        assert!(allow_chain_rpc("mainnet", "https://rpc.testnet.fastnear.com").is_err());
         assert!(allow_chain_rpc("testnet", "https://rpc.mainnet.near.org").is_err());
         assert!(allow_chain_rpc("mainnet", "https://rpc.testnet.near.org").is_err());
         assert!(allow_chain_rpc("", "https://rpc.testnet.near.org").is_err());
@@ -332,6 +335,10 @@ mod tests {
         assert_eq!(failure.class, "jsonrpc");
         assert!(failure.label().contains("-32700"));
         assert!(!failure.label().contains("ed25519"));
+        let deprecated = r#"{"jsonrpc":"2.0","error":{"code":-429,"message":"WARNING: THIS ENDPOINT IS DEPRECATED. STOP USING IT NOW. Switch to https://fastnear.com"},"id":"fe2vi"}"#;
+        let deprecated = interpret_rpc_query(200, deprecated).unwrap_err();
+        assert!(deprecated.label().contains("-429"));
+        assert!(deprecated.label().contains("https://fastnear.com"));
         let missing = interpret_rpc_query(0, "").unwrap_err();
         assert_eq!(missing.class, "transport");
         let ok = interpret_rpc_query(

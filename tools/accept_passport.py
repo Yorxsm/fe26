@@ -47,7 +47,7 @@ def main():
     parser.add_argument("--owner", required=True)
     parser.add_argument("--key-file", required=True)
     parser.add_argument("--signer", default="registry.fe2vidisp7a3c.testnet")
-    parser.add_argument("--rpc", default="https://rpc.testnet.near.org")
+    parser.add_argument("--rpc", default="https://rpc.testnet.fastnear.com")
     args = parser.parse_args()
     api = args.api.rstrip("/")
     key = json.loads(open(os.path.expanduser(args.key_file), encoding="utf-8").read())
