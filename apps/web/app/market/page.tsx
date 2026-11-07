@@ -6,20 +6,30 @@ import { Eye, Shield, Sparkles, Trophy, TrendingUp, ShoppingBag, ExternalLink } 
 import { SkinPreview } from "@/components/SkinPreview";
 import {
   fetchMarketData,
-  FALLBACK_LISTINGS,
-  FALLBACK_SALES,
-  FALLBACK_STATS,
   type MarketListing,
   type MarketSale,
   type MarketStats,
 } from "@/lib/market";
 import { PAINT_COLORS, SCREEN_COLORS, ROLE_NAMES, TRAIL_NAMES } from "@/lib/skin";
+import { buyHandoff, configuredEconomy } from "@/lib/nearBuy";
+
+const EMPTY_STATS: MarketStats = {
+  floorPriceNear: null,
+  totalVolumeNear: null,
+  listedCount: 0,
+  totalSalesCount: null,
+  activeSpectators: null,
+};
 
 export default function MarketPage() {
-  const [listings, setListings] = useState<MarketListing[]>(FALLBACK_LISTINGS);
-  const [sales, setSales] = useState<MarketSale[]>(FALLBACK_SALES);
-  const [stats, setStats] = useState<MarketStats>(FALLBACK_STATS);
-  const [source, setSource] = useState<"arena" | "fixture">("fixture");
+  const [listings, setListings] = useState<MarketListing[]>([]);
+  const [sales, setSales] = useState<MarketSale[]>([]);
+  const [stats, setStats] = useState<MarketStats>(EMPTY_STATS);
+  const [source, setSource] = useState<"chain" | "not-read" | "unavailable" | "loading">("loading");
+  const [contract, setContract] = useState("");
+  const [network, setNetwork] = useState("");
+  const [blockers, setBlockers] = useState<string[]>([]);
+  const [lastSettlement, setLastSettlement] = useState<{ buyer?: string; seller?: string; priceNear?: string; note?: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string>("fdr_001");
   const [rarityFilter, setRarityFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"price-asc" | "price-desc" | "rank">("price-asc");
@@ -32,6 +42,10 @@ export default function MarketPage() {
       setSales(result.sales);
       setStats(result.stats);
       setSource(result.source);
+      setContract(result.contract);
+      setNetwork(result.network);
+      setBlockers(result.blockers);
+      setLastSettlement(result.lastSettlement);
     });
     return () => {
       alive = false;
@@ -41,20 +55,20 @@ export default function MarketPage() {
   const filteredListings = useMemo(() => {
     let result = [...listings];
     if (rarityFilter !== "all") {
-      result = result.filter((item) => item.rarity.toLowerCase() === rarityFilter.toLowerCase());
+      result = result.filter((item) => (item.rarity ?? "").toLowerCase() === rarityFilter.toLowerCase());
     }
     if (sortOrder === "price-asc") {
       result.sort((a, b) => parseFloat(a.priceNear) - parseFloat(b.priceNear));
     } else if (sortOrder === "price-desc") {
       result.sort((a, b) => parseFloat(b.priceNear) - parseFloat(a.priceNear));
     } else if (sortOrder === "rank") {
-      result.sort((a, b) => a.career.rank - b.career.rank);
+      result.sort((a, b) => (a.career?.rank ?? 0) - (b.career?.rank ?? 0));
     }
     return result;
   }, [listings, rarityFilter, sortOrder]);
 
   const selected = useMemo(() => {
-    return listings.find((item) => item.tokenId === selectedId) ?? listings[0] ?? FALLBACK_LISTINGS[0];
+    return listings.find((item) => item.tokenId === selectedId) ?? listings[0] ?? null;
   }, [listings, selectedId]);
 
   return (
@@ -68,16 +82,26 @@ export default function MarketPage() {
             </span>
           </div>
           <p className="lede">
-            Live non-custodial secondary market for fe2VI dynamic agent skins on <code>market.fe2vi.testnet</code>.
-            Spectators can inspect 3D skins, career stats, and match trophies in real-time. Purchases settle peer-to-peer on NEAR with zero platform custody.
+            Listings read from the configured testnet market. Buying opens a testnet wallet and does not run until you confirm it there.
+            {contract ? <> Market: <code>{contract}</code>.</> : null}
+            {network ? <> Chain: <code>{network}</code>.</> : null}
           </p>
         </div>
       </div>
 
       <p className="meta">
-        {source === "arena"
-          ? "Live on-chain market feed synchronized via fe2vi-api."
-          : "Displaying cached market feed. Zero custody, peer-to-peer settlement on NEAR."}
+        {source === "loading"
+          ? "Reading the market contract."
+          : source === "chain"
+            ? listings.length
+              ? "These asks were returned by the market contract."
+              : "The market contract has no listings."
+            : source === "not-read"
+              ? "This response did not read the chain."
+              : "The market contract could not be read. This page is not showing a sample."}
+        {blockers.map((blocker) => (
+          <span key={blocker}> {blocker}</span>
+        ))}
       </p>
 
       {/* Market Metrics Strip */}
@@ -87,15 +111,15 @@ export default function MarketPage() {
             <TrendingUp size={14} color="#f0883e" /> Floor Price
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--ink)" }}>
-            {stats.floorPriceNear} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
+            {stats.floorPriceNear ?? "—"} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
           </div>
         </div>
         <div className="card" style={{ padding: "1rem" }}>
           <div className="meta" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <Sparkles size={14} color="#3fb950" /> 24h Volume
+            <Sparkles size={14} color="#3fb950" /> Recorded volume
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--ink)" }}>
-            {stats.totalVolumeNear} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
+            {stats.totalVolumeNear ?? "—"} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
           </div>
         </div>
         <div className="card" style={{ padding: "1rem" }}>
@@ -108,10 +132,10 @@ export default function MarketPage() {
         </div>
         <div className="card" style={{ padding: "1rem" }}>
           <div className="meta" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <Shield size={14} /> Total Sales
+            <Shield size={14} /> Lifetime sales
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--ink)" }}>
-            {stats.totalSalesCount}
+            {stats.totalSalesCount ?? "—"}
           </div>
         </div>
         <div className="card" style={{ padding: "1rem" }}>
@@ -119,17 +143,17 @@ export default function MarketPage() {
             <Eye size={14} color="#58a6ff" /> Spectators
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--forge)" }}>
-            {stats.activeSpectators}
+            {stats.activeSpectators ?? "—"}
           </div>
         </div>
       </div>
 
-      {/* Main 3D Skin Inspector & Details */}
+      {selected ? (
       <div className="forge-stage">
         <section className="lobby-panel" style={{ position: "relative" }}>
-          <SkinPreview traits={selected.traits} />
+          {selected.traits ? <SkinPreview traits={selected.traits} /> : <p className="meta">This chain listing has no cosmetic preview.</p>}
           <div style={{ position: "absolute", top: "1rem", left: "1rem", display: "flex", gap: "0.5rem" }}>
-            <span className={selected.rarity === "Mythic" ? "tag tag-hot" : "tag"}>{selected.rarity}</span>
+            {selected.rarity ? <span className={selected.rarity === "Mythic" ? "tag tag-hot" : "tag"}>{selected.rarity}</span> : null}
             <span className="tag">{selected.tokenId}</span>
           </div>
           <p className="meta" style={{ textAlign: "center", marginTop: "0.5rem" }}>
@@ -164,7 +188,7 @@ export default function MarketPage() {
               <span
                 className="tag"
                 style={{
-                  background: PAINT_COLORS[selected.traits.paint % PAINT_COLORS.length],
+                  background: PAINT_COLORS[(selected.traits?.paint ?? 0) % PAINT_COLORS.length],
                   color: "#101012",
                   fontWeight: 600,
                 }}
@@ -174,7 +198,7 @@ export default function MarketPage() {
               <span
                 className="tag"
                 style={{
-                  background: SCREEN_COLORS[selected.traits.screen % SCREEN_COLORS.length],
+                  background: SCREEN_COLORS[(selected.traits?.screen ?? 0) % SCREEN_COLORS.length],
                   color: "#101012",
                   fontWeight: 600,
                 }}
@@ -182,10 +206,10 @@ export default function MarketPage() {
                 Screen Visor
               </span>
               <span className="tag">
-                {ROLE_NAMES[selected.traits.role % ROLE_NAMES.length]}
+                {selected.traits ? ROLE_NAMES[selected.traits.role % ROLE_NAMES.length] : "not on chain"}
               </span>
               <span className="tag">
-                {TRAIL_NAMES[selected.traits.trail % TRAIL_NAMES.length]} Trail
+                {selected.traits ? TRAIL_NAMES[selected.traits.trail % TRAIL_NAMES.length] : "not on chain"} Trail
               </span>
             </div>
           </div>
@@ -193,13 +217,13 @@ export default function MarketPage() {
           {/* Battle Trophies */}
           <div>
             <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink-secondary)" }}>
-              Dynamic Trophies ({selected.trophies.length})
+              Chain record
             </h3>
-            {selected.trophies.length === 0 ? (
+            {(selected.trophies ?? []).length === 0 ? (
               <p className="meta" style={{ fontStyle: "italic" }}>No competitive battle trophies attached yet.</p>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginTop: "0.5rem" }}>
-                {selected.trophies.map((trophy, idx) => (
+                {(selected.trophies ?? []).map((trophy, idx) => (
                   <div
                     key={idx}
                     className="card"
@@ -230,45 +254,60 @@ export default function MarketPage() {
             <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: "0.5rem", marginTop: "0.5rem" }}>
               <div style={{ textAlign: "center", padding: "0.4rem", background: "rgba(255, 255, 255, 0.02)" }}>
                 <div className="meta">XP</div>
-                <div style={{ fontWeight: 700 }}>{selected.career.xp}</div>
+                <div style={{ fontWeight: 700 }}>{selected.career?.xp ?? "—"}</div>
               </div>
               <div style={{ textAlign: "center", padding: "0.4rem", background: "rgba(255, 255, 255, 0.02)" }}>
                 <div className="meta">Matches</div>
-                <div style={{ fontWeight: 700 }}>{selected.career.matches}</div>
+                <div style={{ fontWeight: 700 }}>{selected.career?.matches ?? "—"}</div>
               </div>
               <div style={{ textAlign: "center", padding: "0.4rem", background: "rgba(255, 255, 255, 0.02)" }}>
                 <div className="meta">Wins</div>
-                <div style={{ fontWeight: 700, color: "var(--green)" }}>{selected.career.wins}</div>
+                <div style={{ fontWeight: 700, color: "var(--green)" }}>{selected.career?.wins ?? "—"}</div>
               </div>
               <div style={{ textAlign: "center", padding: "0.4rem", background: "rgba(255, 255, 255, 0.02)" }}>
                 <div className="meta">Rank</div>
-                <div style={{ fontWeight: 700, color: "var(--forge)" }}>#{selected.career.rank}</div>
+                <div style={{ fontWeight: 700, color: "var(--forge)" }}>{selected.career ? `#${selected.career.rank}` : "—"}</div>
               </div>
             </div>
           </div>
 
-          {/* Non-Custodial Buy Instructions */}
           <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem" }}>
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <span className="meta" style={{ fontWeight: 600 }}>Execute Direct Purchase (On-Chain)</span>
-              <span className="meta">Contract: <code>market.fe2vi.testnet</code></span>
+              <span className="meta" style={{ fontWeight: 600 }}>Buy on testnet</span>
+              <span className="meta">Contract: <code>{contract || "not configured"}</code></span>
             </div>
-            <pre className="forge-call" style={{ margin: "0.5rem 0 0 0", fontSize: "0.8rem" }}>
+            {(() => {
+              const callback = typeof window === "undefined" ? "https://fe2vi.space/market" : window.location.href.split("?")[0];
+              const handoff = buyHandoff(configuredEconomy(), selected.tokenId, selected.priceYocto, callback);
+              if (!handoff.ok) return <p className="meta">{handoff.reason}</p>;
+              return (
+                <>
+                  <a className="btn btn-primary" href={handoff.login}>Open testnet wallet to buy {selected.priceNear} NEAR</a>
+                  <p className="meta" style={{ marginTop: "0.4rem" }}>
+                    Calls <code>{handoff.method}</code> on <code>{handoff.receiverId}</code> with <code>{handoff.deposit}</code> yoctoNEAR. The wallet asks before anything is signed. <a href={handoff.explorer}>View the contract</a>.
+                  </p>
+                  <pre className="forge-call" style={{ margin: "0.5rem 0 0 0", fontSize: "0.8rem" }}>
 {`fe2vi passport buy --token-id ${selected.tokenId} --price ${selected.priceNear}`}
-            </pre>
-            <p className="meta" style={{ marginTop: "0.4rem" }}>
-              IronClaw agents can also purchase autonomously using their NEAR wallet if instructed by their owner.
-            </p>
+                  </pre>
+                </>
+              );
+            })()}
           </div>
         </section>
       </div>
+      ) : (
+        <section className="card">
+          <h2>No listings</h2>
+          <p>The market contract returned no listings.</p>
+        </section>
+      )}
 
       {/* Filter and Browse Listings */}
       <section>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
           <div>
             <h2>Active Listings ({filteredListings.length})</h2>
-            <p className="meta">All passports & skins pre-minted or listed directly by competing agents.</p>
+            <p className="meta">Passports listed on the market contract.</p>
           </div>
           <div className="row" style={{ gap: "0.5rem" }}>
             <div className="forge-tabs" style={{ margin: 0 }}>
@@ -325,14 +364,14 @@ export default function MarketPage() {
                 <div>
                   <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                     <span className="meta" style={{ fontFamily: "monospace" }}>{listing.tokenId}</span>
-                    <span className={listing.rarity === "Mythic" ? "tag tag-hot" : "tag"}>{listing.rarity}</span>
+                    {listing.rarity ? <span className={listing.rarity === "Mythic" ? "tag tag-hot" : "tag"}>{listing.rarity}</span> : null}
                   </div>
                   <h3 style={{ margin: "0.5rem 0 0.25rem 0", fontSize: "1.05rem" }}>{listing.name}</h3>
                   <div className="meta" style={{ color: "var(--ink-secondary)" }}>
                     Seller: {listing.seller}
                   </div>
                   <div className="stamps" style={{ margin: "0.6rem 0" }}>
-                    {listing.trophies.map((t, idx) => (
+                    {(listing.trophies ?? []).map((t, idx) => (
                       <span key={idx} className="stamp neutral" title={t.name} style={{ fontSize: "0.8rem", padding: "0.15rem 0.4rem" }}>
                         {t.icon} {t.name}
                       </span>
@@ -342,7 +381,7 @@ export default function MarketPage() {
 
                 <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.6rem", marginTop: "0.6rem" }}>
                   <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                    <span className="meta">Rank #{listing.career.rank} ({listing.career.wins}W)</span>
+                    <span className="meta">{listing.owner ? `Owner ${listing.owner}` : "Listed"}</span>
                     <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--forge)" }}>
                       {listing.priceNear} NEAR
                     </span>
@@ -357,8 +396,12 @@ export default function MarketPage() {
       {/* Live On-Chain Sales Feed */}
       <section style={{ marginTop: "1.5rem" }}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Live Sales Tape</h2>
-          <span className="meta">WebSocket Verified from NEAR Mainnet</span>
+          <h2>Sales tape</h2>
+          <span className="meta">
+            {lastSettlement
+              ? `Last settlement only: ${lastSettlement.seller ?? "unknown"} to ${lastSettlement.buyer ?? "unknown"} for ${lastSettlement.priceNear ?? "?"} NEAR. This is not a lifetime volume.`
+              : "No settlement is stored. Lifetime volume is not indexed."}
+          </span>
         </div>
         <table className="board" style={{ marginTop: "0.75rem" }}>
           <thead>
@@ -372,6 +415,11 @@ export default function MarketPage() {
             </tr>
           </thead>
           <tbody>
+            {sales.length === 0 ? (
+              <tr>
+                <td colSpan={6}>No sales recorded.</td>
+              </tr>
+            ) : null}
             {sales.map((sale) => (
               <tr key={sale.id}>
                 <td className="meta">{sale.timestamp}</td>

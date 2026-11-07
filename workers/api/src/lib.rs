@@ -202,6 +202,10 @@ mod edge {
                     )
                 })
                 .unwrap_or(true);
+            arena.chain_network = env_string(&self.env, "FE2VI_NETWORK");
+            arena.passport_contract = env_string(&self.env, "FE2VI_PASSPORT_ID");
+            arena.market_contract = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
+            arena.escrow_contract = env_string(&self.env, "FE2VI_ESCROW_ID");
             let before_book = {
                 let sql = self.state.storage().sql();
                 attach_player_book(&sql, &mut arena)?
@@ -297,6 +301,82 @@ mod edge {
                 .map(|value| value.to_string())
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
+            if method == "GET"
+                && (route_path == "/v1/market/listings" || route_path == "/v1/market/sales")
+            {
+                return self.market_response(route_path).await;
+            }
+            if method == "GET" {
+                let chain_now = worker::Date::now().as_millis() / 1000;
+                if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
+                    if !token_id.is_empty() && !token_id.contains('/') {
+                        let _ = reconcile_token(&self.env, &mut arena, token_id, chain_now).await;
+                    }
+                }
+                if route_path == "/v1/agents/me/passport/jobs" {
+                    if let Some(agent_id) = crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    ) {
+                        let pending: Vec<(String, String)> = arena
+                            .book
+                            .passport_jobs
+                            .iter()
+                            .filter(|job| {
+                                job.agent_id == agent_id
+                                    && job.kind == "bind"
+                                    && job.status == "done"
+                            })
+                            .filter_map(|job| {
+                                arena
+                                    .book
+                                    .passports
+                                    .iter()
+                                    .find(|passport| passport.passport_id == job.passport_id)
+                                    .and_then(|passport| passport.token_id.clone())
+                                    .map(|token_id| (job.job_id.clone(), token_id))
+                            })
+                            .collect();
+                        for (_, token_id) in pending {
+                            let _ =
+                                reconcile_token(&self.env, &mut arena, &token_id, chain_now).await;
+                        }
+                    }
+                }
+                if route_path == "/v1/agents/me/passport" {
+                    if let Some(agent_id) = crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    ) {
+                        let token_id = arena
+                            .book
+                            .passports
+                            .iter()
+                            .find(|passport| {
+                                passport.agent_id == agent_id && passport.status != "unbound"
+                            })
+                            .and_then(|passport| passport.token_id.clone());
+                        if let Some(token_id) = token_id {
+                            let _ =
+                                reconcile_token(&self.env, &mut arena, &token_id, chain_now).await;
+                        }
+                    }
+                }
+            }
             if method == "GET" {
                 if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
                     if !token_id.is_empty()
@@ -308,7 +388,20 @@ mod edge {
                             .any(|passport| passport.token_id.as_deref() == Some(token_id))
                     {
                         match passport_chain_view(&self.env, token_id).await {
-                            Ok(Some(view)) => {
+                            Ok(Some(observed)) => {
+                                let Some(view) = observed.view else {
+                                    return with_cors(
+                                        Response::ok(
+                                            serde_json::json!({
+                                                "error": "not_found",
+                                                "message": "No passport with that token id.",
+                                            })
+                                            .to_string(),
+                                        )?
+                                        .with_status(404),
+                                        "application/json",
+                                    );
+                                };
                                 let body = crate::passport::chain_passport_json(token_id, &view)
                                     .to_string();
                                 return with_cors(
@@ -317,12 +410,17 @@ mod edge {
                                 );
                             }
                             Ok(None) => {}
-                            Err(_) => {
+                            Err(failure) => {
+                                let message =
+                                    format!("Could not read the passport contract ({failure}).");
+                                let body = serde_json::json!({
+                                    "error": "passport_lookup_unavailable",
+                                    "message": message,
+                                    "source": "unavailable",
+                                })
+                                .to_string();
                                 return with_cors(
-                                    Response::ok(
-                                        r#"{"error":"passport_lookup_unavailable","message":"Could not read the passport contract. Try again."}"#,
-                                    )?
-                                    .with_status(503),
+                                    Response::ok(body)?.with_status(503),
                                     "application/json",
                                 );
                             }
@@ -347,11 +445,98 @@ mod edge {
                 Outcome::Http {
                     status,
                     content_type,
-                    body,
-                    mutated,
+                    mut body,
+                    mut mutated,
                     fanout,
                     location,
                 } => {
+                    if method == "POST" {
+                        if let Some(job_id) = route_path
+                            .strip_prefix("/v1/internal/passport/jobs/")
+                            .and_then(|rest| rest.strip_suffix("/complete"))
+                        {
+                            if !job_id.is_empty()
+                                && !job_id.contains('/')
+                                && arena.book.passport_jobs.iter().any(|job| {
+                                    job.job_id == job_id
+                                        && job.kind == "bind"
+                                        && job.status == "done"
+                                })
+                            {
+                                let token_id = arena
+                                    .book
+                                    .passport_jobs
+                                    .iter()
+                                    .find(|job| job.job_id == job_id)
+                                    .and_then(|job| {
+                                        arena.book.passports.iter().find(|passport| {
+                                            passport.passport_id == job.passport_id
+                                        })
+                                    })
+                                    .and_then(|passport| passport.token_id.clone());
+                                let chain_now = worker::Date::now().as_millis() / 1000;
+                                let block_hash = arena
+                                    .book
+                                    .passport_jobs
+                                    .iter()
+                                    .find(|job| job.job_id == job_id)
+                                    .map(|job| job.tx_block_hash.clone())
+                                    .unwrap_or_default();
+                                if !block_hash.is_empty() {
+                                    if let Ok(height) =
+                                        receipt_block_height(&self.env, &block_hash).await
+                                    {
+                                        if let Some(job) = arena
+                                            .book
+                                            .passport_jobs
+                                            .iter_mut()
+                                            .find(|job| job.job_id == job_id)
+                                        {
+                                            job.tx_block_height = height;
+                                        }
+                                    }
+                                }
+                                let changed = match token_id.as_deref() {
+                                    Some(token_id) if !block_hash.is_empty() => {
+                                        match passport_chain_view_at(
+                                            &self.env,
+                                            token_id,
+                                            Some(&block_hash),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Some(observed)) => {
+                                                if observed.block_height > 0 {
+                                                    if let Some(job) = arena
+                                                        .book
+                                                        .passport_jobs
+                                                        .iter_mut()
+                                                        .find(|job| job.job_id == job_id)
+                                                    {
+                                                        job.tx_block_height = observed.block_height;
+                                                    }
+                                                }
+                                                crate::passport::judge_completed_bind(
+                                                    &mut arena,
+                                                    job_id,
+                                                    observed.view.as_ref(),
+                                                    observed.block_height,
+                                                    chain_now,
+                                                )
+                                            }
+                                            Ok(None) | Err(_) => false,
+                                        }
+                                    }
+                                    _ => false,
+                                };
+                                if changed {
+                                    body = crate::passport::complete_response(&arena, job_id)
+                                        .to_string();
+                                    mutated = true;
+                                }
+                            }
+                        }
+                    }
                     let plan = crate::agents::plan_writes(&before_book, &arena.book);
                     if mutated || refreshed || !plan.is_empty() {
                         {
@@ -376,6 +561,16 @@ mod edge {
                             .put("metric_errors", &(errors.saturating_add(1)))
                             .await;
                     }
+                    if status == 200 && method == "GET" {
+                        if let Some(match_id) = finished_match_id(route_path) {
+                            if body.contains("awaiting_contract_view") {
+                                let pot = heist_pot(self, match_id).await;
+                                if let Some(next) = crate::vault::replace_pot(&body, &pot) {
+                                    body = next;
+                                }
+                            }
+                        }
+                    }
                     let mut response = Response::ok(body)?.with_status(status);
                     if let Some(location) = location {
                         response.headers_mut().set("Location", &location)?;
@@ -396,17 +591,11 @@ mod edge {
 
     impl SpectatorFeed {
         async fn run_index(&self) -> Result<Response> {
-            let rpc = self
-                .env
-                .var("FE2VI_RPC_URL")
-                .ok()
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
-            if indexer::refuse_testnet(&rpc).is_err() {
-                return with_cors(
-                    Response::ok(r#"{"ok":false,"error":"testnet rpc refused"}"#)?.with_status(400),
-                    "application/json",
-                );
+            let network = env_string(&self.env, "FE2VI_NETWORK");
+            let rpc = env_string(&self.env, "FE2VI_RPC_URL");
+            if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+                let body = serde_json::json!({"ok": false, "error": message}).to_string();
+                return with_cors(Response::ok(body)?.with_status(400), "application/json");
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
@@ -471,6 +660,30 @@ mod edge {
                 scanned = height;
             }
             let added = indexer::apply_chain_events(&mut arena, &found, scanned);
+            let chain_now = worker::Date::now().as_millis() / 1000;
+            let mut reconciled = 0_u32;
+            let tokens: Vec<String> = arena
+                .book
+                .passports
+                .iter()
+                .filter(|passport| {
+                    passport.status == "active"
+                        && passport
+                            .token_id
+                            .as_deref()
+                            .is_some_and(|token| !token.is_empty())
+                })
+                .filter_map(|passport| passport.token_id.clone())
+                .take(8)
+                .collect();
+            for token_id in tokens {
+                if reconcile_token(&self.env, &mut arena, &token_id, chain_now)
+                    .await
+                    .unwrap_or(false)
+                {
+                    reconciled += 1;
+                }
+            }
             let synced = crate::live_edge::refresh(&mut arena).await;
             let policy_revalidated =
                 crate::live_edge::refresh_policies(&self.env, &mut arena).await;
@@ -488,7 +701,8 @@ mod edge {
                 "indexed_height": arena.indexed_height,
                 "live_synced": synced,
                 "policy_revalidated": policy_revalidated,
-                "network": "mainnet",
+                "passports_reconciled": reconciled,
+                "network": network,
             })
             .to_string();
             with_cors(Response::ok(body)?, "application/json")
@@ -522,6 +736,11 @@ mod edge {
             "ALTER TABLE player_lobby_posts ADD COLUMN reports_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE player_seen ADD COLUMN match_id TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE player_seen ADD COLUMN created_unix INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE player_passports ADD COLUMN career_json TEXT NOT NULL DEFAULT 'null'",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN error TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_block_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE player_passport_jobs ADD COLUMN tx_block_height INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sql.exec(statement, None::<Vec<worker::SqlStorageValue>>);
         }
@@ -689,6 +908,8 @@ mod edge {
             created_unix: i64,
             updated_unix: i64,
             last_sync_seq: i64,
+            #[serde(default)]
+            career_json: String,
         }
         #[derive(serde::Deserialize)]
         struct PassportJobRow {
@@ -702,6 +923,14 @@ mod edge {
             attempts: i64,
             created_unix: i64,
             updated_unix: i64,
+            #[serde(default)]
+            tx_hash: String,
+            #[serde(default)]
+            error: String,
+            #[serde(default)]
+            tx_block_hash: String,
+            #[serde(default)]
+            tx_block_height: i64,
         }
         let players = sql.exec("SELECT agent_id, handle, name, description, owner_contact, token_hash, token_prefix, status, created_unix, wallets_json, capabilities_json, skin_id, war_hits_json FROM players", None::<Vec<worker::SqlStorageValue>>)?.to_array::<PlayerRow>()?;
         let tokens = sql
@@ -764,13 +993,13 @@ mod edge {
             .to_array::<SeenRow>()?;
         let passports = sql
             .exec(
-                "SELECT passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq FROM player_passports",
+                "SELECT passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq, career_json FROM player_passports",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<PassportRow>()?;
         let passport_jobs = sql
             .exec(
-                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix FROM player_passport_jobs",
+                "SELECT job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error, tx_block_hash, tx_block_height FROM player_passport_jobs",
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<PassportJobRow>()?;
@@ -888,6 +1117,7 @@ mod edge {
                     created_unix: row.created_unix.max(0) as u64,
                     updated_unix: row.updated_unix.max(0) as u64,
                     last_sync_seq: row.last_sync_seq.max(0) as u64,
+                    career: serde_json::from_str(&row.career_json).unwrap_or(None),
                 })
                 .collect(),
             passport_jobs: passport_jobs
@@ -903,6 +1133,10 @@ mod edge {
                     attempts: u32::try_from(row.attempts.max(0)).unwrap_or(0),
                     created_unix: row.created_unix.max(0) as u64,
                     updated_unix: row.updated_unix.max(0) as u64,
+                    tx_hash: row.tx_hash,
+                    error: row.error,
+                    tx_block_hash: row.tx_block_hash,
+                    tx_block_height: row.tx_block_height.max(0) as u64,
                 })
                 .collect(),
         }))
@@ -1119,7 +1353,7 @@ mod edge {
         }
         for row in &plan.upsert_passports {
             sql.exec(
-                "INSERT INTO player_passports (passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(passport_id) DO UPDATE SET token_id = excluded.token_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, creator_near = excluded.creator_near, status = excluded.status, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, last_sync_seq = excluded.last_sync_seq",
+                "INSERT INTO player_passports (passport_id, token_id, agent_id, owner_near, creator_near, status, created_unix, updated_unix, last_sync_seq, career_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(passport_id) DO UPDATE SET token_id = excluded.token_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, creator_near = excluded.creator_near, status = excluded.status, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, last_sync_seq = excluded.last_sync_seq, career_json = excluded.career_json",
                 Some(vec![
                     row.passport_id.clone().into(),
                     row.token_id.clone().into(),
@@ -1130,12 +1364,13 @@ mod edge {
                     (row.created_unix as i64).into(),
                     (row.updated_unix as i64).into(),
                     (row.last_sync_seq as i64).into(),
+                    serde_json::to_string(&row.career).unwrap_or_else(|_| "null".into()).into(),
                 ]),
             )?;
         }
         for row in &plan.upsert_passport_jobs {
             sql.exec(
-                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix",
+                "INSERT INTO player_passport_jobs (job_id, kind, passport_id, agent_id, owner_near, agent_near, status, attempts, created_unix, updated_unix, tx_hash, error, tx_block_hash, tx_block_height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET kind = excluded.kind, passport_id = excluded.passport_id, agent_id = excluded.agent_id, owner_near = excluded.owner_near, agent_near = excluded.agent_near, status = excluded.status, attempts = excluded.attempts, created_unix = excluded.created_unix, updated_unix = excluded.updated_unix, tx_hash = excluded.tx_hash, error = excluded.error, tx_block_hash = excluded.tx_block_hash, tx_block_height = excluded.tx_block_height",
                 Some(vec![
                     row.job_id.clone().into(),
                     row.kind.clone().into(),
@@ -1147,6 +1382,10 @@ mod edge {
                     (row.attempts as i64).into(),
                     (row.created_unix as i64).into(),
                     (row.updated_unix as i64).into(),
+                    row.tx_hash.clone().into(),
+                    row.error.clone().into(),
+                    row.tx_block_hash.clone().into(),
+                    (row.tx_block_height as i64).into(),
                 ]),
             )?;
         }
@@ -1154,27 +1393,139 @@ mod edge {
     }
 
     fn watch_accounts(env: &Env) -> Vec<String> {
-        ["FE2VI_FACTORY_ID", "FE2VI_REGISTRY_ID", "FE2VI_HEIST_ID"]
-            .into_iter()
-            .map(|name| {
-                env.var(name)
-                    .ok()
-                    .map(|value| value.to_string())
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| match name {
-                        "FE2VI_FACTORY_ID" => "factory.fe2vi.near".to_string(),
-                        "FE2VI_REGISTRY_ID" => "registry.fe2vi.near".to_string(),
-                        _ => "heist.fe2vi.near".to_string(),
-                    })
-            })
-            .collect()
+        [
+            "FE2VI_PASSPORT_ID",
+            "FE2VI_PASSPORT_MARKET_ID",
+            "FE2VI_ESCROW_ID",
+            "FE2VI_FACTORY_ID",
+            "FE2VI_REGISTRY_ID",
+            "FE2VI_HEIST_ID",
+        ]
+        .into_iter()
+        .filter_map(|name| {
+            let value = env_string(env, name);
+            if value.is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        })
+        .collect()
     }
 
-    async fn rpc_call(
+    async fn heist_pot(feed: &SpectatorFeed, match_id: &str) -> crate::vault::PotAuthorization {
+        let mut pot = crate::vault::contract_pot(match_id, "null", None);
+        pot.outcome = "not_linked".to_string();
+        let heist = env_string(&feed.env, "FE2VI_HEIST_ID");
+        if heist.is_empty() {
+            pot.outcome = "contract_unconfigured".to_string();
+            pot.reason = "FE2VI_HEIST_ID is empty, so resolve was not accepted.".to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let network = env_string(&feed.env, "FE2VI_NETWORK");
+        let rpc = env_string(&feed.env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            pot.outcome = "contract_unreadable".to_string();
+            pot.reason = message.to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let args = serde_json::json!({ "game_id": match_id });
+        let encoded = match serde_json::to_vec(&args) {
+            Ok(bytes) => base64::engine::general_purpose::STANDARD.encode(bytes),
+            Err(_) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be encoded.".to_string();
+                return pot;
+            }
+        };
+        let (http_status, text) = match rpc_exchange(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": heist,
+                "method_name": "get_heist",
+                "args_base64": encoded,
+            }),
+        )
+        .await
+        {
+            Ok(pair) => pair,
+            Err(_) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be read.".to_string();
+                pot.contract_would_accept_resolve = false;
+                pot.pays = false;
+                return pot;
+            }
+        };
+        if http_status >= 400 {
+            pot.outcome = "contract_unreadable".to_string();
+            pot.reason = "The heist view could not be read.".to_string();
+            pot.contract_would_accept_resolve = false;
+            pot.pays = false;
+            return pot;
+        }
+        let view = match contract_result_text(&text) {
+            Ok(view) => view,
+            Err(()) => {
+                pot.outcome = "contract_unreadable".to_string();
+                pot.reason = "The heist view could not be read.".to_string();
+                pot.contract_would_accept_resolve = false;
+                pot.pays = false;
+                return pot;
+            }
+        };
+        if view.trim() == "null" {
+            return crate::vault::contract_pot(match_id, "null", None);
+        }
+        let resolved = view.contains("\"resolved\":true");
+        let delisted = view.contains("\"delisted\":true");
+        let now_ns = if resolved || delisted {
+            None
+        } else {
+            match heist_block_time(&rpc, &text).await {
+                Some(now_ns) => Some(now_ns),
+                None => return crate::vault::contract_pot(match_id, &view, None),
+            }
+        };
+        crate::vault::contract_pot(match_id, &view, now_ns)
+    }
+
+    async fn rpc_view(
+        url: &str,
+        account_id: &str,
+        method_name: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&args).map_err(|err| Error::RustError(err.to_string()))?);
+        let (status, text) = rpc_exchange(
+            url,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": account_id,
+                "method_name": method_name,
+                "args_base64": encoded,
+            }),
+        )
+        .await?;
+        indexer::interpret_rpc_query(status, &text)
+            .map_err(|failure| Error::RustError(failure.label()))
+    }
+
+    async fn rpc_exchange(
         url: &str,
         method: &str,
         params: serde_json::Value,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<(u16, String)> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "fe2vi",
@@ -1190,56 +1541,132 @@ mod edge {
         init.with_body(Some(wasm_bindgen::JsValue::from_str(&body)));
         let request = Request::new_with_init(url, &init)?;
         let mut response = Fetch::Request(request).send().await?;
+        let status = response.status_code();
         let text = response.text().await?;
-        serde_json::from_str(&text).map_err(|err| Error::RustError(err.to_string()))
+        Ok((status, text))
     }
 
-    async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
-        let rpc = env
-            .var("FE2VI_RPC_URL")
-            .ok()
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
-        indexer::refuse_testnet(&rpc).map_err(|message| Error::RustError(message.to_string()))?;
-        let account_id = env
-            .var("FE2VI_PASSPORT_ID")
-            .ok()
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "passport.fe2vi.near".to_string());
+    async fn rpc_call(
+        url: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let (status, text) = rpc_exchange(url, method, params).await?;
+        if status >= 400 {
+            return Err(Error::RustError(format!("http {status}")));
+        }
+        serde_json::from_str(&text).map_err(|_| Error::RustError("decode".into()))
+    }
+
+    async fn reconcile_token(
+        env: &Env,
+        arena: &mut ArenaState,
+        token_id: &str,
+        now: u64,
+    ) -> Result<bool> {
+        let Some(index) = arena
+            .book
+            .passports
+            .iter()
+            .position(|passport| passport.token_id.as_deref() == Some(token_id))
+        else {
+            return Ok(false);
+        };
+        let Some(observed) = passport_chain_view(env, token_id).await? else {
+            return Ok(false);
+        };
+        let Some(view) = observed.view else {
+            return Ok(false);
+        };
+        let book = &mut arena.book;
+        let changed = crate::passport::reconcile_passport(
+            &mut book.passports[index],
+            &view,
+            now,
+            observed.block_height,
+            &mut book.passport_jobs,
+        );
+        Ok(changed)
+    }
+
+    struct ObservedPassport {
+        view: Option<serde_json::Value>,
+        block_height: u64,
+    }
+
+    async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<ObservedPassport>> {
+        passport_chain_view_at(env, token_id, None).await
+    }
+
+    async fn passport_chain_view_at(
+        env: &Env,
+        token_id: &str,
+        block_id: Option<&str>,
+    ) -> Result<Option<ObservedPassport>> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        indexer::allow_chain_rpc(&network, &rpc)
+            .map_err(|message| Error::RustError(message.to_string()))?;
+        let account_id = env_string(env, "FE2VI_PASSPORT_ID");
+        if account_id.is_empty() {
+            return Err(Error::RustError(
+                "passport contract is not configured".into(),
+            ));
+        }
         let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
             .map_err(|err| Error::RustError(err.to_string()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(args);
-        let response = rpc_call(
-            &rpc,
-            "query",
-            serde_json::json!({
-                "request_type": "view",
-                "finality": "final",
-                "account_id": account_id,
-                "method_name": "passport",
-                "args_base64": encoded,
-            }),
-        )
-        .await?;
-        if !response["result"]["error"].is_null() {
-            return Ok(None);
+        let mut params = serde_json::json!({
+            "request_type": "call_function",
+            "account_id": account_id,
+            "method_name": "passport",
+            "args_base64": encoded,
+        });
+        if let Some(block_id) = block_id {
+            params["block_id"] = serde_json::json!(block_id);
+        } else {
+            params["finality"] = serde_json::json!("final");
         }
-        let Some(rows) = response["result"]["result"].as_array() else {
-            return Ok(None);
-        };
-        let bytes: Vec<u8> = rows
-            .iter()
-            .filter_map(serde_json::Value::as_u64)
-            .map(|value| value as u8)
-            .collect();
-        if bytes.is_empty() {
-            return Ok(None);
+        let (status, text) = rpc_exchange(&rpc, "query", params)
+            .await
+            .map_err(|_| Error::RustError("transport".into()))?;
+        let envelope: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        let block_height = envelope
+            .pointer("/result/block_height")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        match indexer::interpret_rpc_query(status, &text) {
+            Ok(value) if value.is_null() => Ok(Some(ObservedPassport {
+                view: None,
+                block_height,
+            })),
+            Ok(value) => Ok(Some(ObservedPassport {
+                view: Some(value),
+                block_height,
+            })),
+            Err(failure) => Err(Error::RustError(failure.label())),
         }
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|err| Error::RustError(err.to_string()))
+    }
+
+    async fn heist_block_time(rpc: &str, query_text: &str) -> Option<u64> {
+        let hash = pull_json_string(query_text, "block_hash")?;
+        let (status, block) = rpc_exchange(rpc, "block", serde_json::json!({ "block_id": hash }))
+            .await
+            .ok()?;
+        if status >= 400 {
+            return None;
+        }
+        crate::vault::pull_u64(&block, "timestamp")
+    }
+
+    async fn receipt_block_height(env: &Env, block_hash: &str) -> Result<u64> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        indexer::allow_chain_rpc(&network, &rpc)
+            .map_err(|message| Error::RustError(message.to_string()))?;
+        let block = rpc_call(&rpc, "block", serde_json::json!({"block_id": block_hash})).await?;
+        indexer::block_height(&block).ok_or_else(|| Error::RustError("block height missing".into()))
     }
 
     fn socket_tag(game_id: &str) -> String {
@@ -1280,6 +1707,133 @@ mod edge {
     }
 
     impl SpectatorFeed {
+        async fn market_response(&self, path: &str) -> Result<Response> {
+            let network = env_string(&self.env, "FE2VI_NETWORK");
+            let rpc = env_string(&self.env, "FE2VI_RPC_URL");
+            if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+                return market_error(403, "chain_mismatch", message);
+            }
+            let passport = env_string(&self.env, "FE2VI_PASSPORT_ID");
+            let market = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
+            if passport.is_empty() || market.is_empty() {
+                return market_error(
+                    503,
+                    "market_unconfigured",
+                    "Passport or market account is not configured.",
+                );
+            }
+            if path.ends_with("/sales") {
+                let settlement =
+                    match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
+                        Ok(value) if value.is_null() => None,
+                        Ok(value) => Some(value),
+                        Err(error) => {
+                            return market_error(
+                                503,
+                                "market_unavailable",
+                                &format!("Could not read the last settlement ({error})."),
+                            )
+                        }
+                    };
+                let body = crate::passport::market_from_chain(
+                    &market,
+                    &network,
+                    &[],
+                    settlement.as_ref(),
+                    "chain",
+                );
+                let payload = serde_json::json!({
+                    "sales": body["sales"],
+                    "source": "chain",
+                    "contract": market,
+                    "network": network,
+                });
+                return with_cors(Response::ok(payload.to_string())?, "application/json");
+            }
+            let tokens = match rpc_view(
+                &rpc,
+                &passport,
+                "nft_tokens",
+                serde_json::json!({"from_index":"0","limit":32}),
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    return market_error(
+                        503,
+                        "market_unavailable",
+                        &format!("Could not read passport tokens ({error})."),
+                    );
+                }
+            };
+            let Some(tokens) = tokens.as_array() else {
+                return market_error(
+                    503,
+                    "market_unavailable",
+                    "Passport token list was not an array.",
+                );
+            };
+            let mut listed = Vec::new();
+            for token in tokens {
+                let Some(token_id) = token.get("token_id").and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+                match rpc_view(
+                    &rpc,
+                    &market,
+                    "get_listing",
+                    serde_json::json!({"token_id": token_id}),
+                )
+                .await
+                {
+                    Ok(listing) => {
+                        if let Some(row) = crate::passport::listed_passport(token, &listing) {
+                            listed.push(row);
+                        }
+                    }
+                    Err(error) => {
+                        return market_error(
+                            503,
+                            "market_unavailable",
+                            &format!("Could not read a market listing ({error})."),
+                        );
+                    }
+                }
+            }
+            let settlement =
+                match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
+                    Ok(value) if value.is_null() => None,
+                    Ok(value) => Some(value),
+                    Err(error) => {
+                        return market_error(
+                            503,
+                            "market_unavailable",
+                            &format!("Could not read the last settlement ({error})."),
+                        )
+                    }
+                };
+            let body = crate::passport::market_from_chain(
+                &market,
+                &network,
+                &listed,
+                settlement.as_ref(),
+                "chain",
+            );
+            let payload = if path.ends_with("/sales") {
+                serde_json::json!({
+                    "sales": body["sales"],
+                    "source": "chain",
+                    "contract": market,
+                    "network": network,
+                })
+            } else {
+                body
+            };
+            with_cors(Response::ok(payload.to_string())?, "application/json")
+        }
+
         async fn enforce_rate_limit(&self, req: &Request) -> Result<Option<Response>> {
             let method = match req.method() {
                 Method::Get => "GET",
@@ -1430,16 +1984,72 @@ mod edge {
         Ok(())
     }
 
+    fn env_string(env: &Env, name: &str) -> String {
+        env.var(name)
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
+    fn market_error(status: u16, code: &str, message: &str) -> Result<Response> {
+        let body =
+            serde_json::json!({ "error": code, "message": message, "source": "unavailable" })
+                .to_string();
+        with_cors(Response::ok(body)?.with_status(status), "application/json")
+    }
+
     fn with_cors(mut response: Response, content_type: &str) -> Result<Response> {
         let headers = response.headers_mut();
         headers.set("content-type", content_type)?;
         headers.set("access-control-allow-origin", "*")?;
         headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")?;
-        headers.set("access-control-expose-headers", "Retry-After")?;
+        headers.set(
+            "access-control-expose-headers",
+            "Retry-After, X-Fe2vi-Build",
+        )?;
+        headers.set("x-fe2vi-build", crate::logic::BUILD_SHA)?;
         headers.set(
             "access-control-allow-headers",
             "content-type, authorization",
         )?;
         Ok(response)
+    }
+
+    fn finished_match_id(path: &str) -> Option<&str> {
+        let rest = path.strip_prefix("/v1/matches/")?;
+        if rest.is_empty() || rest.contains('/') {
+            None
+        } else {
+            Some(rest)
+        }
+    }
+
+    fn contract_result_text(body: &str) -> Result<String, ()> {
+        let value: serde_json::Value = serde_json::from_str(body).map_err(|_| ())?;
+        if value.get("error").is_some_and(|item| !item.is_null()) {
+            return Err(());
+        }
+        let rows = value
+            .pointer("/result/result")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(())?;
+        let bytes: Vec<u8> = rows
+            .iter()
+            .filter_map(serde_json::Value::as_u64)
+            .map(|item| item as u8)
+            .collect();
+        String::from_utf8(bytes).map_err(|_| ())
+    }
+
+    fn pull_json_string(text: &str, field: &str) -> Option<String> {
+        let needle = format!("\"{field}\"");
+        let index = text.find(&needle)?;
+        let rest = text[index + needle.len()..].trim_start();
+        let rest = rest.strip_prefix(':')?.trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
     }
 }

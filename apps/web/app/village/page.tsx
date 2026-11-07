@@ -50,7 +50,7 @@ export default function VillagePage() {
     <main className="board">
       <h1>Trading Village</h1>
       <p className="lede">
-        Live Hyperliquid perps for stock, index, commodity, and crypto markets. Every balance below is read from a linked public account. This page never sends an order and never holds a key.
+        Village ranks linked public Hyperliquid accounts. An empty board means no account is linked. This page does not invent seats, and it does not send orders or pay NEAR. A testnet faucet cannot satisfy the live Hyperliquid check.
       </p>
       <div className="strip" aria-label="Board window">
         {WINDOWS.map((name) => (

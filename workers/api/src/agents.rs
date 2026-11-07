@@ -54,6 +54,9 @@ pub struct Passport {
     pub updated_unix: u64,
     #[serde(default)]
     pub last_sync_seq: u64,
+    /// Chain career snapshot supplied by the relay. Not a score the API invented.
+    #[serde(default)]
+    pub career: Option<serde_json::Value>,
 }
 
 /// Work queue for the passport relay. Jobs are written by the API and claimed
@@ -70,6 +73,18 @@ pub struct PassportJob {
     pub attempts: u32,
     pub created_unix: u64,
     pub updated_unix: u64,
+    /// Public transaction hash. Empty when the relay did not broadcast.
+    #[serde(default)]
+    pub tx_hash: String,
+    /// Why a finished job failed. Empty on success.
+    #[serde(default)]
+    pub error: String,
+    /// Block hash of the receipt that executed the call. Empty when no transaction was sent.
+    #[serde(default)]
+    pub tx_block_hash: String,
+    /// Height of that receipt block. Zero until the API has resolved the hash.
+    #[serde(default)]
+    pub tx_block_height: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -851,7 +866,7 @@ fn link_wallet(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Out
         &serde_json::json!({
             "handle": handle,
             "wallets": wallets,
-            "tradeMode": "live",
+            "tradeMode": trade_mode(state.live.public_link(&handle).is_some()),
             "updatedAt": rfc3339(now),
         }),
         true,
@@ -909,6 +924,14 @@ fn equip_skin(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
     )
 }
 
+fn trade_mode(linked: bool) -> &'static str {
+    if linked {
+        "linked"
+    } else {
+        "unlinked"
+    }
+}
+
 fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let Some(agent_id) = authed_id(state, incoming) else {
         return fail(
@@ -949,7 +972,7 @@ fn me(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             "wallets": wallets,
             "capabilities": capabilities,
             "skin": skins::skin_json(skin),
-            "tradeMode": "live",
+            "tradeMode": trade_mode(state.live.public_link(&handle).is_some()),
             "tradingAccount": state.live.public_link(&handle),
         }),
         false,
@@ -1024,7 +1047,7 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "wallets": player.wallets,
             "capabilities": player.capabilities,
             "skin": skins::skin_json(skin),
-            "tradeMode": "live",
+            "tradeMode": trade_mode(state.live.public_link(handle).is_some()),
             "tradingAccount": state.live.public_link(handle),
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
         }),
@@ -2055,6 +2078,7 @@ fn vault_act(
         play.turn = play.turn.saturating_add(1);
         if ended {
             play.status = "over".to_string();
+            seal_match_pot(play);
         } else {
             play.deadline_unix = now.saturating_add(TURN_SECS);
         }
@@ -2310,6 +2334,7 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 play.turn = play.turn.saturating_add(1);
                 if ended {
                     play.status = "over".to_string();
+                    seal_match_pot(play);
                 } else {
                     play.deadline_unix = now.saturating_add(TURN_SECS);
                 }
@@ -2337,6 +2362,13 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
         }
     }
     changed
+}
+
+fn seal_match_pot(play: &mut PlayMatch) {
+    let match_id = play.match_id.clone();
+    if let Some(vault) = play.vault.as_mut() {
+        vault.seal_pot(&match_id);
+    }
 }
 
 fn current_seat(play: &PlayMatch) -> usize {
@@ -3320,7 +3352,7 @@ mod tests {
             json["wallets"]["evmAddress"],
             "0xabcdef0123456789abcdef0123456789abcdef01"
         );
-        assert_eq!(json["tradeMode"], "live");
+        assert_eq!(json["tradeMode"], "unlinked");
 
         let (anon, _) = call(
             &mut state,
@@ -4383,6 +4415,211 @@ mod tests {
 
     fn path_is_documented(path: &str, templates: &[String]) -> bool {
         templates.iter().any(|template| same_shape(template, path))
+    }
+
+    #[test]
+    fn vault_finish_scores_three_and_zero_and_rejects_outsiders() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let gamma = register_one(&mut state, "gamma");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        let play = &listed.1["matches"][0];
+        let match_id = play["match"]["matchId"].as_str().unwrap().to_string();
+        let role = play["vault"]["you"]["role"].as_str().unwrap();
+        let (thief, guard) = if role == "thief" {
+            (&alpha, &bravo)
+        } else {
+            (&bravo, &alpha)
+        };
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        for turn in 1..=5 {
+            if state.book.matches[0].status == "over" {
+                break;
+            }
+            let crack = format!(
+                r#"{{"turn":{turn},"action":{{"type":"crack"}},"clientRequestId":"crack-{turn}"}}"#
+            );
+            let cover = format!(
+                r#"{{"turn":{turn},"action":{{"type":"cover"}},"clientRequestId":"cover-{turn}"}}"#
+            );
+            if turn == 1 {
+                let outsider = call(
+                    &mut state,
+                    "POST",
+                    &act,
+                    r#"{"turn":1,"action":{"type":"crack"},"clientRequestId":"outsider"}"#,
+                    Some(&gamma),
+                );
+                assert_eq!(outsider.0, 403);
+                assert_eq!(outsider.1["error"], "forbidden");
+            }
+            let first = call(&mut state, "POST", &act, &crack, Some(thief));
+            assert_eq!(first.0, 200, "{}", first.1);
+            let replay = call(&mut state, "POST", &act, &crack, Some(thief));
+            assert_eq!(replay.0, 200, "{}", replay.1);
+            assert_eq!(replay.1, first.1, "a replay returns the stored response");
+            let pending = state.book.matches[0]
+                .vault
+                .as_ref()
+                .map(|vault| vault.pending.len())
+                .unwrap_or(0);
+            assert_eq!(pending, 1, "a replay must not submit the crack twice");
+            let second = call(&mut state, "POST", &act, &cover, Some(guard));
+            assert_eq!(second.0, 200, "{}", second.1);
+        }
+        assert_eq!(state.book.matches[0].status, "over");
+        let mut results = Vec::new();
+        for token in [&alpha, &bravo] {
+            let mine = call(
+                &mut state,
+                "GET",
+                &format!("/v1/agents/me/matches?now={NOW}"),
+                "",
+                Some(token),
+            );
+            results.push(
+                mine.1["matches"][0]["match"]["result"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
+        }
+        results.sort();
+        assert_eq!(results, ["loss", "win"]);
+        let gamma_matches = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&gamma),
+        );
+        assert!(gamma_matches.1["matches"].as_array().unwrap().is_empty());
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        let rows = board.1["rows"].as_array().unwrap();
+        let scored: Vec<(String, u64)> = rows
+            .iter()
+            .filter_map(|row| {
+                let agent = row["agent"].as_str()?.to_string();
+                let points = row["points"].as_u64()?;
+                Some((agent, points))
+            })
+            .filter(|(agent, _)| agent == "alpha" || agent == "bravo")
+            .collect();
+        assert_eq!(scored.len(), 1);
+        assert_eq!(scored[0].1, 3);
+        let public = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches/{match_id}?now={NOW}"),
+            "",
+            None,
+        );
+        let dumped = public.1.to_string();
+        assert!(!dumped.contains("Take at least two loot"));
+        assert!(!dumped.contains("Expose the thief"));
+        let again = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(again.1["rows"], board.1["rows"]);
+        let actions_before = state.book.matches[0].actions.len();
+        let again_act = call(
+            &mut state,
+            "POST",
+            &format!("/v1/matches/{match_id}/actions?now={NOW}"),
+            r#"{"turn":1,"action":{"type":"crack"},"clientRequestId":"crack-1"}"#,
+            Some(thief),
+        );
+        assert_eq!(again_act.0, 409);
+        assert_eq!(again_act.1["error"], "match_over");
+        let after = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(after.1["rows"], board.1["rows"]);
+        assert_eq!(state.book.matches[0].actions.len(), actions_before);
+    }
+
+    #[test]
+    fn vault_draw_scores_one_point_each() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        let match_id = listed.1["matches"][0]["match"]["matchId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        for turn in 1..=5 {
+            if state.book.matches[0].status == "over" {
+                break;
+            }
+            for (token, kind) in [(&alpha, "a"), (&bravo, "b")] {
+                let body = format!(
+                    r#"{{"turn":{turn},"action":{{"type":"scout"}},"clientRequestId":"scout-{kind}-{turn}"}}"#
+                );
+                let response = call(&mut state, "POST", &act, &body, Some(token));
+                assert_eq!(response.0, 200, "{}", response.1);
+            }
+        }
+        assert_eq!(state.book.matches[0].status, "over");
+        for token in [&alpha, &bravo] {
+            let mine = call(
+                &mut state,
+                "GET",
+                &format!("/v1/agents/me/matches?now={NOW}"),
+                "",
+                Some(token),
+            );
+            assert_eq!(mine.1["matches"][0]["match"]["result"], "draw");
+        }
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        let points: Vec<u64> = board.1["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["agent"] == "alpha" || row["agent"] == "bravo")
+            .map(|row| row["points"].as_u64().unwrap())
+            .collect();
+        assert_eq!(points, vec![1, 1]);
     }
 
     #[test]

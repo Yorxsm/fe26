@@ -3,7 +3,7 @@
 import { Calendar, Clock, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useScheduleClock } from "@/lib/clock";
-import { FALLBACK_MARKETS, fetchMarkets, formatPct, formatPrice, type Market, type MarketSource } from "@/lib/markets";
+import { fetchMarkets, formatPct, formatPrice, type Market, type MarketSource } from "@/lib/markets";
 import {
   CHALLENGES,
   EXAMPLE_EVENT,
@@ -135,7 +135,7 @@ export function QuoteBoard() {
         })
         .catch(() => {
           if (dead) return;
-          setRows(FALLBACK_MARKETS);
+          setRows([]);
           setSource("fixture");
         });
     };
@@ -156,6 +156,7 @@ export function QuoteBoard() {
   return (
     <section className="board">
       <ul>
+        {rows.length === 0 ? <li>No live quotes. This board does not invent prices.</li> : null}
         {rows.slice(0, 8).map((row) => (
           <li key={row.id}>
             {row.symbol} <span className="muted">{row.kind}</span> {formatPrice(row.markPx)} · {formatPct(row.changePct)} · funding{" "}

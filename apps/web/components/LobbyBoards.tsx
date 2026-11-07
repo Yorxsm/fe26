@@ -13,8 +13,6 @@ import {
   eventStatusLabel,
   formatClock,
   heistCountdown,
-  heistRows,
-  mockQuotes,
   exampleHeadline,
   SEASON_END,
   SEASON_START,
@@ -105,17 +103,11 @@ function fromFixture(now: number, reason: "unset" | "unreachable"): LobbyView {
     seasonStart: SEASON_START,
     seasonEnd: SEASON_END,
     heist: {
-      today: heistRows("today", now),
-      week: heistRows("week", now),
-      season: heistRows("season", now),
+      today: [],
+      week: [],
+      season: [],
     },
-    quotes: mockQuotes(now).map((row) => ({
-      symbol: row.symbol,
-      kind: row.kind,
-      mark: row.mark,
-      fundingBps: row.fundingBps,
-      pnlMicros: row.pnlMicros,
-    })),
+    quotes: [],
     challenges: CHALLENGES,
     events: [
       {

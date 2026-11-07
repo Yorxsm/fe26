@@ -67,21 +67,6 @@ function fixtureRow(
   };
 }
 
-export const FALLBACK_MARKETS: Market[] = [
-  fixtureRow("xyz:AAPL", "xyz", 232.45, 229.8, 0.0000125, 2_400_000_000, 1_850_000_000, 232.4),
-  fixtureRow("xyz:NVDA", "xyz", 188.75, 184.2, 0.000018, 3_100_000_000, 5_200_000_000, 188.6),
-  fixtureRow("xyz:TSLA", "xyz", 412.3, 419.1, -0.000014, 1_700_000_000, 3_400_000_000, 412.75),
-  fixtureRow("xyz:MSFT", "xyz", 512.6, 508.25, 0.000009, 980_000_000, 1_250_000_000, 512.4),
-  fixtureRow("xyz:AMZN", "xyz", 231.4, 228.05, 0.000011, 1_150_000_000, 1_620_000_000, 231.2),
-  fixtureRow("xyz:GOLD", "xyz", 2745.2, 2718.8, 0.000006, 640_000_000, 890_000_000, 2744.9),
-  fixtureRow("xyz:SP500", "xyz", 6128.5, 6092.25, 0.000004, 2_050_000_000, 2_800_000_000, 6127.8),
-  fixtureRow("xyz:XYZ100", "xyz", 21840.3, 21712.6, 0.000003, 1_300_000_000, 1_950_000_000, 21835.1),
-  fixtureRow("BTC", "", 104_250, 101_800, 0.0000125, 4_200_000_000, 8_400_000_000, 104_180),
-  fixtureRow("ETH", "", 3_890.5, 3_975.2, 0.00001, 2_100_000_000, 4_900_000_000, 3_888.1),
-  fixtureRow("SOL", "", 218.4, 211.75, 0.000022, 890_000_000, 2_250_000_000, 218.2),
-  fixtureRow("HYPE", "", 42.85, 40.9, 0.000031, 420_000_000, 780_000_000, 42.78),
-];
-
 function readMarkets(payload: unknown): { markets: Market[]; source?: MarketSource } {
   if (Array.isArray(payload)) {
     return { markets: payload as Market[] };
@@ -98,7 +83,6 @@ function readMarkets(payload: unknown): { markets: Market[]; source?: MarketSour
 export async function fetchMarkets(
   dex = "xyz",
 ): Promise<{ markets: Market[]; source: MarketSource }> {
-  const fallback = { markets: FALLBACK_MARKETS, source: "fixture" as const };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   try {
@@ -106,17 +90,16 @@ export async function fetchMarkets(
       cache: "no-store",
       signal: controller.signal,
     });
-    if (!response.ok) return fallback;
+    if (!response.ok) return { markets: [], source: "fixture" };
     const payload = readMarkets(await response.json());
     const rows = payload.markets.filter(
       (row) => row && typeof row.id === "string" && Number.isFinite(row.markPx),
     );
-    if (rows.length === 0) return fallback;
     const header = response.headers.get("x-data-source");
     const live = header === "hyperliquid" || payload.source === "hyperliquid";
     return { markets: rows, source: live ? "hyperliquid" : "fixture" };
   } catch {
-    return fallback;
+    return { markets: [], source: "fixture" };
   } finally {
     clearTimeout(timer);
   }

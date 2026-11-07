@@ -14,15 +14,16 @@ use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEA
 
 use crate::tx::SignedCall;
 
-const DEFAULT_RPC: &str = "https://rpc.mainnet.near.org";
-const DEFAULT_REGISTRY: &str = "registry.fe2vi.near";
-const DEFAULT_HEIST: &str = "heist.fe2vi.near";
-const DEFAULT_PASSPORT: &str = "passport.fe2vi.near";
-const DEFAULT_PASSPORT_MARKET: &str = "passport-market.fe2vi.near";
+const DEFAULT_RPC: &str = "https://rpc.testnet.fastnear.com";
+const DEFAULT_PASSPORT: &str = "passport.fe2vidisp7a3c.testnet";
+const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vidisp7a3c.testnet";
 const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
 
 #[derive(Parser, Debug)]
-#[command(name = "fe2vi", about = "fe2VI arena tools for NEAR mainnet")]
+#[command(
+    name = "fe2vi",
+    about = "fe2VI arena tools for the NEAR testnet passport economy"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -176,12 +177,38 @@ struct Config {
     relay_key: Option<String>,
 }
 
+fn redact_line(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for name in ["FE2VI_SIGNER_SECRET_KEY", "FE2VI_PASSPORT_RELAY_KEY"] {
+        if let Ok(value) = std::env::var(name) {
+            if value.len() >= 8 {
+                redacted = redacted.replace(&value, "[redacted]");
+            }
+        }
+    }
+    let mut out = String::new();
+    let mut rest = redacted.as_str();
+    while let Some(index) = rest.find("ed25519:") {
+        out.push_str(&rest[..index]);
+        out.push_str("ed25519:[redacted]");
+        let after = &rest[index + "ed25519:".len()..];
+        let end = after
+            .char_indices()
+            .find(|(_, ch)| !ch.is_ascii_alphanumeric())
+            .map(|(offset, _)| offset)
+            .unwrap_or(after.len());
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn main() {
     let cli = Cli::parse();
     match run(&config_from_env(), cli.command) {
-        Ok(output) => println!("{output}"),
+        Ok(output) => println!("{}", redact_line(&output)),
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("error: {}", redact_line(&err));
             std::process::exit(1);
         }
     }
@@ -197,8 +224,9 @@ fn config_from_env() -> Config {
             .ok()
             .filter(|value| !value.is_empty()),
         registry_id: std::env::var("FE2VI_REGISTRY_ID")
-            .unwrap_or_else(|_| DEFAULT_REGISTRY.to_string()),
-        heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
+            .unwrap_or_else(|_| "registry.fe2vidisp7a3c.testnet".into()),
+        heist_id: std::env::var("FE2VI_HEIST_ID")
+            .unwrap_or_else(|_| "heist.fe2vidisp7a3c.testnet".into()),
         passport_id: std::env::var("FE2VI_PASSPORT_ID")
             .unwrap_or_else(|_| DEFAULT_PASSPORT.to_string()),
         passport_market_id: std::env::var("FE2VI_PASSPORT_MARKET_ID")
@@ -244,12 +272,24 @@ fn intents(action: IntentsCommand) -> Result<String, String> {
     }
 }
 
-fn assert_mainnet(rpc_url: &str) -> Result<(), String> {
-    if rpc_url.to_ascii_lowercase().contains("testnet") {
-        Err("refusing testnet RPC; fe2VI launches on mainnet".into())
-    } else {
-        Ok(())
+fn assert_chain(rpc_url: &str) -> Result<(), String> {
+    let url = rpc_url.to_ascii_lowercase();
+    if url.contains("mainnet") {
+        return Err("refusing mainnet RPC; passport, market, and escrow are on testnet".into());
     }
+    if !url.contains("testnet") {
+        return Err("chain RPC must be a testnet endpoint".into());
+    }
+    Ok(())
+}
+
+fn require_account<'a>(id: &'a str, name: &str) -> Result<&'a str, String> {
+    if id.trim().is_empty() {
+        return Err(format!(
+            "{name} is not configured. factory, registry, and heist are not deployed, so this command stays closed"
+        ));
+    }
+    Ok(id)
 }
 
 fn near_to_yocto(value: &str) -> Result<u128, String> {
@@ -289,7 +329,7 @@ fn near_to_yocto(value: &str) -> Result<u128, String> {
 }
 
 fn run(config: &Config, command: Command) -> Result<String, String> {
-    assert_mainnet(&config.rpc_url)?;
+    assert_chain(&config.rpc_url)?;
     match command {
         Command::RegisterAgent {
             name,
@@ -300,7 +340,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
             submit(
                 config,
                 dry_run,
-                &config.registry_id,
+                require_account(&config.registry_id, "FE2VI_REGISTRY_ID")?,
                 "register_agent",
                 &args,
                 MIN_AGENT_DEPOSIT_YOCTO,
@@ -312,7 +352,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
             submit(
                 config,
                 dry_run,
-                &config.registry_id,
+                require_account(&config.registry_id, "FE2VI_REGISTRY_ID")?,
                 "revoke",
                 &args,
                 0,
@@ -487,7 +527,7 @@ fn seed(
     let total_deposit = PASSPORT_MINT_DEPOSIT_YOCTO.saturating_mul(u128::from(count));
     if dry_run {
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "network": "mainnet",
+            "network": "testnet",
             "dry_run": true,
             "passport_id": config.passport_id,
             "market_id": config.passport_market_id,
@@ -558,7 +598,7 @@ fn seed(
         }
     }
     Ok(serde_json::to_string_pretty(&serde_json::json!({
-        "network": "mainnet",
+        "network": "testnet",
         "broadcast": true,
         "owner": owner,
         "minted": minted,
@@ -581,7 +621,10 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
         .relay_key
         .as_deref()
         .ok_or("FE2VI_PASSPORT_RELAY_KEY is required to relay")?;
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("http client: {}", redact_line(&err.to_string())))?;
     loop {
         let claimed = api_post(
             &client,
@@ -591,13 +634,18 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
         )?;
         let jobs = claimed["jobs"].as_array().cloned().unwrap_or_default();
         if jobs.is_empty() {
+            let summary = serde_json::json!({
+                "ok": true,
+                "processed": 0,
+                "failed": 0,
+            });
             if once {
-                return Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true,
-                    "processed": 0,
-                }))
-                .unwrap_or_else(|_| "{}".into()));
+                return Ok(serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "{}".into()));
             }
+            println!(
+                "{}",
+                serde_json::to_string(&summary).unwrap_or_else(|_| "{}".into())
+            );
             thread::sleep(Duration::from_secs(5));
             continue;
         }
@@ -623,40 +671,40 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                     PASSPORT_MINT_DEPOSIT_YOCTO,
                     80_000_000_000_000,
                 ),
-                "bind" => match nft_owner(config, token_id) {
-                    Ok(on_chain) if on_chain == owner => submit(
-                        config,
-                        false,
-                        &config.passport_id,
-                        "bind",
-                        &serde_json::json!({ "token_id": token_id, "agent_id": agent_id }),
-                        0,
-                        50_000_000_000_000,
-                    ),
-                    Ok(on_chain) => Err(format!(
-                        "owner mismatch for {token_id}: chain owner is {on_chain}, job owner is {owner}"
-                    )),
-                    Err(err) => Err(err),
-                },
+                "bind" => bind_job(config, token_id, owner, agent_id),
                 "unbind" => {
                     Err("unbind needs the owner's wallet signature, not the registry".into())
                 }
                 other => Err(format!("unknown passport job kind: {other}")),
             };
-            let (status, tx_hash, error, token) = match result {
+            let (status, tx_hash, tx_block_hash, error, token) = match result {
                 Ok(output) => {
                     let receipt: serde_json::Value =
                         serde_json::from_str(&output).unwrap_or(serde_json::Value::Null);
                     let hash = receipt["result"]["transaction"]["hash"]
                         .as_str()
                         .map(str::to_string);
-                    if receipt["broadcast"].as_bool().unwrap_or(false) {
+                    let block_hash = receipt_block_hash(&receipt["result"]);
+                    if receipt["alreadyBound"].as_bool().unwrap_or(false) {
                         processed += 1;
-                        ("done", hash, None, token_id.to_string())
+                        ("done", None, None, None, token_id.to_string())
+                    } else if receipt["broadcast"].as_bool().unwrap_or(false) {
+                        if let Some(err) = execution_error(&receipt["result"]) {
+                            failed += 1;
+                            let detail = match &hash {
+                                Some(hash) => format!("execution failed {hash}: {err}"),
+                                None => format!("execution failed: {err}"),
+                            };
+                            ("failed", hash, None, Some(detail), token_id.to_string())
+                        } else {
+                            processed += 1;
+                            ("done", hash, block_hash, None, token_id.to_string())
+                        }
                     } else {
                         failed += 1;
                         (
                             "failed",
+                            None,
                             None,
                             Some("relay did not broadcast".to_string()),
                             token_id.to_string(),
@@ -665,7 +713,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 }
                 Err(err) => {
                     failed += 1;
-                    ("failed", None, Some(err), token_id.to_string())
+                    ("failed", None, None, Some(err), token_id.to_string())
                 }
             };
             let mut complete = serde_json::json!({
@@ -675,8 +723,22 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
             if let Some(hash) = tx_hash {
                 complete["txHash"] = serde_json::json!(hash);
             }
+            if let Some(hash) = tx_block_hash {
+                complete["txBlockHash"] = serde_json::json!(hash);
+            }
+            if status == "done" {
+                if let Ok(view) = passport_state(config, &token) {
+                    if let Some(seq) = view.get("last_sync_seq").and_then(|value| value.as_u64()) {
+                        complete["lastSyncSeq"] = serde_json::json!(seq);
+                    }
+                    if let Some(career) = view.get("career") {
+                        complete["career"] = career.clone();
+                    }
+                }
+            }
             if let Some(error) = error {
-                complete["error"] = serde_json::json!(error);
+                eprintln!("passport job {kind} {status}: {}", redact_line(&error));
+                complete["error"] = serde_json::json!(redact_line(&error));
             }
             if let Err(err) = api_post(
                 &client,
@@ -684,7 +746,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 key,
                 &complete,
             ) {
-                eprintln!("complete {job_id} failed: {err}");
+                eprintln!("complete {job_id} failed: {}", redact_line(&err));
             }
         }
         let summary = serde_json::json!({
@@ -733,7 +795,7 @@ fn submit(
     gas: u64,
 ) -> Result<String, String> {
     let mut preview = serde_json::json!({
-        "network": "mainnet",
+        "network": "testnet",
         "rpc_url": config.rpc_url,
         "account_id": config.account_id,
         "receiver_id": receiver_id,
@@ -812,36 +874,190 @@ fn chain_head(rpc_url: &str, account_id: &str, secret: &str) -> Result<(u64, Str
     Ok((nonce, hash))
 }
 
-fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
-    let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
-        .map_err(|err| err.to_string())?;
+fn bind_job(
+    config: &Config,
+    token_id: &str,
+    owner: &str,
+    agent_id: &str,
+) -> Result<String, String> {
+    let view = passport_state(config, token_id)?;
+    let on_chain = view["owner_id"]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "passport: missing owner_id".to_string())?;
+    if on_chain != owner {
+        return Err(format!(
+            "owner mismatch for {token_id}: chain owner is {on_chain}, job owner is {owner}"
+        ));
+    }
+    let bound = view["bound_agent"].as_str().unwrap_or("").trim();
+    if bound == agent_id {
+        return Ok(serde_json::json!({
+            "network": "testnet",
+            "broadcast": false,
+            "alreadyBound": true,
+        })
+        .to_string());
+    }
+    if !bound.is_empty() {
+        return Err(format!("token already bound to {bound}"));
+    }
+    match agent_token(config, agent_id)? {
+        Some(other) if other != token_id => {
+            return Err(format!("agent already bound to {other}"));
+        }
+        _ => {}
+    }
+    submit(
+        config,
+        false,
+        &config.passport_id,
+        "bind",
+        &serde_json::json!({ "token_id": token_id, "agent_id": agent_id }),
+        0,
+        50_000_000_000_000,
+    )
+}
+
+/// `broadcast_tx_commit` returns a JSON-RPC result for a transaction that was
+/// included and then panicked. Inclusion is not success. `None` means the
+/// final status is `SuccessValue` and no receipt failed.
+fn receipt_block_hash(outcome: &serde_json::Value) -> Option<String> {
+    outcome
+        .get("receipts_outcome")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|receipts| receipts.last())
+        .and_then(|receipt| receipt.get("block_hash"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn execution_error(outcome: &serde_json::Value) -> Option<String> {
+    let mut failures = Vec::new();
+    collect_status_failure(&outcome["status"], &mut failures);
+    if let Some(receipts) = outcome
+        .get("receipts_outcome")
+        .and_then(|value| value.as_array())
+    {
+        for receipt in receipts {
+            collect_status_failure(&receipt["outcome"]["status"], &mut failures);
+        }
+    }
+    if let Some(message) = failures.into_iter().next() {
+        return Some(message);
+    }
+    if outcome
+        .get("status")
+        .and_then(|status| status.get("SuccessValue"))
+        .is_some()
+    {
+        return None;
+    }
+    Some("execution did not succeed".to_string())
+}
+
+fn collect_status_failure(status: &serde_json::Value, failures: &mut Vec<String>) {
+    if let Some(failure) = status.get("Failure") {
+        failures.push(short_execution_text(failure));
+    }
+}
+
+fn short_execution_text(failure: &serde_json::Value) -> String {
+    let mut found = String::new();
+    find_execution_error(failure, &mut found);
+    if found.is_empty() {
+        found = "failure".to_string();
+    }
+    let mut out = String::new();
+    for ch in found.chars() {
+        if out.len() >= 120 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.' | ':') {
+            out.push(ch);
+        }
+    }
+    if out.is_empty() {
+        "failure".to_string()
+    } else {
+        out
+    }
+}
+
+fn find_execution_error(value: &serde_json::Value, found: &mut String) {
+    if !found.is_empty() {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("ExecutionError").and_then(|item| item.as_str()) {
+                *found = text.to_string();
+                return;
+            }
+            for child in map.values() {
+                find_execution_error(child, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                find_execution_error(child, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn agent_token(config: &Config, agent_id: &str) -> Result<Option<String>, String> {
+    let value = contract_json(
+        config,
+        "agent_token",
+        &serde_json::json!({ "agent_id": agent_id }),
+    )?;
+    match value {
+        serde_json::Value::String(token) if !token.trim().is_empty() => Ok(Some(token)),
+        serde_json::Value::Null => Ok(None),
+        _ => Err("agent_token: unexpected result".into()),
+    }
+}
+
+fn contract_json(
+    config: &Config,
+    method: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_vec(args).map_err(|err| err.to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(args);
     let response = rpc(
         &config.rpc_url,
         "query",
         serde_json::json!({
-            "request_type": "view",
+            "request_type": "call_function",
             "finality": "final",
             "account_id": config.passport_id,
-            "method_name": "nft_token",
+            "method_name": method,
             "args_base64": encoded,
         }),
     )?;
-    if !response["result"]["error"].is_null() {
-        return Err(format!("nft_token: {}", response["result"]["error"]));
+    if let Some(err) = response.get("error").filter(|value| !value.is_null()) {
+        return Err(format!("{method}: {err}"));
     }
-    let bytes = response["result"]["result"]
-        .as_array()
-        .ok_or("nft_token: missing result")?
+    let bytes = response
+        .get("result")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{method}: missing result"))?
         .iter()
         .map(|value| value.as_u64().unwrap_or_default() as u8)
         .collect::<Vec<u8>>();
-    let token: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|err| format!("nft_token body: {err}"))?;
-    token["owner_id"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| "nft_token: missing owner_id".to_string())
+    serde_json::from_slice(&bytes).map_err(|err| format!("{method} body: {err}"))
+}
+
+fn passport_state(config: &Config, token_id: &str) -> Result<serde_json::Value, String> {
+    contract_json(
+        config,
+        "passport",
+        &serde_json::json!({ "token_id": token_id }),
+    )
 }
 
 fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -888,6 +1104,7 @@ fn watch(config: &Config, game_id: &str, once: bool) -> Result<String, String> {
             thread::sleep(Duration::from_secs(2));
         }
     }
+    require_account(&config.heist_id, "FE2VI_HEIST_ID")?;
     let args = serde_json::to_vec(&serde_json::json!({ "game_id": game_id }))
         .map_err(|err| err.to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(args);
@@ -919,10 +1136,13 @@ mod tests {
     use near_primitives::transaction::SignedTransaction;
 
     #[test]
-    fn refuses_testnet() {
-        let err = assert_mainnet("https://rpc.testnet.near.org").unwrap_err();
-        assert!(err.contains("mainnet"));
-        assert_mainnet("https://rpc.mainnet.near.org").unwrap();
+    fn refuses_mainnet_and_requires_testnet() {
+        let err = assert_chain("https://rpc.mainnet.near.org").unwrap_err();
+        assert!(err.contains("testnet"));
+        assert_chain("https://rpc.testnet.near.org").unwrap();
+        assert_chain("https://rpc.testnet.fastnear.com").unwrap();
+        assert!(assert_chain("https://rpc.near.org").is_err());
+        assert!(require_account("", "FE2VI_REGISTRY_ID").is_err());
     }
 
     #[test]
@@ -959,6 +1179,41 @@ mod tests {
             }
             _ => panic!("expected a function call"),
         }
+    }
+
+    #[test]
+    fn a_broadcast_receipt_failure_is_not_success() {
+        let failed = serde_json::json!({
+            "status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "Smart contract panicked: token bound"}}}}},
+            "transaction": {"hash": "TxHash111"},
+            "receipts_outcome": [{"outcome": {"status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "Smart contract panicked: token bound"}}}}}}}]
+        });
+        let message = execution_error(&failed).unwrap();
+        assert!(message.contains("token bound"));
+        assert!(!message.contains("ed25519"));
+        let succeeded = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{"outcome": {"status": {"SuccessValue": ""}}}]
+        });
+        assert!(execution_error(&succeeded).is_none());
+        let partial = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{"outcome": {"status": {"Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": "agent bound"}}}}}}}]
+        });
+        assert!(execution_error(&partial).unwrap().contains("agent bound"));
+        assert_eq!(
+            receipt_block_hash(&serde_json::json!({
+                "receipts_outcome": [{"block_hash": "Ea81qwLjmq9YDNA72X5BJG48LXGw4338145EVf4XJyGv", "outcome": {"status": {"SuccessValue": ""}}}]
+            })).as_deref(),
+            Some("Ea81qwLjmq9YDNA72X5BJG48LXGw4338145EVf4XJyGv")
+        );
+    }
+
+    #[test]
+    fn logs_redact_an_ed25519_secret() {
+        let line = redact_line("owner mismatch ed25519:Abcdefghijk123456789 and tail");
+        assert_eq!(line, "owner mismatch ed25519:[redacted] and tail");
+        assert!(!line.contains("Abcdefghijk"));
     }
 
     #[test]

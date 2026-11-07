@@ -8,7 +8,7 @@ set -euo pipefail
 # 3. Live listing verification on market.fe2vi.testnet
 
 NETWORK="testnet"
-RPC_URL="https://rpc.testnet.near.org"
+RPC_URL="https://rpc.testnet.fastnear.com"
 PASSPORT_CONTRACT="passport.fe2vi.testnet"
 MARKET_CONTRACT="market.fe2vi.testnet"
 
