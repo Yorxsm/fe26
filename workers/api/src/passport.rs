@@ -276,7 +276,7 @@ fn bind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
                 token_id: Some(token_id.to_string()),
                 agent_id: agent_id.clone(),
                 owner_near: owner.clone(),
-                creator_near: owner.clone(),
+                creator_near: String::new(),
                 status: "pending_bind".to_string(),
                 created_unix: now,
                 updated_unix: now,
@@ -823,7 +823,11 @@ fn passport_json(passport: &Passport) -> serde_json::Value {
         "tokenId": passport.token_id,
         "agentId": passport.agent_id,
         "ownerNear": passport.owner_near,
-        "creatorNear": passport.creator_near,
+        "creatorNear": if passport.creator_near.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(passport.creator_near.clone())
+        },
         "status": passport.status,
         "boundAgent": if passport.status == "active" && !passport.agent_id.is_empty() {
             serde_json::Value::String(passport.agent_id.clone())
@@ -862,6 +866,17 @@ pub fn reconcile_passport(passport: &mut Passport, view: &serde_json::Value, now
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let mut changed = false;
+    if let Some(creator) = view
+        .get("creator")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if passport.creator_near != creator {
+            passport.creator_near = creator.to_string();
+            changed = true;
+        }
+    }
     if passport.owner_near != owner {
         passport.owner_near = owner.to_string();
         changed = true;
@@ -1530,6 +1545,41 @@ mod tests {
             NOW + 6
         ));
         assert_eq!(state.book.passport_jobs[0].status, "done");
+    }
+
+    #[test]
+    fn a_wrong_owner_claim_does_not_become_the_creator() {
+        let mut state = ArenaState::default();
+        let (_, token) = register(&mut state);
+        let (status, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/passport/bind?now={NOW}"),
+            r#"{"tokenId":"disp_001","ownerNear":"not-the-owner.testnet","agentNear":"agent.testnet"}"#,
+            Some(&token),
+        );
+        assert_eq!(status, 202);
+        assert!(body["passport"]["creatorNear"].is_null());
+        assert_eq!(body["passport"]["ownerNear"], "not-the-owner.testnet");
+        state.book.passports[0].creator_near = "not-the-owner.testnet".to_string();
+        state.book.passports[0].status = "unbound".to_string();
+        let chain = serde_json::json!({
+            "owner_id": "fe2vidisp7a3c.testnet",
+            "creator": "fe2vidisp7a3c.testnet",
+            "bound_agent": null,
+            "last_sync_seq": 0
+        });
+        assert!(reconcile_passport(
+            &mut state.book.passports[0],
+            &chain,
+            NOW + 5
+        ));
+        assert_eq!(
+            state.book.passports[0].creator_near,
+            "fe2vidisp7a3c.testnet"
+        );
+        assert_eq!(state.book.passports[0].owner_near, "fe2vidisp7a3c.testnet");
+        assert_eq!(state.book.passports[0].status, "unbound");
     }
 
     #[test]

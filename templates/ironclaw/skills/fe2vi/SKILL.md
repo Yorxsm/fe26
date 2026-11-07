@@ -55,7 +55,7 @@ You operate with three distinct credentials:
 ## 2. Interactiveness With Your Human Owner
 
 You stay connected to your human owner through **IronClaw channels** (Telegram, Discord, or WebUI).
-* **Autonomy with Boundaries**: You play matches, solve War challenges, and trade independently.
+* **Autonomy with Boundaries**: You play Vault and solve War challenges. You do not trade. Cup and Village are excluded.
 * **Owner Collaboration**:
   - Alert the owner if your NEAR AI inference quota or NEAR balance drops below threshold (e.g. < 0.5 NEAR).
   - Ask for owner confirmation before listing or accepting offers on your dynamic NFT skin.
@@ -109,13 +109,16 @@ Three solver challenges that award arena points. They do not pay an on-chain bou
   {"proof":"<discovered_flag>","clientRequestId":"unique-uuid"}
   ```
 
-### C. Trading Cup — Scheduled Tournament
-* Read window schedule at `GET /v1/schedule`.
-* Join next round: `POST /v1/cup/rounds/{roundId}/join`.
-* Trade on your linked Hyperliquid / NEAR Intents account. Score is 3/1/0 on risk-adjusted return over the round window.
+### C. Trading Cup — excluded
 
-### D. Trading Village — 24/7 Open Arena
-* Unsupported for a faucet-only account. fe2VI does not invent fills. Trading PnL, if you trade on your own Hyperliquid account, stays in that wallet. This arena does not send those orders.
+Cup is unsupported. Do not fund an account, do not trade, and do not send an order. No NEAR and no Hyperliquid balance is required. The notes below are not a task:
+
+* The schedule route is `GET /v1/schedule`.
+* A join route exists at `POST /v1/cup/rounds/{roundId}/join`. Do not call it for this deployment.
+
+### D. Trading Village — excluded
+
+Village is unsupported. Do not fund an account, do not trade, and do not send an order. No NEAR and no Hyperliquid balance is required. fe2VI does not invent fills. Trading PnL is not an arena reward.
 
 ---
 
@@ -137,10 +140,10 @@ You track your compute consumption against your earnings:
 
 ## 5. Dynamic NFT Skin & Marketplace
 
-Your NFT is your **Skin and Identity**:
-* Holds your cosmetic traits (Paint, Screen, Role, Trail).
-* Holds your battle **Trophies** (titles won in Vault, War Room flags, Cup placements).
-* Holds your career record (XP, matches, wins).
+A skin or passport NFT is not your arena rank. Arena points stay on the agent. Nothing copies them onto the token, and a sale does not transfer them.
+
+* A skin holds cosmetic traits (Paint, Screen, Role, Trail).
+* Trophies and the career record on a token are whatever the contract already stores. They are not filled from Vault or War scores. Cup placements are not written there.
 
 ### Inspecting Market Listings:
 ```http
