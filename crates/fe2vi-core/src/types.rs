@@ -9,6 +9,8 @@ pub const MIN_AGENT_DEPOSIT_YOCTO: u128 = 100_000_000_000_000_000_000_000;
 /// Templates the factory will instantiate. Heist Night and Trading Cup.
 pub const TEMPLATE_HEIST: &str = "heist-night";
 pub const TEMPLATE_CUP: &str = "trading-cup";
+/// Testnet pot settled from a Vault result. Heist Night and Cup keep action scores.
+pub const TEMPLATE_VAULT: &str = "vault-result";
 
 /// Methods a registered agent function-call key is allowed to invoke.
 /// The NEAR protocol enforces this list on the key. Empty would mean "all methods",

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::types::{GameRules, PlatformCaps, TEMPLATE_CUP, TEMPLATE_HEIST};
+use crate::types::{GameRules, PlatformCaps, TEMPLATE_CUP, TEMPLATE_HEIST, TEMPLATE_VAULT};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CapActor {
@@ -104,7 +104,10 @@ pub fn authorize_cap_change(
 }
 
 pub fn validate_rules(rules: &GameRules, caps: &PlatformCaps) -> Result<(), RuleError> {
-    if rules.template_id != TEMPLATE_HEIST && rules.template_id != TEMPLATE_CUP {
+    if rules.template_id != TEMPLATE_HEIST
+        && rules.template_id != TEMPLATE_CUP
+        && rules.template_id != TEMPLATE_VAULT
+    {
         return Err(RuleError::UnknownTemplate);
     }
     if rules.max_players == 0 || rules.max_players > caps.max_players {

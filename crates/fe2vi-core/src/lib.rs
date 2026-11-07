@@ -12,6 +12,7 @@ mod score;
 mod scoring;
 mod skin;
 mod types;
+mod vault_pot;
 mod venue;
 mod village;
 
@@ -49,8 +50,9 @@ pub use skin::{
 pub use types::{
     absolute_ceiling, default_platform_caps, heist_night_example, trading_cup_example, GameRules,
     PlatformCaps, MIN_AGENT_DEPOSIT_YOCTO, ONE_NEAR, SCOPED_METHODS, SCOPED_METHOD_LIST,
-    TEMPLATE_CUP, TEMPLATE_HEIST,
+    TEMPLATE_CUP, TEMPLATE_HEIST, TEMPLATE_VAULT,
 };
+pub use vault_pot::{vault_pot_shares, vault_result_call, VaultPotCall};
 pub use venue::{
     default_venue, refuse_testnet, venue_notes, MockVenue, Quote, Venue, VenueNote,
     HYPERLIQUID_INFO, HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,

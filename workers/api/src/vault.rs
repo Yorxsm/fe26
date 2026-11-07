@@ -80,6 +80,13 @@ pub struct PotAuthorization {
     pub outcome: String,
     #[serde(default)]
     pub reason: String,
+    /// `winner-takes-all` for a Vault result. Empty for an action-score resolve check.
+    #[serde(default)]
+    pub rule: String,
+    #[serde(default)]
+    pub winner: String,
+    #[serde(default)]
+    pub participants: Vec<String>,
 }
 
 fn awaiting_contract_view() -> String {
@@ -547,6 +554,50 @@ impl VaultMatch {
         self.pot = Some(stored_pot(match_id));
     }
 
+    /// Record the Vault result rule. Amounts stay on the contract pot. A repeat keeps the first record.
+    pub fn seal_vault_result(&mut self, match_id: &str, seats: &[(String, i64, Option<String>)]) {
+        if !self.ended
+            || self
+                .pot
+                .as_ref()
+                .is_some_and(|pot| pot.rule == "winner-takes-all")
+        {
+            return;
+        }
+        let mut pot = stored_pot(match_id);
+        pot.rule = "winner-takes-all".to_string();
+        pot.pays = false;
+        pot.contract_would_accept_resolve = false;
+        let mapped = seats.iter().all(|(_, _, near)| near.is_some());
+        if seats.is_empty() || !mapped {
+            pot.outcome = "unmapped".to_string();
+            pot.reason = "A seat has no linked NEAR account, so no payee was invented.".to_string();
+            self.pot = Some(pot);
+            return;
+        }
+        let scores: Vec<(String, i64)> = seats
+            .iter()
+            .map(|(_, score, near)| (near.clone().unwrap_or_default(), *score))
+            .collect();
+        pot.participants = scores.iter().map(|(account, _)| account.clone()).collect();
+        match fe2vi_core::vault_result_call(&scores) {
+            Ok(fe2vi_core::VaultPotCall::Win { winner }) => {
+                pot.outcome = "win".to_string();
+                pot.winner = winner;
+                pot.reason = "The unique high score takes the whole testnet pot through factory settle_vault. Arena points are not NEAR. A second settlement is already resolved.".to_string();
+            }
+            Ok(fe2vi_core::VaultPotCall::Draw) => {
+                pot.outcome = "draw".to_string();
+                pot.reason = "Tied scores split the testnet pot equally through factory settle_vault. Arena points are not NEAR. A second settlement is already resolved.".to_string();
+            }
+            Ok(fe2vi_core::VaultPotCall::Cancel) | Err(_) => {
+                pot.outcome = "unmapped".to_string();
+                pot.reason = "This match has no seated result to settle.".to_string();
+            }
+        }
+        self.pot = Some(pot);
+    }
+
     pub fn private_json(
         &self,
         handles: &HashMap<String, String>,
@@ -581,6 +632,9 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         outcome: "awaiting_contract_view".to_string(),
         reason: "The contract view has not been read. A stored match row is not a payout."
             .to_string(),
+        rule: String::new(),
+        winner: String::new(),
+        participants: Vec::new(),
     }
 }
 
@@ -789,6 +843,39 @@ mod tests {
         let public = game.public_json(&handles(&["a", "b"]));
         assert_eq!(public["pot"]["idempotencyKey"], "pot:mt_one");
         assert_eq!(public["pot"]["pays"], false);
+    }
+
+    #[test]
+    fn a_vault_result_names_the_winner_without_inventing_near() {
+        let mut game = VaultMatch::start(&["a".into(), "b".into()]);
+        game.ended = true;
+        game.seal_vault_result(
+            "mt_win",
+            &[
+                ("a".into(), 4, Some("ann.testnet".into())),
+                ("b".into(), 1, Some("bob.testnet".into())),
+            ],
+        );
+        game.seal_vault_result("mt_win", &[("a".into(), 0, Some("other.testnet".into()))]);
+        let pot = game.pot.clone().unwrap();
+        assert_eq!(pot.rule, "winner-takes-all");
+        assert_eq!(pot.outcome, "win");
+        assert_eq!(pot.winner, "ann.testnet");
+        assert!(!pot.pays);
+        let mut draw = VaultMatch::start(&["a".into(), "b".into()]);
+        draw.ended = true;
+        draw.seal_vault_result(
+            "mt_draw",
+            &[
+                ("a".into(), 2, Some("ann.testnet".into())),
+                ("b".into(), 2, Some("bob.testnet".into())),
+            ],
+        );
+        assert_eq!(draw.pot.unwrap().outcome, "draw");
+        let mut missing = VaultMatch::start(&["a".into()]);
+        missing.ended = true;
+        missing.seal_vault_result("mt_none", &[("a".into(), 1, None)]);
+        assert_eq!(missing.pot.unwrap().outcome, "unmapped");
     }
 
     #[test]

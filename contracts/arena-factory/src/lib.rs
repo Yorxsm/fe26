@@ -110,6 +110,40 @@ impl ArenaFactory {
         )
     }
 
+    /// Owner-only. Forwards a Vault result to heist `settle_vault`. The heist
+    /// contract rejects a second settlement. This does not change action-score games.
+    pub fn settle_vault(
+        &mut self,
+        game_id: String,
+        outcome: String,
+        winner: Option<AccountId>,
+    ) -> Promise {
+        require!(
+            env::predecessor_account_id() == self.owner,
+            "only the owner can settle a vault"
+        );
+        let game = self
+            .games
+            .get(&game_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("game not found"));
+        require!(
+            game.rules.template_id == fe2vi_core::TEMPLATE_VAULT,
+            "not a vault result pot"
+        );
+        Promise::new(self.heist.clone()).function_call(
+            "settle_vault".to_string(),
+            near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+                "game_id": game_id,
+                "outcome": outcome,
+                "winner": winner,
+            }))
+            .unwrap_or_else(|_| env::panic_str("settle args")),
+            NearToken::from_yoctonear(0),
+            Gas::from_tgas(80),
+        )
+    }
+
     /// Single moderator. Players and the game contract cannot delist.
     /// The heist contract is told to freeze play; payout still follows the rules.
     pub fn delist_game(&mut self, game_id: String) {
@@ -364,5 +398,37 @@ mod tests {
         assert!(panic_text(err).contains("game cannot raise platform caps"));
         assert_eq!(factory.get_platform_caps(), original);
         assert!(factory.list_games().is_empty());
+    }
+
+    #[test]
+    fn only_the_owner_can_settle_a_vault_result() {
+        let mut factory = setup();
+        let mut rules = heist_night_example();
+        rules.template_id = fe2vi_core::TEMPLATE_VAULT.to_string();
+        factory.games.insert(
+            "vault1".into(),
+            StoredGame {
+                creator: "creator.fe2vi.testnet".parse().unwrap(),
+                rules,
+                game_md_hash: "ab".into(),
+                delisted: false,
+                created_at_ns: 0,
+            },
+        );
+        use_pred("visitor.fe2vi.testnet", 0);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            factory.settle_vault("vault1".into(), "cancel".into(), None);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("only the owner can settle a vault"));
+        use_pred("owner.fe2vi.testnet", 0);
+        factory.settle_vault("vault1".into(), "cancel".into(), None);
+        let forwarded = get_created_receipts().iter().any(|receipt| {
+            receipt.receiver_id.as_str() == "heist.fe2vi.testnet"
+                && receipt.actions.iter().any(|action| {
+                    matches!(action, near_sdk::mock::MockAction::FunctionCallWeight { method_name, .. } if method_name == b"settle_vault")
+                })
+        });
+        assert!(forwarded, "settlement must be sent to the heist contract");
     }
 }

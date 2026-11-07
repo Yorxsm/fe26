@@ -2043,6 +2043,7 @@ fn vault_act(
             .map(|player| player.agent_id.clone())
             .unwrap_or_else(|| value.to_string())
     });
+    let near = near_by_agent(state);
     let play = &mut state.book.matches[index];
     let (rows, ready, ended) = {
         let Some(vault) = play.vault.as_mut() else {
@@ -2078,7 +2079,7 @@ fn vault_act(
         play.turn = play.turn.saturating_add(1);
         if ended {
             play.status = "over".to_string();
-            seal_match_pot(play);
+            seal_match_pot(&near, play);
         } else {
             play.deadline_unix = now.saturating_add(TURN_SECS);
         }
@@ -2311,6 +2312,7 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
 }
 
 fn settle(state: &mut ArenaState, now: u64) -> bool {
+    let near = near_by_agent(state);
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
@@ -2334,7 +2336,7 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 play.turn = play.turn.saturating_add(1);
                 if ended {
                     play.status = "over".to_string();
-                    seal_match_pot(play);
+                    seal_match_pot(&near, play);
                 } else {
                     play.deadline_unix = now.saturating_add(TURN_SECS);
                 }
@@ -2364,10 +2366,39 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
     changed
 }
 
-fn seal_match_pot(play: &mut PlayMatch) {
+fn near_by_agent(state: &ArenaState) -> HashMap<String, String> {
+    state
+        .book
+        .players
+        .iter()
+        .filter_map(|player| {
+            player
+                .wallets
+                .near_account
+                .as_ref()
+                .map(|account| account.trim().to_string())
+                .filter(|account| !account.is_empty())
+                .map(|account| (player.agent_id.clone(), account))
+        })
+        .collect()
+}
+
+fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
     let match_id = play.match_id.clone();
+    let seats: Vec<(String, i64, Option<String>)> = play
+        .seats
+        .iter()
+        .map(|seat| {
+            let score = play
+                .vault
+                .as_ref()
+                .map(|vault| i64::from(vault.score(seat)))
+                .unwrap_or(0);
+            (seat.clone(), score, near.get(seat).cloned())
+        })
+        .collect();
     if let Some(vault) = play.vault.as_mut() {
-        vault.seal_pot(&match_id);
+        vault.seal_vault_result(&match_id, &seats);
     }
 }
 
