@@ -202,6 +202,12 @@ mod edge {
                     )
                 })
                 .unwrap_or(true);
+            arena.market_contract = self
+                .env
+                .var("FE2VI_PASSPORT_MARKET_ID")
+                .ok()
+                .map(|value| value.to_string())
+                .unwrap_or_default();
             let before_book = {
                 let sql = self.state.storage().sql();
                 attach_player_book(&sql, &mut arena)?

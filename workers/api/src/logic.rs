@@ -41,6 +41,9 @@ pub struct ArenaState {
     pub passport_gate: crate::passport::PassportGate,
     #[serde(skip)]
     pub passport_mint: bool,
+    /// Worker var `FE2VI_PASSPORT_MARKET_ID`. Not a chain read.
+    #[serde(skip)]
+    pub market_contract: String,
 }
 
 impl Default for ArenaState {
@@ -59,6 +62,7 @@ impl Default for ArenaState {
             live: crate::live::LiveBook::default(),
             passport_gate: crate::passport::PassportGate::default(),
             passport_mint: true,
+            market_contract: String::new(),
         }
     }
 }

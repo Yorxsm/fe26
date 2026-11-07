@@ -6,20 +6,26 @@ import { Eye, Shield, Sparkles, Trophy, TrendingUp, ShoppingBag, ExternalLink } 
 import { SkinPreview } from "@/components/SkinPreview";
 import {
   fetchMarketData,
-  FALLBACK_LISTINGS,
-  FALLBACK_SALES,
-  FALLBACK_STATS,
   type MarketListing,
   type MarketSale,
   type MarketStats,
 } from "@/lib/market";
 import { PAINT_COLORS, SCREEN_COLORS, ROLE_NAMES, TRAIL_NAMES } from "@/lib/skin";
 
+const EMPTY_STATS: MarketStats = {
+  floorPriceNear: "0",
+  totalVolumeNear: "0",
+  listedCount: 0,
+  totalSalesCount: 0,
+  activeSpectators: 0,
+};
+
 export default function MarketPage() {
-  const [listings, setListings] = useState<MarketListing[]>(FALLBACK_LISTINGS);
-  const [sales, setSales] = useState<MarketSale[]>(FALLBACK_SALES);
-  const [stats, setStats] = useState<MarketStats>(FALLBACK_STATS);
-  const [source, setSource] = useState<"arena" | "fixture">("fixture");
+  const [listings, setListings] = useState<MarketListing[]>([]);
+  const [sales, setSales] = useState<MarketSale[]>([]);
+  const [stats, setStats] = useState<MarketStats>(EMPTY_STATS);
+  const [source, setSource] = useState<"arena" | "fixture" | "loading">("loading");
+  const [contract, setContract] = useState("");
   const [selectedId, setSelectedId] = useState<string>("fdr_001");
   const [rarityFilter, setRarityFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"price-asc" | "price-desc" | "rank">("price-asc");
@@ -32,6 +38,7 @@ export default function MarketPage() {
       setSales(result.sales);
       setStats(result.stats);
       setSource(result.source);
+      setContract(result.contract);
     });
     return () => {
       alive = false;
@@ -54,7 +61,7 @@ export default function MarketPage() {
   }, [listings, rarityFilter, sortOrder]);
 
   const selected = useMemo(() => {
-    return listings.find((item) => item.tokenId === selectedId) ?? listings[0] ?? FALLBACK_LISTINGS[0];
+    return listings.find((item) => item.tokenId === selectedId) ?? listings[0] ?? null;
   }, [listings, selectedId]);
 
   return (
@@ -68,16 +75,20 @@ export default function MarketPage() {
             </span>
           </div>
           <p className="lede">
-            Live non-custodial secondary market for fe2VI dynamic agent skins on <code>market.fe2vi.testnet</code>.
-            Spectators can inspect 3D skins, career stats, and match trophies in real-time. Purchases settle peer-to-peer on NEAR with zero platform custody.
+            Spectator view of passport listings the arena API reports. This page does not send a transaction.
+            {contract ? <> Configured market: <code>{contract}</code>.</> : null}
           </p>
         </div>
       </div>
 
       <p className="meta">
-        {source === "arena"
-          ? "Live on-chain market feed synchronized via fe2vi-api."
-          : "Displaying cached market feed. Zero custody, peer-to-peer settlement on NEAR."}
+        {source === "loading"
+          ? "Loading the arena book."
+          : source === "arena"
+            ? listings.length
+              ? "Listings stored in the arena book. This is not a chain read."
+              : "The arena book has no listings. Chain listings are not read by this worker."
+            : "The arena API did not answer, so this is a local sample, not a live contract."}
       </p>
 
       {/* Market Metrics Strip */}
@@ -124,7 +135,7 @@ export default function MarketPage() {
         </div>
       </div>
 
-      {/* Main 3D Skin Inspector & Details */}
+      {selected ? (
       <div className="forge-stage">
         <section className="lobby-panel" style={{ position: "relative" }}>
           <SkinPreview traits={selected.traits} />
@@ -251,7 +262,7 @@ export default function MarketPage() {
           <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem" }}>
             <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <span className="meta" style={{ fontWeight: 600 }}>Execute Direct Purchase (On-Chain)</span>
-              <span className="meta">Contract: <code>market.fe2vi.testnet</code></span>
+              <span className="meta">Contract: <code>{contract || "not configured"}</code></span>
             </div>
             <pre className="forge-call" style={{ margin: "0.5rem 0 0 0", fontSize: "0.8rem" }}>
 {`fe2vi passport buy --token-id ${selected.tokenId} --price ${selected.priceNear}`}
@@ -262,13 +273,19 @@ export default function MarketPage() {
           </div>
         </section>
       </div>
+      ) : (
+        <section className="card">
+          <h2>No listings</h2>
+          <p>The arena book is empty. This page does not invent chain listings.</p>
+        </section>
+      )}
 
       {/* Filter and Browse Listings */}
       <section>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
           <div>
             <h2>Active Listings ({filteredListings.length})</h2>
-            <p className="meta">All passports & skins pre-minted or listed directly by competing agents.</p>
+            <p className="meta">Passports the arena book returned for this view.</p>
           </div>
           <div className="row" style={{ gap: "0.5rem" }}>
             <div className="forge-tabs" style={{ margin: 0 }}>
@@ -357,8 +374,10 @@ export default function MarketPage() {
       {/* Live On-Chain Sales Feed */}
       <section style={{ marginTop: "1.5rem" }}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Live Sales Tape</h2>
-          <span className="meta">WebSocket Verified from NEAR Mainnet</span>
+          <h2>Sales tape</h2>
+          <span className="meta">
+            {source === "fixture" ? "Local sample. The arena API did not answer." : "Sales returned by the arena API."}
+          </span>
         </div>
         <table className="board" style={{ marginTop: "0.75rem" }}>
           <thead>
@@ -372,6 +391,11 @@ export default function MarketPage() {
             </tr>
           </thead>
           <tbody>
+            {sales.length === 0 ? (
+              <tr>
+                <td colSpan={6}>No sales recorded.</td>
+              </tr>
+            ) : null}
             {sales.map((sale) => (
               <tr key={sale.id}>
                 <td className="meta">{sale.timestamp}</td>

@@ -5,6 +5,7 @@ import { useGLTF } from "@react-three/drei";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
+import { seasonBoardRows, type SeasonBoardRow } from "@/lib/seasonBoard";
 import { useHeistNow, useRoomClocks, useScheduleClock } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
 import { CHALLENGES, formatCountdown, mockQuotes } from "@/lib/schedule";
@@ -97,7 +98,7 @@ function quotedFamily(variable: string, fallback: string) {
   return first || fallback;
 }
 
-type BoardRow = { label: string; value?: string; tone?: "green" | "orange" };
+type BoardRow = SeasonBoardRow;
 
 function toneColor(tone: BoardRow["tone"]) {
   if (tone === "green") return "#2fb86a";
@@ -359,15 +360,10 @@ function useSeasonBoard(id: string) {
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("missing"))))
       .then((body: { rows?: Array<{ name?: string; points?: number; rank?: number }> }) => {
         if (dead) return;
-        const next = (body.rows ?? []).slice(0, 4).map((row) => ({
-          label: `${row.rank ?? ""}  ${String(row.name ?? "").toUpperCase()}`,
-          value: String(row.points ?? ""),
-          tone: "orange" as const,
-        }));
-        setRows(next.length ? next : [{ label: "LIVE DATA UNAVAILABLE" }]);
+        setRows(seasonBoardRows(body.rows ?? []));
       })
       .catch(() => {
-        if (!dead) setRows([{ label: "LIVE DATA UNAVAILABLE" }]);
+        if (!dead) setRows(seasonBoardRows(null));
       });
     return () => {
       dead = true;
@@ -701,18 +697,18 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
   if (frameMode !== "in" || !focusId || !ROOMS[focusId]) return null;
   const room = ROOMS[focusId];
   return (
-    <Suspense fallback={null}>
-      <group position={room.position}>
-        <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.05 : 1.35} />
-        <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.72 : 0.9} />
+    <group position={room.position}>
+      <ambientLight color="#f4efe6" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 1.05 : 1.35} />
+      <hemisphereLight color="#fff6ea" groundColor="#6a5848" intensity={focusId === "skin-forge" || focusId === "oracle-plaza" ? 0.72 : 0.9} />
+      <Suspense fallback={null}>
         <RoomMesh key={`${focusId}-${room.url}`} url={room.url} roomId={focusId} />
-        {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
-          <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />
-        ))}
-        <RoomBoards id={focusId} />
-        {focusId === "cup-stadium" ? <SeatCrowd /> : null}
-      </group>
-    </Suspense>
+      </Suspense>
+      {(ROOM_LIGHTS[focusId] ?? []).map((lamp) => (
+        <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />
+      ))}
+      <RoomBoards id={focusId} />
+      {focusId === "cup-stadium" ? <SeatCrowd /> : null}
+    </group>
   );
 }
 

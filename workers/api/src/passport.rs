@@ -589,7 +589,11 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
     for passport in &state.book.passports {
         if let Some(token_id) = &passport.token_id {
             let role = (token_id.len() % 6) as u32;
-            let seller = if passport.owner_near.is_empty() { "fe2vi.testnet" } else { &passport.owner_near };
+            let seller = if passport.owner_near.is_empty() {
+                "unrecorded"
+            } else {
+                passport.owner_near.as_str()
+            };
             listings.push(serde_json::json!({
                 "tokenId": token_id,
                 "name": format!("Passport Skin #{}", token_id),
@@ -597,7 +601,7 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
                 "priceNear": "1.0",
                 "priceYocto": "1000000000000000000000000",
                 "rarity": "Common",
-                "description": "On-chain dynamic agent passport skin carrying verifiable battle career records.",
+                "description": "Passport recorded in the arena book. This is not a chain listing read.",
                 "traits": {
                     "paint": (token_id.len() * 3) % 12,
                     "screen": (token_id.len() * 2) % 8,
@@ -611,69 +615,31 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
                 },
                 "trophies": serde_json::json!([]),
                 "career": {
-                    "xp": 100,
-                    "wins": 1,
-                    "matches": 3,
-                    "rank": 20,
-                    "bestRank": 18,
+                    "xp": 0,
+                    "wins": 0,
+                    "matches": 0,
+                    "rank": 0,
+                    "bestRank": 0,
                 }
             }));
         }
     }
-    if listings.is_empty() {
-        for i in 1..=8 {
-            let token_id = format!("fdr_{:03}", i);
-            let role = (i % 6) as u32;
-            listings.push(serde_json::json!({
-                "tokenId": token_id,
-                "name": format!("Launch Stock #fdr_{:03}", i),
-                "seller": "fe2vi.testnet",
-                "priceNear": "1.0",
-                "priceYocto": "1000000000000000000000000",
-                "rarity": if i == 1 { "Mythic" } else if i <= 3 { "Rare" } else { "Common" },
-                "description": "Genesis unbound launch passport ready to bind and wear in the arena.",
-                "traits": {
-                    "paint": (i * 2) % 12,
-                    "screen": (i * 3) % 8,
-                    "eyes": role % 6,
-                    "headwear": (role + 2) % 8,
-                    "face_item": role % 4,
-                    "back_item": (role + 1) % 4,
-                    "emblem": role % 6,
-                    "trail": i % 4,
-                    "role": role,
-                },
-                "trophies": if i == 1 {
-                    vec![serde_json::json!({ "name": "Genesis Token", "description": "Token 001 of launch series", "icon": "⭐", "season": 1 })]
-                } else {
-                    vec![]
-                },
-                "career": {
-                    "xp": 100 * i,
-                    "wins": i,
-                    "matches": i + 2,
-                    "rank": i,
-                    "bestRank": i,
-                }
-            }));
-        }
-    }
-    let total_listings = listings.len();
-    let active_spectators = state.book.players.len().max(3);
+    let listed = listings.len();
     let stats = serde_json::json!({
-        "floorPriceNear": "1.0",
-        "totalVolumeNear": format!("{:.1}", (total_listings as f64) * 1.0 + 4.2),
-        "listedCount": total_listings,
-        "totalSalesCount": 3,
-        "activeSpectators": active_spectators,
+        "floorPriceNear": if listed == 0 { "0" } else { "1.0" },
+        "totalVolumeNear": "0",
+        "listedCount": listed,
+        "totalSalesCount": 0,
+        "activeSpectators": state.book.players.len(),
     });
     json(
         200,
         &serde_json::json!({
             "listings": listings,
             "stats": stats,
-            "contract": "market.fe2vi.testnet",
-            "fee": "0%"
+            "contract": state.market_contract,
+            "fee": "0%",
+            "source": "arena-book"
         }),
         false,
         None,
@@ -681,36 +647,7 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
 }
 
 pub fn market_sales(_state: &ArenaState) -> Outcome {
-    let sales = serde_json::json!([
-        {
-            "id": "sale-1",
-            "tokenId": "fdr_001",
-            "buyer": "poc-v4-demo-1779362775.testnet",
-            "seller": "fe2vi.testnet",
-            "priceNear": "1.0",
-            "timestamp": "12m ago",
-            "rarity": "Mythic"
-        },
-        {
-            "id": "sale-2",
-            "tokenId": "fdr_002",
-            "buyer": "poc-v1-test-1779361511.testnet",
-            "seller": "fe2vi.testnet",
-            "priceNear": "1.0",
-            "timestamp": "45m ago",
-            "rarity": "Common"
-        },
-        {
-            "id": "sale-3",
-            "tokenId": "fdr_005",
-            "buyer": "escrow.fe2vi.testnet",
-            "seller": "fe2vi.testnet",
-            "priceNear": "2.2",
-            "timestamp": "2h ago",
-            "rarity": "Rare"
-        }
-    ]);
-    json(200, &serde_json::json!({ "sales": sales }), false, None)
+    json(200, &serde_json::json!({ "sales": [] }), false, None)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -1102,5 +1039,24 @@ mod tests {
         assert_eq!(body["passport"]["status"], "active");
         assert_eq!(body["passport"]["agentId"], "buyer.near");
         assert_eq!(body["passport"]["lastSyncSeq"], 3);
+    }
+
+    #[test]
+    fn empty_market_does_not_invent_testnet_listings() {
+        let mut state = ArenaState {
+            market_contract: "passport-market.fe2vi.near".into(),
+            ..ArenaState::default()
+        };
+        let (status, body) = call(&mut state, "GET", "/v1/market/listings", "", None);
+        assert_eq!(status, 200);
+        assert_eq!(body["listings"].as_array().unwrap().len(), 0);
+        assert_eq!(body["contract"], "passport-market.fe2vi.near");
+        assert_eq!(body["stats"]["listedCount"], 0);
+        assert_eq!(body["stats"]["totalSalesCount"], 0);
+        assert_eq!(body["source"], "arena-book");
+        assert!(!body.to_string().contains("testnet"));
+        let (status, sales) = call(&mut state, "GET", "/v1/market/sales", "", None);
+        assert_eq!(status, 200);
+        assert!(sales["sales"].as_array().unwrap().is_empty());
     }
 }
