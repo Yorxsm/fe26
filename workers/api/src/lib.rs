@@ -313,6 +313,49 @@ mod edge {
                         let _ = reconcile_token(&self.env, &mut arena, token_id, chain_now).await;
                     }
                 }
+                if route_path == "/v1/agents/me/passport/jobs" {
+                    if let Some(agent_id) = crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    ) {
+                        let pending: Vec<(String, String)> = arena
+                            .book
+                            .passport_jobs
+                            .iter()
+                            .filter(|job| {
+                                job.agent_id == agent_id
+                                    && job.kind == "bind"
+                                    && job.status == "done"
+                            })
+                            .filter_map(|job| {
+                                arena
+                                    .book
+                                    .passports
+                                    .iter()
+                                    .find(|passport| passport.passport_id == job.passport_id)
+                                    .and_then(|passport| passport.token_id.clone())
+                                    .map(|token_id| (job.job_id.clone(), token_id))
+                            })
+                            .collect();
+                        for (job_id, token_id) in pending {
+                            if let Ok(view) = passport_chain_view(&self.env, &token_id).await {
+                                let _ = crate::passport::reject_unconfirmed_bind(
+                                    &mut arena,
+                                    &job_id,
+                                    view.as_ref(),
+                                    chain_now,
+                                );
+                            }
+                        }
+                    }
+                }
                 if route_path == "/v1/agents/me/passport" {
                     if let Some(agent_id) = crate::agents::authed_id(
                         &arena,
@@ -1385,11 +1428,28 @@ mod edge {
         let Some(view) = passport_chain_view(env, token_id).await? else {
             return Ok(false);
         };
-        Ok(crate::passport::reconcile_passport(
-            &mut arena.book.passports[index],
-            &view,
-            now,
-        ))
+        let changed =
+            crate::passport::reconcile_passport(&mut arena.book.passports[index], &view, now);
+        let token_id = token_id.to_string();
+        let job_ids: Vec<String> = arena
+            .book
+            .passport_jobs
+            .iter()
+            .filter(|job| {
+                job.kind == "bind"
+                    && job.status == "done"
+                    && arena.book.passports.iter().any(|passport| {
+                        passport.passport_id == job.passport_id
+                            && passport.token_id.as_deref() == Some(token_id.as_str())
+                    })
+            })
+            .map(|job| job.job_id.clone())
+            .collect();
+        let mut rejected = false;
+        for job_id in job_ids {
+            rejected |= crate::passport::reject_unconfirmed_bind(arena, &job_id, Some(&view), now);
+        }
+        Ok(changed || rejected)
     }
 
     async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
