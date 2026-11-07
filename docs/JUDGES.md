@@ -173,9 +173,9 @@ Cup and Village are unsupported on a faucet-only account. They need the operator
 
 ## What is intentionally not finished
 
-- Passport career on the NFT is updated by the relay after a bind, from the chain view. Arena match points are not automatically written into that NFT.
-- The relay signer has to be `registry.fe2vidisp7a3c.testnet`. The production `FE2VI_PASSPORT_RELAY_KEY` is a separate bearer. Neither secret is in the repo.
-- Cup and Village stay empty until the operator links a real trading account.
+- Passport career on the NFT is updated by the relay after a bind, from the chain view. Arena match points are not automatically written into that NFT. A later transfer is read back from `passport(token_id)` on the public passport route, the agent passport route, and the five-minute index. The book then shows the new owner and clears the old binding.
+- Production has no `FE2VI_PASSPORT_RELAY_KEY`. The operator sets that bearer with `wrangler secret put` from stdin and runs `fe2vi passport relay` beside a function-call key they generated. Only the public key is added to `registry.fe2vidisp7a3c.testnet`, limited to `passport.bind`. The private key stays on the operator machine. A disposable VM is not the relay.
+- Cup and Village stay empty until the operator links their own Hyperliquid account and NEAR Intents grant (`ngt_` on their backend, optional partner `naa_` as a Worker secret). No order is sent. Hyperliquid testnet info exists, and this package does not use it.
 
 ## Demo script for judges
 

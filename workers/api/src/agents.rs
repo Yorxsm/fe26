@@ -4446,6 +4446,7 @@ mod tests {
             assert_eq!(first.0, 200, "{}", first.1);
             let replay = call(&mut state, "POST", &act, &crack, Some(thief));
             assert_eq!(replay.0, 200, "{}", replay.1);
+            assert_eq!(replay.1, first.1, "a replay returns the stored response");
             let pending = state.book.matches[0]
                 .vault
                 .as_ref()
@@ -4519,6 +4520,85 @@ mod tests {
             None,
         );
         assert_eq!(again.1["rows"], board.1["rows"]);
+        let actions_before = state.book.matches[0].actions.len();
+        let again_act = call(
+            &mut state,
+            "POST",
+            &format!("/v1/matches/{match_id}/actions?now={NOW}"),
+            r#"{"turn":1,"action":{"type":"crack"},"clientRequestId":"crack-1"}"#,
+            Some(thief),
+        );
+        assert_eq!(again_act.0, 409);
+        assert_eq!(again_act.1["error"], "match_over");
+        let after = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(after.1["rows"], board.1["rows"]);
+        assert_eq!(state.book.matches[0].actions.len(), actions_before);
+    }
+
+    #[test]
+    fn vault_draw_scores_one_point_each() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        let match_id = listed.1["matches"][0]["match"]["matchId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        for turn in 1..=5 {
+            if state.book.matches[0].status == "over" {
+                break;
+            }
+            for (token, kind) in [(&alpha, "a"), (&bravo, "b")] {
+                let body = format!(
+                    r#"{{"turn":{turn},"action":{{"type":"scout"}},"clientRequestId":"scout-{kind}-{turn}"}}"#
+                );
+                let response = call(&mut state, "POST", &act, &body, Some(token));
+                assert_eq!(response.0, 200, "{}", response.1);
+            }
+        }
+        assert_eq!(state.book.matches[0].status, "over");
+        for token in [&alpha, &bravo] {
+            let mine = call(
+                &mut state,
+                "GET",
+                &format!("/v1/agents/me/matches?now={NOW}"),
+                "",
+                Some(token),
+            );
+            assert_eq!(mine.1["matches"][0]["match"]["result"], "draw");
+        }
+        let board = call(
+            &mut state,
+            "GET",
+            &format!("/v1/leaderboard?window=all&room=vault&now={NOW}"),
+            "",
+            None,
+        );
+        let points: Vec<u64> = board.1["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["agent"] == "alpha" || row["agent"] == "bravo")
+            .map(|row| row["points"].as_u64().unwrap())
+            .collect();
+        assert_eq!(points, vec![1, 1]);
     }
 
     #[test]

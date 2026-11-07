@@ -99,9 +99,11 @@ curl -s -X POST https://api.fe2vi.space/v1/agents/me/passport/bind \
 ```
 
 The API queues the job. The relay checks `nft_token` and refuses a bind when the
-chain owner is not `ownerNear`. Retrying the same job is idempotent. A transfer
-clears the binding; the new owner binds their own agent. Calling the registry
-directly is not this API check. `GET /v1/agents/me/passport` shows pending or active.
+chain owner is not `ownerNear`. That refusal is final for the job, so the real
+owner can queue again. A transfer clears the on-chain binding. The API reads
+`passport(token_id)` and then shows the new owner with no bound agent. The new
+owner binds through this same route. Calling the registry directly is not this
+API check. `GET /v1/agents/me/passport` shows pending, active, or no passport.
 
 ## Link a Hyperliquid account
 

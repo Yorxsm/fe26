@@ -307,6 +307,40 @@ mod edge {
                 return self.market_response(route_path).await;
             }
             if method == "GET" {
+                let chain_now = worker::Date::now().as_millis() / 1000;
+                if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
+                    if !token_id.is_empty() && !token_id.contains('/') {
+                        let _ = reconcile_token(&self.env, &mut arena, token_id, chain_now).await;
+                    }
+                }
+                if route_path == "/v1/agents/me/passport" {
+                    if let Some(agent_id) = crate::agents::authed_id(
+                        &arena,
+                        &Incoming {
+                            method,
+                            path: &route,
+                            body: &body,
+                            authorization: authorization.as_deref(),
+                            ingest_token: ingest_token.as_deref(),
+                            policy_check: None,
+                        },
+                    ) {
+                        let token_id = arena
+                            .book
+                            .passports
+                            .iter()
+                            .find(|passport| {
+                                passport.agent_id == agent_id && passport.status != "unbound"
+                            })
+                            .and_then(|passport| passport.token_id.clone());
+                        if let Some(token_id) = token_id {
+                            let _ =
+                                reconcile_token(&self.env, &mut arena, &token_id, chain_now).await;
+                        }
+                    }
+                }
+            }
+            if method == "GET" {
                 if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
                     if !token_id.is_empty()
                         && !token_id.contains('/')
@@ -474,6 +508,30 @@ mod edge {
                 scanned = height;
             }
             let added = indexer::apply_chain_events(&mut arena, &found, scanned);
+            let chain_now = worker::Date::now().as_millis() / 1000;
+            let mut reconciled = 0_u32;
+            let tokens: Vec<String> = arena
+                .book
+                .passports
+                .iter()
+                .filter(|passport| {
+                    passport.status == "active"
+                        && passport
+                            .token_id
+                            .as_deref()
+                            .is_some_and(|token| !token.is_empty())
+                })
+                .filter_map(|passport| passport.token_id.clone())
+                .take(8)
+                .collect();
+            for token_id in tokens {
+                if reconcile_token(&self.env, &mut arena, &token_id, chain_now)
+                    .await
+                    .unwrap_or(false)
+                {
+                    reconciled += 1;
+                }
+            }
             let synced = crate::live_edge::refresh(&mut arena).await;
             let policy_revalidated =
                 crate::live_edge::refresh_policies(&self.env, &mut arena).await;
@@ -491,6 +549,7 @@ mod edge {
                 "indexed_height": arena.indexed_height,
                 "live_synced": synced,
                 "policy_revalidated": policy_revalidated,
+                "passports_reconciled": reconciled,
                 "network": network,
             })
             .to_string();
@@ -1240,6 +1299,30 @@ mod edge {
         serde_json::from_str(&text).map_err(|err| Error::RustError(err.to_string()))
     }
 
+    async fn reconcile_token(
+        env: &Env,
+        arena: &mut ArenaState,
+        token_id: &str,
+        now: u64,
+    ) -> Result<bool> {
+        let Some(index) = arena
+            .book
+            .passports
+            .iter()
+            .position(|passport| passport.token_id.as_deref() == Some(token_id))
+        else {
+            return Ok(false);
+        };
+        let Some(view) = passport_chain_view(env, token_id).await? else {
+            return Ok(false);
+        };
+        Ok(crate::passport::reconcile_passport(
+            &mut arena.book.passports[index],
+            &view,
+            now,
+        ))
+    }
+
     async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
         let network = env_string(env, "FE2VI_NETWORK");
         let rpc = env_string(env, "FE2VI_RPC_URL");
@@ -1258,7 +1341,7 @@ mod edge {
             &rpc,
             "query",
             serde_json::json!({
-                "request_type": "view",
+                "request_type": "call_function",
                 "finality": "final",
                 "account_id": account_id,
                 "method_name": "passport",

@@ -821,6 +821,72 @@ fn passport_json(passport: &Passport) -> serde_json::Value {
     })
 }
 
+/// The chain passport view wins over the API book. A transfer clears `bound_agent`
+/// and moves `owner_id`. An in-flight mint, bind, or unbind is left alone so a
+/// relay job is not wiped before its transaction lands.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn reconcile_passport(passport: &mut Passport, view: &serde_json::Value, now: u64) -> bool {
+    if matches!(
+        passport.status.as_str(),
+        "pending_mint" | "pending_bind" | "pending_unbind"
+    ) {
+        return false;
+    }
+    let owner = view
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if owner.is_empty() {
+        return false;
+    }
+    let bound = view
+        .get("bound_agent")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut changed = false;
+    if passport.owner_near != owner {
+        passport.owner_near = owner.to_string();
+        changed = true;
+    }
+    match bound {
+        None => {
+            if passport.status == "active" || !passport.agent_id.is_empty() {
+                passport.status = "unbound".to_string();
+                passport.agent_id.clear();
+                changed = true;
+            }
+        }
+        Some(agent) if passport.status == "active" && passport.agent_id != agent => {
+            passport.agent_id = agent.to_string();
+            changed = true;
+        }
+        Some(_) => {}
+    }
+    if let Some(seq) = view
+        .get("last_sync_seq")
+        .and_then(serde_json::Value::as_u64)
+    {
+        if seq >= passport.last_sync_seq {
+            if seq > passport.last_sync_seq {
+                passport.last_sync_seq = seq;
+                changed = true;
+            }
+            if let Some(career) = view.get("career").filter(|value| !value.is_null()) {
+                if passport.career.as_ref() != Some(career) {
+                    passport.career = Some(career.clone());
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        passport.updated_unix = now;
+    }
+    changed
+}
+
 fn apply_career_sync(passport: &mut Passport, body: &CompleteBody) {
     if let Some(seq) = body.last_sync_seq {
         if seq < passport.last_sync_seq {
@@ -1043,6 +1109,74 @@ mod tests {
         assert_eq!(status, 200);
         assert_eq!(body["passport"]["lastSyncSeq"], 2);
         assert_eq!(body["passport"]["career"]["xp"], 4);
+    }
+
+    #[test]
+    fn a_later_transfer_clears_the_book_binding() {
+        let mut state = ArenaState::default();
+        let (agent_id, token) = register(&mut state);
+        let (_, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/passport/bind?now={NOW}"),
+            r#"{"tokenId":"disp_001","ownerNear":"seller.testnet","agentNear":"seller.testnet"}"#,
+            Some(&token),
+        );
+        let job_id = body["job"]["jobId"].as_str().unwrap().to_string();
+        call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":1}"#,
+            None,
+        );
+        let (status, _) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{job_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"disp_001","txHash":"bind","lastSyncSeq":1,"career":{"xp":2,"wins":1}}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        let view = serde_json::json!({
+            "owner_id": "buyer.testnet",
+            "bound_agent": null,
+            "last_sync_seq": 1,
+            "career": {"xp": 2, "wins": 1}
+        });
+        let row = state
+            .book
+            .passports
+            .iter_mut()
+            .find(|passport| passport.token_id.as_deref() == Some("disp_001"))
+            .unwrap();
+        assert!(reconcile_passport(row, &view, NOW + 10));
+        assert_eq!(row.status, "unbound");
+        assert!(row.agent_id.is_empty());
+        assert_eq!(row.owner_near, "buyer.testnet");
+        assert_eq!(row.career.as_ref().unwrap()["xp"], 2);
+        let (status, me) = call(
+            &mut state,
+            "GET",
+            "/v1/agents/me/passport",
+            "",
+            Some(&token),
+        );
+        assert_eq!(status, 200);
+        assert!(me["passport"].is_null());
+        let pending = serde_json::json!({
+            "owner_id": "seller.testnet",
+            "bound_agent": null,
+            "last_sync_seq": 0
+        });
+        state.book.passports[0].status = "pending_bind".to_string();
+        state.book.passports[0].agent_id = agent_id;
+        assert!(!reconcile_passport(
+            &mut state.book.passports[0],
+            &pending,
+            NOW + 20
+        ));
+        assert_eq!(state.book.passports[0].status, "pending_bind");
     }
 
     #[test]
