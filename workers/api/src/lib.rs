@@ -202,12 +202,10 @@ mod edge {
                     )
                 })
                 .unwrap_or(true);
-            arena.market_contract = self
-                .env
-                .var("FE2VI_PASSPORT_MARKET_ID")
-                .ok()
-                .map(|value| value.to_string())
-                .unwrap_or_default();
+            arena.chain_network = env_string(&self.env, "FE2VI_NETWORK");
+            arena.passport_contract = env_string(&self.env, "FE2VI_PASSPORT_ID");
+            arena.market_contract = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
+            arena.escrow_contract = env_string(&self.env, "FE2VI_ESCROW_ID");
             let before_book = {
                 let sql = self.state.storage().sql();
                 attach_player_book(&sql, &mut arena)?
@@ -303,6 +301,11 @@ mod edge {
                 .map(|value| value.to_string())
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
+            if method == "GET"
+                && (route_path == "/v1/market/listings" || route_path == "/v1/market/sales")
+            {
+                return self.market_response(route_path).await;
+            }
             if method == "GET" {
                 if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
                     if !token_id.is_empty()
@@ -402,17 +405,11 @@ mod edge {
 
     impl SpectatorFeed {
         async fn run_index(&self) -> Result<Response> {
-            let rpc = self
-                .env
-                .var("FE2VI_RPC_URL")
-                .ok()
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
-            if indexer::refuse_testnet(&rpc).is_err() {
-                return with_cors(
-                    Response::ok(r#"{"ok":false,"error":"testnet rpc refused"}"#)?.with_status(400),
-                    "application/json",
-                );
+            let network = env_string(&self.env, "FE2VI_NETWORK");
+            let rpc = env_string(&self.env, "FE2VI_RPC_URL");
+            if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+                let body = serde_json::json!({"ok": false, "error": message}).to_string();
+                return with_cors(Response::ok(body)?.with_status(400), "application/json");
             }
             let storage = self.state.storage();
             let mut arena: ArenaState = storage.get("arena").await?.unwrap_or_default();
@@ -494,7 +491,7 @@ mod edge {
                 "indexed_height": arena.indexed_height,
                 "live_synced": synced,
                 "policy_revalidated": policy_revalidated,
-                "network": "mainnet",
+                "network": network,
             })
             .to_string();
             with_cors(Response::ok(body)?, "application/json")
@@ -1160,20 +1157,55 @@ mod edge {
     }
 
     fn watch_accounts(env: &Env) -> Vec<String> {
-        ["FE2VI_FACTORY_ID", "FE2VI_REGISTRY_ID", "FE2VI_HEIST_ID"]
-            .into_iter()
-            .map(|name| {
-                env.var(name)
-                    .ok()
-                    .map(|value| value.to_string())
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| match name {
-                        "FE2VI_FACTORY_ID" => "factory.fe2vi.near".to_string(),
-                        "FE2VI_REGISTRY_ID" => "registry.fe2vi.near".to_string(),
-                        _ => "heist.fe2vi.near".to_string(),
-                    })
-            })
-            .collect()
+        [
+            "FE2VI_PASSPORT_ID",
+            "FE2VI_PASSPORT_MARKET_ID",
+            "FE2VI_ESCROW_ID",
+            "FE2VI_FACTORY_ID",
+            "FE2VI_REGISTRY_ID",
+            "FE2VI_HEIST_ID",
+        ]
+        .into_iter()
+        .filter_map(|name| {
+            let value = env_string(env, name);
+            if value.is_empty() { None } else { Some(value) }
+        })
+        .collect()
+    }
+
+    async fn rpc_view(
+        url: &str,
+        account_id: &str,
+        method_name: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            serde_json::to_vec(&args).map_err(|err| Error::RustError(err.to_string()))?,
+        );
+        let response = rpc_call(
+            url,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": account_id,
+                "method_name": method_name,
+                "args_base64": encoded,
+            }),
+        )
+        .await?;
+        if response.get("error").is_some() || !response["result"]["error"].is_null() {
+            return Err(Error::RustError("view failed".into()));
+        }
+        let Some(rows) = response["result"]["result"].as_array() else {
+            return Err(Error::RustError("view had no result".into()));
+        };
+        let bytes: Vec<u8> = rows
+            .iter()
+            .filter_map(serde_json::Value::as_u64)
+            .map(|value| value as u8)
+            .collect();
+        serde_json::from_slice(&bytes).map_err(|err| Error::RustError(err.to_string()))
     }
 
     async fn rpc_call(
@@ -1201,19 +1233,14 @@ mod edge {
     }
 
     async fn passport_chain_view(env: &Env, token_id: &str) -> Result<Option<serde_json::Value>> {
-        let rpc = env
-            .var("FE2VI_RPC_URL")
-            .ok()
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "https://rpc.mainnet.near.org".to_string());
-        indexer::refuse_testnet(&rpc).map_err(|message| Error::RustError(message.to_string()))?;
-        let account_id = env
-            .var("FE2VI_PASSPORT_ID")
-            .ok()
-            .map(|value| value.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "passport.fe2vi.near".to_string());
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        indexer::allow_chain_rpc(&network, &rpc)
+            .map_err(|message| Error::RustError(message.to_string()))?;
+        let account_id = env_string(env, "FE2VI_PASSPORT_ID");
+        if account_id.is_empty() {
+            return Err(Error::RustError("passport contract is not configured".into()));
+        }
         let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
             .map_err(|err| Error::RustError(err.to_string()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(args);
@@ -1286,6 +1313,74 @@ mod edge {
     }
 
     impl SpectatorFeed {
+    async fn market_response(&self, path: &str) -> Result<Response> {
+        let network = env_string(&self.env, "FE2VI_NETWORK");
+        let rpc = env_string(&self.env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            return market_error(403, "chain_mismatch", message);
+        }
+        let passport = env_string(&self.env, "FE2VI_PASSPORT_ID");
+        let market = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
+        if passport.is_empty() || market.is_empty() {
+            return market_error(503, "market_unconfigured", "Passport or market account is not configured.");
+        }
+        if path.ends_with("/sales") {
+            let settlement = match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
+                Ok(value) if value.is_null() => None,
+                Ok(value) => Some(value),
+                Err(_) => return market_error(503, "market_unavailable", "Could not read the last settlement."),
+            };
+            let body = crate::passport::market_from_chain(&market, &network, &[], settlement.as_ref(), "chain");
+            let payload = serde_json::json!({
+                "sales": body["sales"],
+                "source": "chain",
+                "contract": market,
+                "network": network,
+            });
+            return with_cors(Response::ok(payload.to_string())?, "application/json");
+        }
+        let tokens = match rpc_view(&rpc, &passport, "nft_tokens", serde_json::json!({"from_index":"0","limit":32})).await {
+            Ok(value) => value,
+            Err(_) => return market_error(503, "market_unavailable", "Could not read passport tokens."),
+        };
+        let Some(tokens) = tokens.as_array() else {
+            return market_error(503, "market_unavailable", "Passport token list was not an array.");
+        };
+        let mut listed = Vec::new();
+        for token in tokens {
+            let Some(token_id) = token.get("token_id").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            match rpc_view(&rpc, &market, "get_listing", serde_json::json!({"token_id": token_id})).await {
+                Ok(listing) => {
+                    if let Some(row) = crate::passport::listed_passport(token, &listing) {
+                        listed.push(row);
+                    }
+                }
+                Err(_) => {
+                    return market_error(503, "market_unavailable", "Could not read a market listing.");
+                }
+            }
+        }
+        let settlement = match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
+            Ok(value) if value.is_null() => None,
+            Ok(value) => Some(value),
+            Err(_) => return market_error(503, "market_unavailable", "Could not read the last settlement."),
+        };
+        let body = crate::passport::market_from_chain(&market, &network, &listed, settlement.as_ref(), "chain");
+        let payload = if path.ends_with("/sales") {
+            serde_json::json!({
+                "sales": body["sales"],
+                "source": "chain",
+                "contract": market,
+                "network": network,
+            })
+        } else {
+            body
+        };
+        with_cors(Response::ok(payload.to_string())?, "application/json")
+    }
+
         async fn enforce_rate_limit(&self, req: &Request) -> Result<Option<Response>> {
             let method = match req.method() {
                 Method::Get => "GET",
@@ -1434,6 +1529,20 @@ mod edge {
             Some(vec![ip.to_string().into(), day.into()]),
         )?;
         Ok(())
+    }
+
+    fn env_string(env: &Env, name: &str) -> String {
+        env.var(name)
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
+    fn market_error(status: u16, code: &str, message: &str) -> Result<Response> {
+        let body = serde_json::json!({ "error": code, "message": message, "source": "unavailable" }).to_string();
+        with_cors(Response::ok(body)?.with_status(status), "application/json")
     }
 
     fn with_cors(mut response: Response, content_type: &str) -> Result<Response> {

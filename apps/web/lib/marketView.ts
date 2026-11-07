@@ -16,16 +16,18 @@ export type MarketListing = {
   seller: string;
   priceNear: string;
   priceYocto: string;
-  rarity: "Common" | "Rare" | "Mythic";
+  rarity?: "Common" | "Rare" | "Mythic";
   description: string;
-  traits: SkinTraits;
-  trophies: Array<{
+  traits?: SkinTraits;
+  trophies?: Array<{
     name: string;
     description: string;
     icon: string;
     season: number;
   }>;
-  career: {
+  owner?: string;
+  approvalId?: number;
+  career?: {
     xp: number;
     wins: number;
     matches: number;
@@ -46,10 +48,10 @@ export type MarketSale = {
 
 export type MarketStats = {
   floorPriceNear: string;
-  totalVolumeNear: string;
+  totalVolumeNear: string | null;
   listedCount: number;
   totalSalesCount: number;
-  activeSpectators: number;
+  activeSpectators: number | null;
 };
 
 export const FALLBACK_LISTINGS: MarketListing[] = [
@@ -249,6 +251,9 @@ export type MarketPayload = {
   sales?: MarketSale[];
   stats?: MarketStats;
   contract?: string;
+  network?: string;
+  source?: string;
+  blockers?: string[];
 };
 
 const EMPTY_STATS: MarketStats = {
@@ -259,31 +264,38 @@ const EMPTY_STATS: MarketStats = {
   activeSpectators: 0,
 };
 
-/** A successful empty book stays empty. Fixtures are only for a failed request. */
+/** A successful body is shown as returned. A failed read stays empty and is not replaced with samples. */
 export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
   listings: MarketListing[];
   sales: MarketSale[];
   stats: MarketStats;
   contract: string;
-  source: "arena" | "fixture";
+  network: string;
+  blockers: string[];
+  source: "chain" | "not-read" | "unavailable";
 } {
   if (!ok || !body) {
     return {
-      listings: FALLBACK_LISTINGS,
-      sales: FALLBACK_SALES,
-      stats: FALLBACK_STATS,
+      listings: [],
+      sales: [],
+      stats: EMPTY_STATS,
       contract: "",
-      source: "fixture",
+      network: "",
+      blockers: [],
+      source: "unavailable",
     };
   }
   const listings = Array.isArray(body.listings) ? body.listings : [];
   const sales = Array.isArray(body.sales) ? body.sales : [];
+  const source = body.source === "not-read" ? "not-read" : "chain";
   return {
     listings,
     sales,
     stats: body.stats ?? { ...EMPTY_STATS, listedCount: listings.length, totalSalesCount: sales.length },
     contract: typeof body.contract === "string" ? body.contract : "",
-    source: "arena",
+    network: typeof body.network === "string" ? body.network : "",
+    blockers: Array.isArray(body.blockers) ? body.blockers.filter((item) => typeof item === "string") : [],
+    source,
   };
 }
 

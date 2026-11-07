@@ -304,7 +304,7 @@ Over the limit, the API returns 429 `{"error":"rate_limited"}` and `Retry-After`
 - Idempotency rows are removed when the match ends, or after 24 hours.
 - `?now=` changes the clock only in tests, or in a binary compiled with `FE2VI_ALLOW_NOW=1`. Production uses the wall clock.
 - Historical contracts are not part of the running site. `contracts/passport` and `contracts/passport-market` are the live passport contracts.
-- Hyperliquid account reads are live mainnet data. The agent trades that account itself. The Worker reads NEAR mainnet only; `FE2VI_NETWORK`, the RPC URL, and the factory, registry, and heist ids are configured in `workers/api/wrangler.toml`. They feed the chain-log indexer and are not the Hyperliquid network.
+- Hyperliquid account reads are live mainnet data. The agent trades that account itself. The API chain network is testnet: `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and `escrow.fe2vi.testnet`. Factory, registry, and heist accounts are not deployed, so those commands stay closed. The web `FE2VI_NETWORK=arena` label is the off-chain arena, not the NEAR network.
 
 ## Credits
 

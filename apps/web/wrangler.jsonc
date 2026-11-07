@@ -16,6 +16,13 @@
   ],
   "vars": {
     "FE2VI_NETWORK": "arena",
-    "NEXT_PUBLIC_FE2VI_API_URL": "https://api.fe2vi.space"
+    "NEXT_PUBLIC_FE2VI_API_URL": "https://api.fe2vi.space",
+    "NEXT_PUBLIC_FE2VI_CHAIN": "testnet",
+    "NEXT_PUBLIC_FE2VI_RPC_URL": "https://rpc.testnet.near.org",
+    "NEXT_PUBLIC_FE2VI_PASSPORT_ID": "passport.fe2vi.testnet",
+    "NEXT_PUBLIC_FE2VI_MARKET_ID": "market.fe2vi.testnet",
+    "NEXT_PUBLIC_FE2VI_ESCROW_ID": "escrow.fe2vi.testnet",
+    "NEXT_PUBLIC_FE2VI_EXPLORER": "https://testnet.nearblocks.io",
+    "NEXT_PUBLIC_FE2VI_WALLET": "https://testnet.mynearwallet.com"
   }
 }

@@ -14,15 +14,13 @@ use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEA
 
 use crate::tx::SignedCall;
 
-const DEFAULT_RPC: &str = "https://rpc.mainnet.near.org";
-const DEFAULT_REGISTRY: &str = "registry.fe2vi.near";
-const DEFAULT_HEIST: &str = "heist.fe2vi.near";
-const DEFAULT_PASSPORT: &str = "passport.fe2vi.near";
-const DEFAULT_PASSPORT_MARKET: &str = "passport-market.fe2vi.near";
+const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
+const DEFAULT_PASSPORT: &str = "passport.fe2vi.testnet";
+const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vi.testnet";
 const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
 
 #[derive(Parser, Debug)]
-#[command(name = "fe2vi", about = "fe2VI arena tools for NEAR mainnet")]
+#[command(name = "fe2vi", about = "fe2VI arena tools for the NEAR testnet passport economy")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -196,9 +194,8 @@ fn config_from_env() -> Config {
         signer_secret: std::env::var("FE2VI_SIGNER_SECRET_KEY")
             .ok()
             .filter(|value| !value.is_empty()),
-        registry_id: std::env::var("FE2VI_REGISTRY_ID")
-            .unwrap_or_else(|_| DEFAULT_REGISTRY.to_string()),
-        heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_else(|_| DEFAULT_HEIST.to_string()),
+        registry_id: std::env::var("FE2VI_REGISTRY_ID").unwrap_or_default(),
+        heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_default(),
         passport_id: std::env::var("FE2VI_PASSPORT_ID")
             .unwrap_or_else(|_| DEFAULT_PASSPORT.to_string()),
         passport_market_id: std::env::var("FE2VI_PASSPORT_MARKET_ID")
@@ -244,12 +241,24 @@ fn intents(action: IntentsCommand) -> Result<String, String> {
     }
 }
 
-fn assert_mainnet(rpc_url: &str) -> Result<(), String> {
-    if rpc_url.to_ascii_lowercase().contains("testnet") {
-        Err("refusing testnet RPC; fe2VI launches on mainnet".into())
-    } else {
-        Ok(())
+fn assert_chain(rpc_url: &str) -> Result<(), String> {
+    let url = rpc_url.to_ascii_lowercase();
+    if url.contains("mainnet") {
+        return Err("refusing mainnet RPC; passport, market, and escrow are on testnet".into());
     }
+    if !url.contains("testnet") {
+        return Err("chain RPC must be a testnet endpoint".into());
+    }
+    Ok(())
+}
+
+fn require_account<'a>(id: &'a str, name: &str) -> Result<&'a str, String> {
+    if id.trim().is_empty() {
+        return Err(format!(
+            "{name} is not configured. factory, registry, and heist are not deployed, so this command stays closed"
+        ));
+    }
+    Ok(id)
 }
 
 fn near_to_yocto(value: &str) -> Result<u128, String> {
@@ -289,7 +298,7 @@ fn near_to_yocto(value: &str) -> Result<u128, String> {
 }
 
 fn run(config: &Config, command: Command) -> Result<String, String> {
-    assert_mainnet(&config.rpc_url)?;
+    assert_chain(&config.rpc_url)?;
     match command {
         Command::RegisterAgent {
             name,
@@ -300,7 +309,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
             submit(
                 config,
                 dry_run,
-                &config.registry_id,
+                require_account(&config.registry_id, "FE2VI_REGISTRY_ID")?,
                 "register_agent",
                 &args,
                 MIN_AGENT_DEPOSIT_YOCTO,
@@ -312,7 +321,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
             submit(
                 config,
                 dry_run,
-                &config.registry_id,
+                require_account(&config.registry_id, "FE2VI_REGISTRY_ID")?,
                 "revoke",
                 &args,
                 0,
@@ -487,7 +496,7 @@ fn seed(
     let total_deposit = PASSPORT_MINT_DEPOSIT_YOCTO.saturating_mul(u128::from(count));
     if dry_run {
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "network": "mainnet",
+            "network": "testnet",
             "dry_run": true,
             "passport_id": config.passport_id,
             "market_id": config.passport_market_id,
@@ -558,7 +567,7 @@ fn seed(
         }
     }
     Ok(serde_json::to_string_pretty(&serde_json::json!({
-        "network": "mainnet",
+        "network": "testnet",
         "broadcast": true,
         "owner": owner,
         "minted": minted,
@@ -733,7 +742,7 @@ fn submit(
     gas: u64,
 ) -> Result<String, String> {
     let mut preview = serde_json::json!({
-        "network": "mainnet",
+        "network": "testnet",
         "rpc_url": config.rpc_url,
         "account_id": config.account_id,
         "receiver_id": receiver_id,
@@ -888,6 +897,7 @@ fn watch(config: &Config, game_id: &str, once: bool) -> Result<String, String> {
             thread::sleep(Duration::from_secs(2));
         }
     }
+    require_account(&config.heist_id, "FE2VI_HEIST_ID")?;
     let args = serde_json::to_vec(&serde_json::json!({ "game_id": game_id }))
         .map_err(|err| err.to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(args);
@@ -919,10 +929,12 @@ mod tests {
     use near_primitives::transaction::SignedTransaction;
 
     #[test]
-    fn refuses_testnet() {
-        let err = assert_mainnet("https://rpc.testnet.near.org").unwrap_err();
-        assert!(err.contains("mainnet"));
-        assert_mainnet("https://rpc.mainnet.near.org").unwrap();
+    fn refuses_mainnet_and_requires_testnet() {
+        let err = assert_chain("https://rpc.mainnet.near.org").unwrap_err();
+        assert!(err.contains("testnet"));
+        assert_chain("https://rpc.testnet.near.org").unwrap();
+        assert!(assert_chain("https://rpc.near.org").is_err());
+        assert!(require_account("", "FE2VI_REGISTRY_ID").is_err());
     }
 
     #[test]

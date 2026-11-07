@@ -16,12 +16,24 @@ pub struct ChainEvent {
     pub fingerprint: String,
 }
 
-pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
-    if url.to_ascii_lowercase().contains("testnet") {
-        Err("testnet rpc refused")
-    } else {
-        Ok(())
+/// The RPC host has to match the configured chain.
+/// Testnet passport, market, and escrow calls fail closed on a mainnet RPC.
+/// A mainnet configuration still refuses a testnet RPC.
+pub fn allow_chain_rpc(network: &str, url: &str) -> Result<(), &'static str> {
+    let network = network.trim().to_ascii_lowercase();
+    let testnet_url = url.to_ascii_lowercase().contains("testnet");
+    match network.as_str() {
+        "testnet" if testnet_url => Ok(()),
+        "testnet" => Err("testnet economy requires a testnet rpc"),
+        "mainnet" if testnet_url => Err("testnet rpc refused"),
+        "mainnet" if !url.trim().is_empty() => Ok(()),
+        _ => Err("unknown chain network"),
     }
+}
+
+/// Mainnet fail-closed check. Testnet URLs are refused here on purpose.
+pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
+    allow_chain_rpc("mainnet", url)
 }
 
 /// Heights still to scan. The window is bounded so a cron tick stays small.
@@ -203,9 +215,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn testnet_rpc_is_refused_and_only_chain_logs_verify() {
+    fn testnet_rpc_matches_the_configured_chain() {
         assert!(refuse_testnet("https://rpc.testnet.near.org").is_err());
         assert!(refuse_testnet("https://rpc.mainnet.near.org").is_ok());
+        assert!(allow_chain_rpc("testnet", "https://rpc.testnet.near.org").is_ok());
+        assert!(allow_chain_rpc("testnet", "https://rpc.mainnet.near.org").is_err());
+        assert!(allow_chain_rpc("mainnet", "https://rpc.testnet.near.org").is_err());
+        assert!(allow_chain_rpc("", "https://rpc.testnet.near.org").is_err());
         assert_eq!(plan_heights(0, 20), (13..=20).collect::<Vec<_>>());
         assert_eq!(plan_heights(20, 20), Vec::<u64>::new());
 

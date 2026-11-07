@@ -584,70 +584,137 @@ fn public_passport(state: &ArenaState, token_id: &str) -> Outcome {
     )
 }
 
-pub fn market_listings(state: &ArenaState) -> Outcome {
-    let mut listings = Vec::new();
-    for passport in &state.book.passports {
-        if let Some(token_id) = &passport.token_id {
-            let role = (token_id.len() % 6) as u32;
-            let seller = if passport.owner_near.is_empty() {
-                "unrecorded"
-            } else {
-                passport.owner_near.as_str()
-            };
-            listings.push(serde_json::json!({
-                "tokenId": token_id,
-                "name": format!("Passport Skin #{}", token_id),
-                "seller": seller,
-                "priceNear": "1.0",
-                "priceYocto": "1000000000000000000000000",
-                "rarity": "Common",
-                "description": "Passport recorded in the arena book. This is not a chain listing read.",
-                "traits": {
-                    "paint": (token_id.len() * 3) % 12,
-                    "screen": (token_id.len() * 2) % 8,
-                    "eyes": role % 6,
-                    "headwear": (role + 1) % 8,
-                    "face_item": role % 4,
-                    "back_item": (role + 2) % 4,
-                    "emblem": role % 6,
-                    "trail": role % 4,
-                    "role": role,
-                },
-                "trophies": serde_json::json!([]),
-                "career": {
-                    "xp": 0,
-                    "wins": 0,
-                    "matches": 0,
-                    "rank": 0,
-                    "bestRank": 0,
-                }
-            }));
+pub fn yocto_to_near(yocto: &str) -> String {
+    let digits: String = yocto.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return "0".into();
+    }
+    let padded = format!("{digits:0>25}");
+    let split = padded.len() - 24;
+    let whole = padded[..split].trim_start_matches('0');
+    let whole = if whole.is_empty() { "0" } else { whole };
+    let frac = padded[split..].trim_end_matches('0');
+    if frac.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{whole}.{frac}")
+    }
+}
+
+/// One chain listing. Missing or zero prices are skipped so the API cannot invent an ask.
+pub fn listed_passport(token: &serde_json::Value, listing: &serde_json::Value) -> Option<serde_json::Value> {
+    if listing.is_null() {
+        return None;
+    }
+    let token_id = listing
+        .get("token_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    let price = listing.get("price").and_then(serde_json::Value::as_str).unwrap_or("");
+    if price.is_empty() || price.chars().all(|ch| ch == '0') {
+        return None;
+    }
+    let seller = listing.get("seller").and_then(serde_json::Value::as_str).unwrap_or("");
+    let title = token
+        .pointer("/metadata/title")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(token_id);
+    let description = token
+        .pointer("/metadata/description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Passport listed on the configured market.");
+    let owner = token.get("owner_id").and_then(serde_json::Value::as_str).unwrap_or(seller);
+    Some(serde_json::json!({
+        "tokenId": token_id,
+        "name": title,
+        "seller": seller,
+        "owner": owner,
+        "priceNear": yocto_to_near(price),
+        "priceYocto": price,
+        "approvalId": listing.get("approval_id").cloned().unwrap_or(serde_json::Value::Null),
+        "description": description,
+    }))
+}
+
+pub fn market_from_chain(
+    contract: &str,
+    network: &str,
+    listings: &[serde_json::Value],
+    settlement: Option<&serde_json::Value>,
+    source: &str,
+) -> serde_json::Value {
+    let mut floor = String::new();
+    for row in listings {
+        let price = row.get("priceYocto").and_then(serde_json::Value::as_str).unwrap_or("");
+        if floor.is_empty() || price.len() < floor.len() || (price.len() == floor.len() && price < floor.as_str()) {
+            floor = price.to_string();
         }
     }
-    let listed = listings.len();
-    let stats = serde_json::json!({
-        "floorPriceNear": if listed == 0 { "0" } else { "1.0" },
-        "totalVolumeNear": "0",
-        "listedCount": listed,
-        "totalSalesCount": 0,
-        "activeSpectators": state.book.players.len(),
-    });
+    let sales = match settlement {
+        Some(value) if value.is_object() => {
+            let price = value.get("price").and_then(serde_json::Value::as_str).unwrap_or("0");
+            vec![serde_json::json!({
+                "id": "last-settlement",
+                "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
+                "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
+                "priceNear": yocto_to_near(price),
+                "priceYocto": price,
+            })]
+        }
+        _ => Vec::new(),
+    };
+    let blockers = if network == "testnet" {
+        vec!["Factory, registry, and heist accounts are not deployed. Vault, War, Cup, and Village score in the arena API. The escrow contract can report caps, and it cannot open a pot without a factory."]
+    } else {
+        Vec::new()
+    };
+    let floor_near = if floor.is_empty() { "0".to_string() } else { yocto_to_near(&floor) };
+    serde_json::json!({
+        "listings": listings,
+        "sales": sales,
+        "stats": {
+            "floorPriceNear": floor_near,
+            "totalVolumeNear": null,
+            "listedCount": listings.len(),
+            "totalSalesCount": sales.len(),
+            "activeSpectators": null,
+        },
+        "contract": contract,
+        "network": network,
+        "fee": "0%",
+        "source": source,
+        "blockers": blockers,
+    })
+}
+
+pub fn market_listings(state: &ArenaState) -> Outcome {
     json(
         200,
-        &serde_json::json!({
-            "listings": listings,
-            "stats": stats,
-            "contract": state.market_contract,
-            "fee": "0%",
-            "source": "arena-book"
-        }),
+        &market_from_chain(
+            &state.market_contract,
+            &state.chain_network,
+            &[],
+            None,
+            "not-read",
+        ),
         false,
         None,
     )
 }
 
-pub fn market_sales(_state: &ArenaState) -> Outcome {
-    json(200, &serde_json::json!({ "sales": [] }), false, None)
+pub fn market_sales(state: &ArenaState) -> Outcome {
+    let body = market_from_chain(&state.market_contract, &state.chain_network, &[], None, "not-read");
+    json(
+        200,
+        &serde_json::json!({
+            "sales": body["sales"],
+            "source": body["source"],
+            "contract": state.market_contract,
+        }),
+        false,
+        None,
+    )
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -1042,21 +1109,49 @@ mod tests {
     }
 
     #[test]
-    fn empty_market_does_not_invent_testnet_listings() {
+    fn empty_market_does_not_invent_listings() {
         let mut state = ArenaState {
-            market_contract: "passport-market.fe2vi.near".into(),
+            chain_network: "testnet".into(),
+            market_contract: "market.fe2vi.testnet".into(),
             ..ArenaState::default()
         };
         let (status, body) = call(&mut state, "GET", "/v1/market/listings", "", None);
         assert_eq!(status, 200);
         assert_eq!(body["listings"].as_array().unwrap().len(), 0);
-        assert_eq!(body["contract"], "passport-market.fe2vi.near");
+        assert_eq!(body["contract"], "market.fe2vi.testnet");
         assert_eq!(body["stats"]["listedCount"], 0);
         assert_eq!(body["stats"]["totalSalesCount"], 0);
-        assert_eq!(body["source"], "arena-book");
-        assert!(!body.to_string().contains("testnet"));
+        assert_eq!(body["stats"]["totalVolumeNear"], serde_json::Value::Null);
+        assert_eq!(body["source"], "not-read");
+        assert!(!body.to_string().contains("Launch Stock"));
+        assert!(!body.to_string().contains("sale-1"));
         let (status, sales) = call(&mut state, "GET", "/v1/market/sales", "", None);
         assert_eq!(status, 200);
         assert!(sales["sales"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn chain_listing_keeps_the_ask_and_skips_unlisted_tokens() {
+        let token = serde_json::json!({
+            "token_id": "fdr_001",
+            "owner_id": "fe2vi.testnet",
+            "metadata": { "title": "fe2VI passport fdr_001", "description": "Tradable passport." }
+        });
+        let listing = serde_json::json!({
+            "token_id": "fdr_001",
+            "seller": "fe2vi.testnet",
+            "approval_id": 1,
+            "price": "1000000000000000000000000"
+        });
+        let row = listed_passport(&token, &listing).unwrap();
+        assert_eq!(row["priceNear"], "1");
+        assert_eq!(row["seller"], "fe2vi.testnet");
+        assert!(listed_passport(&token, &serde_json::Value::Null).is_none());
+        let body = market_from_chain("market.fe2vi.testnet", "testnet", &[row], None, "chain");
+        assert_eq!(body["source"], "chain");
+        assert_eq!(body["stats"]["floorPriceNear"], "1");
+        assert_eq!(body["stats"]["listedCount"], 1);
+        assert!(body["sales"].as_array().unwrap().is_empty());
+        assert!(body["blockers"].as_array().unwrap().len() == 1);
     }
 }

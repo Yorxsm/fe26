@@ -23,10 +23,12 @@ export async function fetchMarketData(): Promise<{
   sales: MarketSale[];
   stats: MarketStats;
   contract: string;
-  source: "arena" | "fixture";
+  network: string;
+  blockers: string[];
+  source: "chain" | "not-read" | "unavailable";
 }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
+  const timer = setTimeout(() => controller.abort(), 35000);
   try {
     const response = await fetch(`${apiBase()}/v1/market/listings`, {
       cache: "no-store",
@@ -34,6 +36,7 @@ export async function fetchMarketData(): Promise<{
     });
     if (!response.ok) return marketFromResponse(false, null);
     const body = (await response.json()) as MarketPayload;
+    if (Array.isArray(body.sales)) return marketFromResponse(true, body);
     try {
       const salesResponse = await fetch(`${apiBase()}/v1/market/sales`, {
         cache: "no-store",
