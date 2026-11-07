@@ -33,6 +33,20 @@ export type MarketListing = {
     matches: number;
     rank: number;
     bestRank: number;
+    vaultReceipts?: {
+      wins: number;
+      draws: number;
+      losses: number;
+      payoutYocto: string;
+      source: string;
+    };
+  };
+  vaultReceipts?: {
+    wins: number;
+    draws: number;
+    losses: number;
+    payoutYocto: string;
+    source: string;
   };
 };
 

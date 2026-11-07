@@ -793,6 +793,62 @@ pub fn market_from_chain(
     })
 }
 
+/// Credit every bound passport whose agent linked the paid NEAR account.
+/// The career stays on the token. A later transfer clears only the binding.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn credit_passports(
+    players: &[crate::agents::Player],
+    passports: &mut [Passport],
+    pot: &crate::vault::PotAuthorization,
+) {
+    for passport in passports.iter_mut() {
+        if passport.status != "active" || passport.agent_id.is_empty() {
+            continue;
+        }
+        let Some(player) = players
+            .iter()
+            .find(|player| player.agent_id == passport.agent_id)
+        else {
+            continue;
+        };
+        let Some(near) = player.wallets.near_account.as_deref() else {
+            continue;
+        };
+        let mut career = passport
+            .career
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if crate::vault::apply_receipt_to_career(&mut career, near, pot) {
+            passport.career = Some(career);
+        }
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn overlay_vault_careers(body: &mut serde_json::Value, passports: &[Passport]) {
+    let Some(listings) = body
+        .get_mut("listings")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return;
+    };
+    for listing in listings {
+        let Some(token_id) = listing.get("tokenId").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(record) = passports.iter().find_map(|passport| {
+            if passport.token_id.as_deref() != Some(token_id) {
+                return None;
+            }
+            passport.career.as_ref()?.get("vaultReceipts").cloned()
+        }) else {
+            continue;
+        };
+        listing["vaultReceipts"] = record;
+        listing["vaultReceiptsSource"] = serde_json::json!("settled-receipts");
+    }
+}
+
 pub fn market_listings(state: &ArenaState) -> Outcome {
     json(
         200,
@@ -989,8 +1045,19 @@ pub fn reconcile_passport(
                 changed = true;
             }
             if let Some(career) = view.get("career").filter(|value| !value.is_null()) {
-                if passport.career.as_ref() != Some(career) {
-                    passport.career = Some(career.clone());
+                let mut next = career.clone();
+                if let Some(kept) = passport
+                    .career
+                    .as_ref()
+                    .and_then(|row| row.get("vaultReceipts"))
+                    .cloned()
+                {
+                    if let Some(object) = next.as_object_mut() {
+                        object.insert("vaultReceipts".into(), kept);
+                    }
+                }
+                if passport.career.as_ref() != Some(&next) {
+                    passport.career = Some(next);
                     changed = true;
                 }
             }
@@ -1386,6 +1453,28 @@ mod tests {
         assert!(row.agent_id.is_empty());
         assert_eq!(row.owner_near, "buyer.testnet");
         assert_eq!(row.career.as_ref().unwrap()["xp"], 2);
+        row.career.as_mut().unwrap()["vaultReceipts"] = serde_json::json!({
+            "wins": 1,
+            "draws": 0,
+            "losses": 0,
+            "payoutYocto": "10",
+            "matchIds": ["mt_one"],
+            "source": "settled-receipts"
+        });
+        let chain = serde_json::json!({
+            "owner_id": "buyer.testnet",
+            "bound_agent": null,
+            "last_sync_seq": 1,
+            "career": {"xp": 2, "wins": 1}
+        });
+        let _ = reconcile_passport(row, &chain, NOW + 11, u64::MAX, &mut []);
+        assert_eq!(row.status, "unbound");
+        assert!(row.agent_id.is_empty());
+        assert_eq!(row.career.as_ref().unwrap()["vaultReceipts"]["wins"], 1);
+        assert_eq!(
+            row.career.as_ref().unwrap()["vaultReceipts"]["payoutYocto"],
+            "10"
+        );
         let (status, me) = call(
             &mut state,
             "GET",
@@ -1876,6 +1965,83 @@ mod tests {
         assert_eq!(body["passport"]["status"], "active");
         assert_eq!(body["passport"]["agentId"], "buyer.near");
         assert_eq!(body["passport"]["lastSyncSeq"], 3);
+    }
+
+    #[test]
+    fn a_bound_token_keeps_a_receipt_career_on_a_listing() {
+        use crate::agents::{Player, Wallets};
+        use crate::vault::PotAuthorization;
+        let player = Player {
+            agent_id: "agt".into(),
+            handle: "ann".into(),
+            name: "Ann".into(),
+            description: "plays".into(),
+            owner_contact: None,
+            token_hash: "h".into(),
+            token_prefix: "fe2".into(),
+            status: "active".into(),
+            created_unix: 1,
+            wallets: Wallets {
+                near_account: Some("ann.testnet".into()),
+                ..Wallets::default()
+            },
+            capabilities: Vec::new(),
+            skin_id: "ingot".into(),
+            war_hits: Vec::new(),
+        };
+        let mut passport = Passport {
+            passport_id: "pass".into(),
+            token_id: Some("disp_001".into()),
+            agent_id: "agt".into(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 1,
+            updated_unix: 1,
+            last_sync_seq: 0,
+            career: None,
+        };
+        let pot = PotAuthorization {
+            idempotency_key: "pot:mt_one".into(),
+            pays: true,
+            contract_would_accept_resolve: false,
+            outcome: "draw".into(),
+            reason: "test".into(),
+            rule: "equal-split".into(),
+            pay_rule: "equal-split".into(),
+            settlement_method: "settle_vault".into(),
+            finality: "FINAL".into(),
+            winner: String::new(),
+            participants: vec!["ann.testnet".into()],
+            settled: true,
+            tx_hash: "A".repeat(44),
+            creator: "ann.testnet".into(),
+            payouts: vec![crate::vault::VaultPayout {
+                account: "ann.testnet".into(),
+                amount: "5".into(),
+            }],
+        };
+        credit_passports(
+            std::slice::from_ref(&player),
+            std::slice::from_mut(&mut passport),
+            &pot,
+        );
+        assert_eq!(
+            passport.career.as_ref().unwrap()["vaultReceipts"]["draws"],
+            1
+        );
+        passport.status = "unbound".into();
+        passport.agent_id.clear();
+        assert_eq!(
+            passport.career.as_ref().unwrap()["vaultReceipts"]["payoutYocto"],
+            "5"
+        );
+        let mut body = serde_json::json!({"listings": [{"tokenId": "disp_001"}]});
+        overlay_vault_careers(&mut body, std::slice::from_ref(&passport));
+        assert_eq!(
+            body["listings"][0]["vaultReceipts"]["source"],
+            "settled-receipts"
+        );
     }
 
     #[test]

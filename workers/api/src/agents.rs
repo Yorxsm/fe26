@@ -332,6 +332,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
             Some(public_agent(state, handle, now))
         }
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
+        ("GET", ["v1", "vault", "settlements"]) => Some(vault_settlements(state)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
         ("GET", ["v1", "matches", id]) => Some(spectate(state, incoming, id)),
@@ -1899,6 +1900,57 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
     json(200, &serde_json::json!({ "matches": rows }), false, None)
 }
 
+fn vault_settlements(state: &ArenaState) -> Outcome {
+    let mut rows: Vec<serde_json::Value> = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.arena_id == "vault")
+        .filter_map(|play| {
+            let pot = play.vault.as_ref()?.pot.as_ref()?;
+            if !pot.settled || !pot.pays || pot.finality != "FINAL" || pot.tx_hash.trim().is_empty()
+            {
+                return None;
+            }
+            if pot.settlement_method != "settle_vault" {
+                return None;
+            }
+            Some(serde_json::json!({
+                "matchId": play.match_id,
+                "outcome": pot.outcome,
+                "rule": pot.rule,
+                "payRule": pot.pay_rule,
+                "txHash": pot.tx_hash,
+                "txUrl": format!("https://testnet.nearblocks.io/txns/{}", pot.tx_hash),
+                "creator": pot.creator,
+                "winner": pot.winner,
+                "participants": pot.participants,
+                "payouts": pot.payouts,
+                "finality": pot.finality,
+                "pays": pot.pays,
+                "settlementMethod": pot.settlement_method,
+                "source": "settled-receipts",
+            }))
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        left["matchId"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(right["matchId"].as_str().unwrap_or(""))
+    });
+    json(
+        200,
+        &serde_json::json!({
+            "source": "settled-receipts",
+            "note": "Only FINAL settle_vault receipts. Unsettled matches are omitted.",
+            "matches": rows,
+        }),
+        false,
+        None,
+    )
+}
+
 fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outcome {
     let Some(play) = state
         .book
@@ -3075,6 +3127,7 @@ fn openapi() -> String {
             "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
+            "/v1/vault/settlements": { "get": { "operationId": "vaultSettlements" } },
             "/v1/markets": { "get": { "operationId": "markets" } },
             "/v1/markets/candles": { "get": { "operationId": "candles" } },
             "/v1/market/listings": { "get": { "operationId": "marketListings" } },
@@ -4641,6 +4694,54 @@ mod tests {
         );
         assert_eq!(after.1["rows"], board.1["rows"]);
         assert_eq!(state.book.matches[0].actions.len(), actions_before);
+    }
+
+    #[test]
+    fn vault_settlements_list_only_receipt_verified_matches() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        {
+            let play = state.book.matches[0].vault.as_mut().unwrap();
+            play.ended = true;
+            play.seal_vault_result(
+                "mt_loop",
+                &[
+                    ("alpha".into(), 2, Some("ann.testnet".into())),
+                    ("bravo".into(), 0, Some("bob.testnet".into())),
+                ],
+            );
+        }
+        let empty = call(&mut state, "GET", "/v1/vault/settlements", "", None);
+        assert_eq!(empty.0, 200);
+        assert_eq!(empty.1["matches"].as_array().unwrap().len(), 0);
+        {
+            let pot = state.book.matches[0]
+                .vault
+                .as_mut()
+                .unwrap()
+                .pot
+                .as_mut()
+                .unwrap();
+            pot.settled = true;
+            pot.pays = true;
+            pot.finality = "FINAL".into();
+            pot.tx_hash = "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61".into();
+        }
+        let listed = call(&mut state, "GET", "/v1/vault/settlements", "", None);
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        assert_eq!(listed.1["source"], "settled-receipts");
+        assert_eq!(
+            listed.1["matches"][0]["txHash"],
+            "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"
+        );
+        assert!(listed.1["matches"][0]["txUrl"]
+            .as_str()
+            .unwrap()
+            .contains("8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"));
     }
 
     #[test]

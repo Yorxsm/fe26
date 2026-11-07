@@ -326,6 +326,36 @@ Over the limit, the API returns 429 `{"error":"rate_limited"}` and `Retry-After`
 - Hyperliquid account reads, when an operator links one, are that operator's own account. A testnet faucet cannot satisfy Cup or Village. Those rooms stay empty for faucet-only accounts. No order is sent on their behalf.
 - Cup and Village are unsupported for this package until the operator supplies a Hyperliquid account and a NEAR Intents grant. That is not whole-economy readiness.
 
+## Vault loop and token record
+
+`GET /v1/vault/settlements` lists only matches whose FINAL `settle_vault` receipt was accepted. Each row has the transaction hash and a testnet explorer link. The lobby shows that list. Unsettled matches are omitted.
+
+A verified receipt adds wins, draws, losses, and payout yocto to `career.vaultReceipts` on the passport token that was bound to the paid account. A transfer clears the binding and keeps that record. It is not an invented score, and it is not written by this package onto `passport.fe2vi.testnet`.
+
+Build, do not deploy:
+
+```bash
+export FE2VI_GIT_SHA="$(git rev-parse HEAD)"
+( cd workers/api && worker-build --release && npx wrangler@4.153.0 deploy --dry-run --outdir /tmp/fe2vi-api-preview )
+( cd apps/web && npx opennextjs-cloudflare build )
+```
+
+Live test with the local restricted settler. Do not echo the secret, the receipt bearer, or the agent tokens.
+
+```bash
+export FE2VI_API_URL=https://api.fe2vi.space
+export FE2VI_FACTORY_ID=factory.fe2vidisp7a3c.testnet
+export FE2VI_NETWORK=testnet
+export FE2VI_RPC_URL=https://rpc.testnet.fastnear.com
+# Set these in the shell yourself. Leave them unset to print the plan only.
+# FE2VI_SETTLER_SECRET_KEY  FE2VI_SETTLER_KEY  FE2VI_LOOP_TOKEN_A  FE2VI_LOOP_TOKEN_B
+fe2vi vault-loop --matches 2 --dry-run
+fe2vi vault-loop --matches 2
+fe2vi settle-vault --match-id MATCH_ID
+```
+
+`tools/vault-loop.sh` runs the same command and does not print those values. A dry run sends no transaction. The real command signs `settle_vault` only with the restricted key and then posts the receipt.
+
 ## Credits
 
 Buildings, agents, the mark, and room shells in this repo are original. Props and textures are CC0, recolored for the dusk palette. The pack list is `docs/ASSETS.md` and https://fe2vi.space/about.

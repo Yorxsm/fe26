@@ -1607,6 +1607,11 @@ mod edge {
                 if let Some(vault) = arena.book.matches[index].vault.as_mut() {
                     vault.pot = Some(next.clone());
                 }
+                crate::passport::credit_passports(
+                    &arena.book.players,
+                    &mut arena.book.passports,
+                    &next,
+                );
                 Ok((
                     200,
                     serde_json::to_string(&next).unwrap_or_else(|_| "{}".into()),
@@ -2062,13 +2067,21 @@ mod edge {
                         )
                     }
                 };
-            let body = crate::passport::market_from_chain(
+            let mut body = crate::passport::market_from_chain(
                 &market,
                 &network,
                 &listed,
                 settlement.as_ref(),
                 "chain",
             );
+            let storage = self.state.storage();
+            if let Ok(stored) = storage.get::<crate::logic::ArenaState>("arena").await {
+                let mut arena = stored.unwrap_or_default();
+                let sql = storage.sql();
+                if attach_player_book(&sql, &mut arena).is_ok() {
+                    crate::passport::overlay_vault_careers(&mut body, &arena.book.passports);
+                }
+            }
             let payload = if path.ends_with("/sales") {
                 serde_json::json!({
                     "sales": body["sales"],

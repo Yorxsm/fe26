@@ -269,6 +269,20 @@ export default function MarketPage() {
                 <div style={{ fontWeight: 700, color: "var(--forge)" }}>{selected.career ? `#${selected.career.rank}` : "—"}</div>
               </div>
             </div>
+            {selected.vaultReceipts || selected.career?.vaultReceipts ? (
+              <p className="meta" style={{ marginTop: "0.6rem" }}>
+                Vault receipt record on this token:{" "}
+                {(selected.vaultReceipts ?? selected.career?.vaultReceipts)?.wins ?? 0} wins,{" "}
+                {(selected.vaultReceipts ?? selected.career?.vaultReceipts)?.draws ?? 0} draws,{" "}
+                {(selected.vaultReceipts ?? selected.career?.vaultReceipts)?.losses ?? 0} losses, payout{" "}
+                {(selected.vaultReceipts ?? selected.career?.vaultReceipts)?.payoutYocto ?? "0"} yocto.
+                Stays with the token after transfer. Binding does not. Source: settled receipts.
+              </p>
+            ) : (
+              <p className="meta" style={{ marginTop: "0.6rem" }}>
+                No Vault receipt record is attached to this token.
+              </p>
+            )}
           </div>
 
           <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem" }}>

@@ -163,6 +163,14 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Play several Vault matches back to back, then settle each with the restricted settler.
+    /// Agent tokens and the settler secret stay in the environment and are not printed.
+    VaultLoop {
+        #[arg(long, default_value_t = 2)]
+        matches: u32,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Poll the spectator API, or a heist view if no API is configured.
     Watch {
         #[arg(long)]
@@ -498,6 +506,7 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
         },
         Command::Intents { action } => intents(action),
         Command::SettleVault { match_id, dry_run } => settle_vault(config, &match_id, dry_run),
+        Command::VaultLoop { matches, dry_run } => vault_loop(config, matches, dry_run),
         Command::Watch { game_id, once } => watch(config, &game_id, once),
     }
 }
@@ -625,6 +634,199 @@ fn seed(
     .unwrap_or_else(|_| "{}".into()))
 }
 
+fn vault_result_ready(rule: &str, outcome: &str) -> bool {
+    matches!(
+        (rule, outcome),
+        ("winner-takes-all", "win") | ("equal-split", "draw") | ("creator-refund", "cancel")
+    )
+}
+
+fn vault_loop(config: &Config, matches: u32, dry_run: bool) -> Result<String, String> {
+    let matches = matches.clamp(1, 5);
+    let tokens_ready =
+        std::env::var("FE2VI_LOOP_TOKEN_A").is_ok() && std::env::var("FE2VI_LOOP_TOKEN_B").is_ok();
+    if dry_run || !tokens_ready {
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true,
+            "broadcast": false,
+            "matches": matches,
+            "reason": if dry_run { "dry-run" } else { "FE2VI_LOOP_TOKEN_A and FE2VI_LOOP_TOKEN_B are unset" },
+            "steps": [
+                "queue both agents on /v1/arenas/vault/queue",
+                "submit cover until the public match is over",
+                "settle_vault with FE2VI_SETTLER_SECRET_KEY",
+                "record the FINAL receipt",
+                "repeat"
+            ],
+            "secrets": "not printed",
+        }))
+        .unwrap_or_else(|_| "{}".into()));
+    }
+    let api = config
+        .api_url
+        .as_deref()
+        .ok_or("FE2VI_API_URL is required")?
+        .trim_end_matches('/')
+        .to_string();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let token_a = std::env::var("FE2VI_LOOP_TOKEN_A").map_err(|err| err.to_string())?;
+    let token_b = std::env::var("FE2VI_LOOP_TOKEN_B").map_err(|err| err.to_string())?;
+    let mut played = Vec::new();
+    for index in 0..matches {
+        let queued_a = bearer_post(
+            &client,
+            &format!("{api}/v1/arenas/vault/queue"),
+            &token_a,
+            &serde_json::json!({}),
+        )?;
+        let queued_b = bearer_post(
+            &client,
+            &format!("{api}/v1/arenas/vault/queue"),
+            &token_b,
+            &serde_json::json!({}),
+        )?;
+        let match_id = queued_b
+            .pointer("/match/matchId")
+            .or_else(|| queued_a.pointer("/match/matchId"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let match_id = match match_id {
+            Some(id) => id,
+            None => poll_match_id(&client, &api, &token_a)?,
+        };
+        let mut spins = 0_u32;
+        loop {
+            let mine = bearer_get(&client, &format!("{api}/v1/agents/me/matches"), &token_a)?;
+            let row = mine["matches"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["match"]["matchId"] == match_id))
+                .cloned()
+                .ok_or("loop match disappeared")?;
+            let status = row["match"]["status"].as_str().unwrap_or("");
+            if status == "over" {
+                break;
+            }
+            let turn = row["match"]["turn"].as_u64().unwrap_or(1);
+            let body = serde_json::json!({
+                "turn": turn,
+                "action": {"type": "cover", "intent": "vault loop"},
+                "clientRequestId": format!("loop-{index}-{turn}-a"),
+            });
+            let _ = bearer_post(
+                &client,
+                &format!("{api}/v1/matches/{match_id}/actions"),
+                &token_a,
+                &body,
+            );
+            let body_b = serde_json::json!({
+                "turn": turn,
+                "action": {"type": "cover", "intent": "vault loop"},
+                "clientRequestId": format!("loop-{index}-{turn}-b"),
+            });
+            let _ = bearer_post(
+                &client,
+                &format!("{api}/v1/matches/{match_id}/actions"),
+                &token_b,
+                &body_b,
+            );
+            spins += 1;
+            if spins > 12 {
+                return Err("vault loop did not reach a public result".into());
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+        let public = api_get(&client, &format!("{api}/v1/matches/{match_id}"))?;
+        let receipt = settle_vault(config, &match_id, false)?;
+        played.push(serde_json::json!({
+            "matchId": match_id,
+            "outcome": public.pointer("/vault/pot/outcome").cloned().unwrap_or(serde_json::Value::Null),
+            "rule": public.pointer("/vault/pot/rule").cloned().unwrap_or(serde_json::Value::Null),
+            "receipt": serde_json::from_str::<serde_json::Value>(&receipt).unwrap_or(serde_json::Value::String(receipt)),
+        }));
+    }
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "ok": true,
+        "broadcast": true,
+        "source": "settled-receipts",
+        "matches": played,
+    }))
+    .unwrap_or_else(|_| "{}".into()))
+}
+
+fn poll_match_id(
+    client: &reqwest::blocking::Client,
+    api: &str,
+    token: &str,
+) -> Result<String, String> {
+    for _ in 0..5 {
+        let mine = bearer_get(client, &format!("{api}/v1/agents/me/matches"), token)?;
+        if let Some(id) = mine["matches"]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|row| row["match"]["matchId"].as_str())
+        {
+            return Ok(id.to_string());
+        }
+        thread::sleep(Duration::from_millis(300));
+    }
+    Err("no vault match was opened".into())
+}
+
+fn bearer_get(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .get(url)
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}"));
+    }
+    serde_json::from_str(&text).map_err(|err| format!("api body: {err}"))
+}
+
+fn bearer_post(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(url)
+        .header("authorization", format!("Bearer {token}"))
+        .json(body)
+        .send()
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}"));
+    }
+    Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::vault_result_ready;
+
+    #[test]
+    fn a_draw_is_ready_for_settle_vault() {
+        assert!(vault_result_ready("winner-takes-all", "win"));
+        assert!(vault_result_ready("equal-split", "draw"));
+        assert!(vault_result_ready("creator-refund", "cancel"));
+        assert!(!vault_result_ready("winner-takes-all", "draw"));
+        assert!(!vault_result_ready("equal-split", "unmapped"));
+    }
+}
+
 fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String, String> {
     let api = config
         .api_url
@@ -653,7 +855,7 @@ fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String
         }))
         .unwrap_or_else(|_| "{}".into()));
     }
-    if rule != "winner-takes-all" || !matches!(outcome, "win" | "draw" | "cancel") {
+    if !vault_result_ready(rule, outcome) {
         return Err("match is unmapped or not a vault result; no account was invented".into());
     }
     let winner = pot["winner"].as_str().unwrap_or("");

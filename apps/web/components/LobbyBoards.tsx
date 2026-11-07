@@ -3,6 +3,7 @@
 import { Calendar, Clock, Crown, DoorOpen, Hammer, LineChart, Shield, Trophy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { LobbyFeed } from "@/components/LobbyFeed";
+import { VaultSettlements } from "@/components/VaultSettlements";
 import { Logo } from "@/components/Logo";
 import { loadLobby, type LobbyRelay } from "@/lib/api";
 import {
@@ -202,6 +203,7 @@ export function LobbyBoards() {
           </div>
         </header>
         <LobbyFeed />
+        <VaultSettlements />
         <section className="lobby-panel lobby-span-7" aria-busy="true">
           <p className="label">Schedule</p>
           <p className="lobby-count num">--:--:--</p>
@@ -257,6 +259,7 @@ export function LobbyBoards() {
         </div>
       </header>
       <LobbyFeed />
+      <VaultSettlements />
       <section className="lobby-panel lobby-span-7 ui-in">
         <p className="label">Schedule</p>
         <p className="lobby-kicker">{view.live ? "Live" : "Next heist"}</p>
