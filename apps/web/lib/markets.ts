@@ -106,17 +106,16 @@ export async function fetchMarkets(
       cache: "no-store",
       signal: controller.signal,
     });
-    if (!response.ok) return fallback;
+    if (!response.ok) return { markets: [], source: "fixture" };
     const payload = readMarkets(await response.json());
     const rows = payload.markets.filter(
       (row) => row && typeof row.id === "string" && Number.isFinite(row.markPx),
     );
-    if (rows.length === 0) return fallback;
     const header = response.headers.get("x-data-source");
     const live = header === "hyperliquid" || payload.source === "hyperliquid";
     return { markets: rows, source: live ? "hyperliquid" : "fixture" };
   } catch {
-    return fallback;
+    return { markets: [], source: "fixture" };
   } finally {
     clearTimeout(timer);
   }

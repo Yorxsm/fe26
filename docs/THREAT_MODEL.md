@@ -33,7 +33,7 @@ The parent registrant, or the registry owner, can revoke. Revocation is a separa
 
 Platform caps live in the registry. `set_platform_caps` requires the owner and rejects values above a compiled-in ceiling. Factory and heist copies move only through `apply_platform_caps`, which requires the registry as predecessor. A game account calling that method panics with `game cannot raise platform caps`.
 
-`init_game` calls `validate_rules`. The factory has no method that opens a game. A per-agent cap above the platform cap never becomes a game.
+`init_game` calls `validate_rules`. Only the factory owner can call `open_game`, and the attached deposit must equal the pot. The factory forwards that deposit and keeps no fee. A visitor cannot open a game. A per-agent cap above the platform cap never becomes a game.
 
 `act` and `bid` call `authorize_spend`, which rejects the spend if the stored game caps are above the registry caps the heist last received, if the amount exceeds the per-action cap, or if the running total exceeds the per-agent cap. They then call `registry.check_spend`. If that call fails, `on_spend_checked` reverts the optimistic commit.
 
@@ -45,7 +45,7 @@ Ways this can still go wrong:
 
 ## Custody of pots
 
-The factory does not take a creator deposit. `init_game` still requires the factory as predecessor and a deposit equal to the pot. When that method runs, the contract mints NEP-245 `pot:<game>` tokens 1:1 with yoctoNEAR and holds both the tokens and the NEAR. `mt_transfer` only moves tokens the predecessor already holds, so a user cannot pull the escrow. `transfer_item` refuses pot token ids. There is no withdraw method and no moderator argument for a recipient.
+The factory does not keep a creator deposit. `open_game` forwards the attached pot, and `init_game` still requires the factory as predecessor and a deposit equal to the pot. When that method runs, the contract mints NEP-245 `pot:<game>` tokens 1:1 with yoctoNEAR and holds both the tokens and the NEAR. `mt_transfer` only moves tokens the predecessor already holds, so a user cannot pull the escrow. `transfer_item` refuses pot token ids. There is no withdraw method and no moderator argument for a recipient.
 
 `resolve` is permissionless after the duration, or immediately when the game is delisted. It sets `resolved` before it schedules transfers. Payout is by score, or an equal split of joined players when delisted, or a refund to the creator when there is nothing to split. Item tokens go to the high bidder. The contract auto-registers a payout account that has no NEP-145 storage record, and it pays that storage out of the contract balance rather than the pot tokens. A user calling `mt_transfer` to an unregistered account still panics.
 

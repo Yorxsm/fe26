@@ -25,6 +25,7 @@ export async function fetchMarketData(): Promise<{
   contract: string;
   network: string;
   blockers: string[];
+  lastSettlement: { buyer?: string; seller?: string; priceNear?: string; note?: string } | null;
   source: "chain" | "not-read" | "unavailable";
 }> {
   const controller = new AbortController();

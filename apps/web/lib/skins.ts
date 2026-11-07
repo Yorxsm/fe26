@@ -40,12 +40,12 @@ export async function fetchSkins(): Promise<{ skins: Skin[]; source: "arena" | "
       cache: "no-store",
       signal: controller.signal,
     });
-    if (!response.ok) return { skins: FALLBACK_SKINS, source: "fixture" };
+    if (!response.ok) return { skins: [], source: "fixture" };
     const body = (await response.json()) as { skins?: Skin[] };
     const rows = Array.isArray(body.skins) ? body.skins.filter((row) => row && typeof row.id === "string") : [];
-    return rows.length > 0 ? { skins: rows, source: "arena" } : { skins: FALLBACK_SKINS, source: "fixture" };
+    return { skins: rows, source: "arena" };
   } catch {
-    return { skins: FALLBACK_SKINS, source: "fixture" };
+    return { skins: [], source: "fixture" };
   } finally {
     clearTimeout(timer);
   }

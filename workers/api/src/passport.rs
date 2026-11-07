@@ -148,6 +148,7 @@ fn mint(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         created_unix: now,
         updated_unix: now,
         last_sync_seq: 0,
+        career: None,
     };
     let job = PassportJob {
         job_id: job_id.clone(),
@@ -279,6 +280,7 @@ fn bind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
                 created_unix: now,
                 updated_unix: now,
                 last_sync_seq: 0,
+                career: None,
             };
             state.book.passports.push(passport.clone());
             (passport.passport_id.clone(), owner, Some(passport))
@@ -365,6 +367,9 @@ struct CompleteBody {
     #[serde(rename = "txHash")]
     tx_hash: Option<String>,
     error: Option<String>,
+    #[serde(rename = "lastSyncSeq")]
+    last_sync_seq: Option<u64>,
+    career: Option<serde_json::Value>,
 }
 
 fn claim(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
@@ -439,6 +444,7 @@ fn complete(state: &mut ArenaState, incoming: &Incoming<'_>, job_id: &str, now: 
                     state.book.passports[index].status = "active".to_string();
                     state.book.passports[index].agent_id = job.agent_id;
                     state.book.passports[index].owner_near = job.owner_near;
+                    apply_career_sync(&mut state.book.passports[index], &body);
                 }
                 "unbind" => {
                     state.book.passports[index].status = "unbound".to_string();
@@ -602,7 +608,10 @@ pub fn yocto_to_near(yocto: &str) -> String {
 }
 
 /// One chain listing. Missing or zero prices are skipped so the API cannot invent an ask.
-pub fn listed_passport(token: &serde_json::Value, listing: &serde_json::Value) -> Option<serde_json::Value> {
+pub fn listed_passport(
+    token: &serde_json::Value,
+    listing: &serde_json::Value,
+) -> Option<serde_json::Value> {
     if listing.is_null() {
         return None;
     }
@@ -610,11 +619,17 @@ pub fn listed_passport(token: &serde_json::Value, listing: &serde_json::Value) -
         .get("token_id")
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.is_empty())?;
-    let price = listing.get("price").and_then(serde_json::Value::as_str).unwrap_or("");
+    let price = listing
+        .get("price")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     if price.is_empty() || price.chars().all(|ch| ch == '0') {
         return None;
     }
-    let seller = listing.get("seller").and_then(serde_json::Value::as_str).unwrap_or("");
+    let seller = listing
+        .get("seller")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     let title = token
         .pointer("/metadata/title")
         .and_then(serde_json::Value::as_str)
@@ -624,7 +639,10 @@ pub fn listed_passport(token: &serde_json::Value, listing: &serde_json::Value) -
         .pointer("/metadata/description")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("Passport listed on the configured market.");
-    let owner = token.get("owner_id").and_then(serde_json::Value::as_str).unwrap_or(seller);
+    let owner = token
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(seller);
     Some(serde_json::json!({
         "tokenId": token_id,
         "name": title,
@@ -646,38 +664,52 @@ pub fn market_from_chain(
 ) -> serde_json::Value {
     let mut floor = String::new();
     for row in listings {
-        let price = row.get("priceYocto").and_then(serde_json::Value::as_str).unwrap_or("");
-        if floor.is_empty() || price.len() < floor.len() || (price.len() == floor.len() && price < floor.as_str()) {
+        let price = row
+            .get("priceYocto")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if floor.is_empty()
+            || price.len() < floor.len()
+            || (price.len() == floor.len() && price < floor.as_str())
+        {
             floor = price.to_string();
         }
     }
-    let sales = match settlement {
+    let last_settlement = match settlement {
         Some(value) if value.is_object() => {
-            let price = value.get("price").and_then(serde_json::Value::as_str).unwrap_or("0");
-            vec![serde_json::json!({
-                "id": "last-settlement",
+            let price = value
+                .get("price")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("0");
+            Some(serde_json::json!({
                 "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
                 "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
                 "priceNear": yocto_to_near(price),
                 "priceYocto": price,
-            })]
+                "note": "The contract stores one settlement, not a sales history.",
+            }))
         }
-        _ => Vec::new(),
+        _ => None,
     };
     let blockers = if network == "testnet" {
-        vec!["The shipped factory has no method that opens a game. Vault, War, Cup, and Village score in the arena API. The heist contract can report caps, and a pot cannot be opened without a factory call that this repository does not expose."]
+        vec!["Vault, War, Cup, and Village season points stay in the arena API. An on-chain pot opens only when the factory owner calls open_game with a deposit equal to the pot."]
     } else {
         Vec::new()
     };
-    let floor_near = if floor.is_empty() { "0".to_string() } else { yocto_to_near(&floor) };
+    let floor_near = if floor.is_empty() {
+        "0".to_string()
+    } else {
+        yocto_to_near(&floor)
+    };
     serde_json::json!({
         "listings": listings,
-        "sales": sales,
+        "sales": [],
+        "lastSettlement": last_settlement,
         "stats": {
             "floorPriceNear": floor_near,
             "totalVolumeNear": null,
             "listedCount": listings.len(),
-            "totalSalesCount": sales.len(),
+            "totalSalesCount": null,
             "activeSpectators": null,
         },
         "contract": contract,
@@ -704,7 +736,13 @@ pub fn market_listings(state: &ArenaState) -> Outcome {
 }
 
 pub fn market_sales(state: &ArenaState) -> Outcome {
-    let body = market_from_chain(&state.market_contract, &state.chain_network, &[], None, "not-read");
+    let body = market_from_chain(
+        &state.market_contract,
+        &state.chain_network,
+        &[],
+        None,
+        "not-read",
+    );
     json(
         200,
         &serde_json::json!({
@@ -761,9 +799,22 @@ fn passport_json(passport: &Passport) -> serde_json::Value {
         "status": passport.status,
         "boundAgent": if passport.agent_id.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(passport.agent_id.clone()) },
         "lastSyncSeq": passport.last_sync_seq,
+        "career": passport.career.clone().unwrap_or(serde_json::Value::Null),
         "createdAt": agents::rfc3339(passport.created_unix),
         "updatedAt": agents::rfc3339(passport.updated_unix),
     })
+}
+
+fn apply_career_sync(passport: &mut Passport, body: &CompleteBody) {
+    if let Some(seq) = body.last_sync_seq {
+        if seq < passport.last_sync_seq {
+            return;
+        }
+        passport.last_sync_seq = seq;
+    }
+    if let Some(career) = &body.career {
+        passport.career = Some(career.clone());
+    }
 }
 
 fn job_json(job: &PassportJob) -> serde_json::Value {
@@ -938,6 +989,47 @@ mod tests {
     }
 
     #[test]
+    fn career_sync_keeps_the_newer_sequence() {
+        let mut state = ArenaState::default();
+        let (_, token) = register(&mut state);
+        let (_, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/agents/me/passport/bind?now={NOW}"),
+            r#"{"tokenId":"fdr_009","ownerNear":"buyer.near","agentNear":"buyer.near"}"#,
+            Some(&token),
+        );
+        let job_id = body["job"]["jobId"].as_str().unwrap().to_string();
+        call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":1}"#,
+            None,
+        );
+        let (status, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{job_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"fdr_009","txHash":"bind1","lastSyncSeq":2,"career":{"xp":4,"wins":1}}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(body["passport"]["lastSyncSeq"], 2);
+        assert_eq!(body["passport"]["career"]["xp"], 4);
+        let (status, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{job_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"fdr_009","txHash":"bind1","lastSyncSeq":1,"career":{"xp":0,"wins":0}}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(body["passport"]["lastSyncSeq"], 2);
+        assert_eq!(body["passport"]["career"]["xp"], 4);
+    }
+
+    #[test]
     fn failed_bind_does_not_activate_the_passport() {
         let mut state = ArenaState::default();
         let (_, token) = register(&mut state);
@@ -1060,6 +1152,7 @@ mod tests {
             created_unix: NOW,
             updated_unix: NOW,
             last_sync_seq: 0,
+            career: None,
         });
         let (status, _) = call(
             &mut state,
@@ -1120,7 +1213,8 @@ mod tests {
         assert_eq!(body["listings"].as_array().unwrap().len(), 0);
         assert_eq!(body["contract"], "market.fe2vi.testnet");
         assert_eq!(body["stats"]["listedCount"], 0);
-        assert_eq!(body["stats"]["totalSalesCount"], 0);
+        assert_eq!(body["stats"]["totalSalesCount"], serde_json::Value::Null);
+        assert!(body["lastSettlement"].is_null());
         assert_eq!(body["stats"]["totalVolumeNear"], serde_json::Value::Null);
         assert_eq!(body["source"], "not-read");
         assert!(!body.to_string().contains("Launch Stock"));
@@ -1152,6 +1246,8 @@ mod tests {
         assert_eq!(body["stats"]["floorPriceNear"], "1");
         assert_eq!(body["stats"]["listedCount"], 1);
         assert!(body["sales"].as_array().unwrap().is_empty());
+        assert!(body["lastSettlement"].is_null());
+        assert!(body["stats"]["totalSalesCount"].is_null());
         assert!(body["blockers"].as_array().unwrap().len() == 1);
     }
 }

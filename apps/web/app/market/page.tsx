@@ -29,6 +29,7 @@ export default function MarketPage() {
   const [contract, setContract] = useState("");
   const [network, setNetwork] = useState("");
   const [blockers, setBlockers] = useState<string[]>([]);
+  const [lastSettlement, setLastSettlement] = useState<{ buyer?: string; seller?: string; priceNear?: string; note?: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string>("fdr_001");
   const [rarityFilter, setRarityFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"price-asc" | "price-desc" | "rank">("price-asc");
@@ -44,6 +45,7 @@ export default function MarketPage() {
       setContract(result.contract);
       setNetwork(result.network);
       setBlockers(result.blockers);
+      setLastSettlement(result.lastSettlement);
     });
     return () => {
       alive = false;
@@ -130,10 +132,10 @@ export default function MarketPage() {
         </div>
         <div className="card" style={{ padding: "1rem" }}>
           <div className="meta" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <Shield size={14} /> Total Sales
+            <Shield size={14} /> Lifetime sales
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--ink)" }}>
-            {stats.totalSalesCount}
+            {stats.totalSalesCount ?? "—"}
           </div>
         </div>
         <div className="card" style={{ padding: "1rem" }}>
@@ -396,7 +398,9 @@ export default function MarketPage() {
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <h2>Sales tape</h2>
           <span className="meta">
-            {source === "unavailable" ? "Sales were not read." : "Last settlement returned by the market contract. There is no invented tape."}
+            {lastSettlement
+              ? `Last settlement only: ${lastSettlement.seller ?? "unknown"} to ${lastSettlement.buyer ?? "unknown"} for ${lastSettlement.priceNear ?? "?"} NEAR. This is not a lifetime volume.`
+              : "No settlement is stored. Lifetime volume is not indexed."}
           </span>
         </div>
         <table className="board" style={{ marginTop: "0.75rem" }}>

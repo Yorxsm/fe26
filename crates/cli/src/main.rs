@@ -20,7 +20,10 @@ const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vidisp7a3c.testnet";
 const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
 
 #[derive(Parser, Debug)]
-#[command(name = "fe2vi", about = "fe2VI arena tools for the NEAR testnet passport economy")]
+#[command(
+    name = "fe2vi",
+    about = "fe2VI arena tools for the NEAR testnet passport economy"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -686,6 +689,16 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
             if let Some(hash) = tx_hash {
                 complete["txHash"] = serde_json::json!(hash);
             }
+            if status == "done" {
+                if let Ok(view) = passport_state(config, &token) {
+                    if let Some(seq) = view.get("last_sync_seq").and_then(|value| value.as_u64()) {
+                        complete["lastSyncSeq"] = serde_json::json!(seq);
+                    }
+                    if let Some(career) = view.get("career") {
+                        complete["career"] = career.clone();
+                    }
+                }
+            }
             if let Some(error) = error {
                 complete["error"] = serde_json::json!(error);
             }
@@ -831,7 +844,7 @@ fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
         &config.rpc_url,
         "query",
         serde_json::json!({
-            "request_type": "view",
+            "request_type": "call_function",
             "finality": "final",
             "account_id": config.passport_id,
             "method_name": "nft_token",
@@ -853,6 +866,33 @@ fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| "nft_token: missing owner_id".to_string())
+}
+
+fn passport_state(config: &Config, token_id: &str) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
+        .map_err(|err| err.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(args);
+    let response = rpc(
+        &config.rpc_url,
+        "query",
+        serde_json::json!({
+            "request_type": "call_function",
+            "finality": "final",
+            "account_id": config.passport_id,
+            "method_name": "passport",
+            "args_base64": encoded,
+        }),
+    )?;
+    if !response["result"]["error"].is_null() {
+        return Err(format!("passport: {}", response["result"]["error"]));
+    }
+    let bytes = response["result"]["result"]
+        .as_array()
+        .ok_or("passport: missing result")?
+        .iter()
+        .map(|value| value.as_u64().unwrap_or_default() as u8)
+        .collect::<Vec<u8>>();
+    serde_json::from_slice(&bytes).map_err(|err| format!("passport body: {err}"))
 }
 
 fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {

@@ -54,6 +54,9 @@ pub struct Passport {
     pub updated_unix: u64,
     #[serde(default)]
     pub last_sync_seq: u64,
+    /// Chain career snapshot supplied by the relay. Not a score the API invented.
+    #[serde(default)]
+    pub career: Option<serde_json::Value>,
 }
 
 /// Work queue for the passport relay. Jobs are written by the API and claimed

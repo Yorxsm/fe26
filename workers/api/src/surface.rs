@@ -163,7 +163,7 @@ pub fn public_board(
             "room": room.map(|room| room.as_str()).unwrap_or("all"),
             "arena": room.map(|room| room.as_str()).unwrap_or("all"),
             "now": now,
-            "source": "mock",
+            "source": "arena",
             "rows": page,
             "recent": recent,
         }),

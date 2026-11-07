@@ -235,7 +235,10 @@ impl VaultMatch {
                     ("gained intel".to_string(), 0)
                 }
                 "cover" => {
-                    let before = baseline_heats.get(&submission.agent_id).copied().unwrap_or(0);
+                    let before = baseline_heats
+                        .get(&submission.agent_id)
+                        .copied()
+                        .unwrap_or(0);
                     if before > 0 {
                         *heat_sub.entry(submission.agent_id.clone()).or_default() += 1;
                         self.seats[index].points += 1;

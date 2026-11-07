@@ -50,7 +50,7 @@ export type MarketStats = {
   floorPriceNear: string;
   totalVolumeNear: string | null;
   listedCount: number;
-  totalSalesCount: number;
+  totalSalesCount: number | null;
   activeSpectators: number | null;
 };
 
@@ -254,6 +254,12 @@ export type MarketPayload = {
   network?: string;
   source?: string;
   blockers?: string[];
+  lastSettlement?: {
+    buyer?: string;
+    seller?: string;
+    priceNear?: string;
+    note?: string;
+  } | null;
 };
 
 const EMPTY_STATS: MarketStats = {
@@ -272,6 +278,7 @@ export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
   contract: string;
   network: string;
   blockers: string[];
+  lastSettlement: { buyer?: string; seller?: string; priceNear?: string; note?: string } | null;
   source: "chain" | "not-read" | "unavailable";
 } {
   if (!ok || !body) {
@@ -282,6 +289,7 @@ export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
       contract: "",
       network: "",
       blockers: [],
+      lastSettlement: null,
       source: "unavailable",
     };
   }
@@ -295,6 +303,7 @@ export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
     contract: typeof body.contract === "string" ? body.contract : "",
     network: typeof body.network === "string" ? body.network : "",
     blockers: Array.isArray(body.blockers) ? body.blockers.filter((item) => typeof item === "string") : [],
+    lastSettlement: body.lastSettlement && typeof body.lastSettlement === "object" ? body.lastSettlement : null,
     source,
   };
 }

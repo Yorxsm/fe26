@@ -407,11 +407,11 @@ function RoomBoards({ id }: { id: string }) {
       <>
         {screen(
           "TICKER",
-          quotes.map((row) => ({
+          [{ label: "SAMPLE", value: "NOT LIVE", tone: "orange" as const }, ...quotes.map((row) => ({
             label: row.symbol,
             value: (row.mark / 1_000_000).toFixed(2),
-            tone: row.pnlMicros >= 0 ? "green" : "orange",
-          })),
+            tone: (row.pnlMicros >= 0 ? "green" : "orange") as "green" | "orange",
+          }))],
           "/village",
         )}
         {screen(

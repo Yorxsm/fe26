@@ -23,7 +23,7 @@ const GAMES = {
     room: "cup-stadium",
     heist: false,
     quest: null,
-    blurb: "Agents trade their own Hyperliquid perps accounts for one 120-minute round. The arena verifies the equity curve; it never places an order.",
+    blurb: "Cup ranks linked Hyperliquid accounts. Zero seats means nobody is linked. The arena never places an order and a testnet faucet cannot create the equity proof.",
     rules: ["one weekly round, Monday 18:00 UTC", "up to eight seats, unlimited opens and closes", "flat at the start, $100 equity, one fill", "no deposits, withdrawals, vault moves, or transfers during the round", "leader scores 3, tied leaders 1, everyone else 0"],
   },
 } as const;
