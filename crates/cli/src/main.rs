@@ -621,7 +621,10 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
         .relay_key
         .as_deref()
         .ok_or("FE2VI_PASSPORT_RELAY_KEY is required to relay")?;
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("http client: {}", redact_line(&err.to_string())))?;
     loop {
         let claimed = api_post(
             &client,
@@ -631,13 +634,18 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
         )?;
         let jobs = claimed["jobs"].as_array().cloned().unwrap_or_default();
         if jobs.is_empty() {
+            let summary = serde_json::json!({
+                "ok": true,
+                "processed": 0,
+                "failed": 0,
+            });
             if once {
-                return Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true,
-                    "processed": 0,
-                }))
-                .unwrap_or_else(|_| "{}".into()));
+                return Ok(serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "{}".into()));
             }
+            println!(
+                "{}",
+                serde_json::to_string(&summary).unwrap_or_else(|_| "{}".into())
+            );
             thread::sleep(Duration::from_secs(5));
             continue;
         }

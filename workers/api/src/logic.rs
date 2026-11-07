@@ -12,6 +12,12 @@ use serde::{Deserialize, Serialize};
 
 const HISTORY_LIMIT: usize = 200;
 
+/// Set `FE2VI_GIT_SHA` for the wasm build. `unset` means that variable was absent.
+pub const BUILD_SHA: &str = match option_env!("FE2VI_GIT_SHA") {
+    Some(sha) if !sha.is_empty() => sha,
+    _ => "unset",
+};
+
 pub fn history_limit() -> usize {
     HISTORY_LIMIT
 }
@@ -201,6 +207,7 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
                 200,
                 &serde_json::json!({
                     "ok": true,
+                    "build": BUILD_SHA,
                     "network": network,
                     "arena": "off-chain",
                     "passport": state.passport_contract,

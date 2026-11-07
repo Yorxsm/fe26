@@ -1701,7 +1701,11 @@ mod edge {
         headers.set("content-type", content_type)?;
         headers.set("access-control-allow-origin", "*")?;
         headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS")?;
-        headers.set("access-control-expose-headers", "Retry-After")?;
+        headers.set(
+            "access-control-expose-headers",
+            "Retry-After, X-Fe2vi-Build",
+        )?;
+        headers.set("x-fe2vi-build", crate::logic::BUILD_SHA)?;
         headers.set(
             "access-control-allow-headers",
             "content-type, authorization",

@@ -36,4 +36,9 @@ export FE2VI_PASSPORT_RELAY_KEY
 FE2VI_SIGNER_SECRET_KEY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["private_key"], end="")' "$key_file")
 export FE2VI_SIGNER_SECRET_KEY
 
+log="${FE2VI_RELAY_LOG:-$(pwd)/relay.log}"
+touch "$log"
+chmod 600 "$log"
+exec >>"$log" 2>&1
+printf '%s\n' "relay start api=${FE2VI_API_URL} account=${FE2VI_ACCOUNT_ID}"
 exec "$binary" passport relay
