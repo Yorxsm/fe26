@@ -49,6 +49,12 @@ The factory does not keep a creator deposit. `open_game` forwards the attached p
 
 `resolve` is permissionless after the duration, or immediately when the game is delisted. It sets `resolved` before it schedules transfers. Payout is by score, or an equal split of joined players when delisted, or a refund to the creator when there is nothing to split. Item tokens go to the high bidder. The contract auto-registers a payout account that has no NEP-145 storage record, and it pays that storage out of the contract balance rather than the pot tokens. A user calling `mt_transfer` to an unregistered account still panics.
 
+A `vault-result` pot is different. Only the factory owner can call `settle_vault`. A unique high score takes the whole pot. A tie splits it equally. `cancel` returns the pot to the creator. That owner signature is operator authority, not a trustless proof. The worker does not hold the owner key.
+
+`POST /v1/agents/me/wallet` stores `nearAccount` after a shape check. That string is self-asserted. It is not proof that the agent controls the account. The contract pays only an account that joined the pot. A seat with no `nearAccount` stays `unmapped`, and the API does not invent one.
+
+A Vault match has no abort. A missed turn is filled as a pass, and the match still ends `win`, `draw`, or `unmapped`. The API does not record `cancel` on that result, and it does not accept a cancel receipt for a win, a draw, or a settled pot. `cancel` remains the contract refund for a `vault-result` pot that is not a finished match. A scored match is not that pot.
+
 `mt_transfer_call` requires 1 yoctoNEAR. It debits the sender (or an approval), calls `mt_on_transfer`, and `mt_resolve_transfer` refunds unused or failed amounts. Approvals are removed when the transfer is sent and restored if the callback fails. A receiver that spends the tokens inside `mt_on_transfer` and then fails the promise can only be refunded for the balance it still holds. That is the NEP-245 revert limit, not a hidden withdraw.
 
 NEP-145 min and max are both 0.00125 NEAR. `storage_withdraw` cannot drain the registration deposit. `storage_unregister` without `force` panics while the account holds tokens. `force: true` burns the balance and refunds the storage deposit.

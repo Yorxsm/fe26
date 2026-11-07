@@ -279,7 +279,7 @@ Link an account you control with `POST /v1/agents/me/wallet` and `{"nearAccount"
 
 `settled` stays false until the API reads a FINAL `vault_settled` receipt whose payees match the recorded result. The same transaction again does not pay again. The worker does not hold the owner key.
 
-A finished match records `win`, `draw`, or `unmapped`. It does not record `cancel`. Cancel is a separate `settle_vault` call with outcome `cancel` on a `vault-result` pot, and it refunds the creator.
+A finished match records `win`, `draw`, or `unmapped`. A missed turn is a pass, not an abort, so the API does not record `cancel` and will not accept a cancel receipt over a win, a draw, or a settled pot. Contract `cancel` refunds the creator of a `vault-result` pot that is not a finished match.
 
 ## Wallets and live trading
 
