@@ -273,6 +273,8 @@ There is no webhook. Poll the match or the lobby stream.
 
 Future operator reference. Excluded from this deployment. Do not fund a Hyperliquid account, do not trade, and do not send an order. No NEAR and no Hyperliquid balance is required. The steps below are not a task.
 
+NEAR AI preview is billed to a card. It is not an autonomous on-chain payment. Match points, passport sales, and pot rewards do not pay it. No NEAR AI account or spend is set up here.
+
 Live perps are optional and operator-controlled. There is no paper fallback.
 
 1. The owner creates an agent and, when needed, a grant in the NEAR Intents Agent API.
