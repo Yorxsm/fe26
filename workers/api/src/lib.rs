@@ -597,6 +597,19 @@ mod edge {
                                     body = next;
                                 }
                             }
+                            if body.contains("\"settlementMethod\":\"settle_vault\"")
+                                && body.contains("\"creator\":\"\"")
+                            {
+                                if let Ok(facts) = heist_pot_facts(self, match_id).await {
+                                    if let Some(creator) = facts.creator {
+                                        if let Some(next) =
+                                            crate::vault::fill_creator(&body, &creator)
+                                        {
+                                            body = next;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     let mut response = Response::ok(body)?.with_status(status);
@@ -1449,18 +1462,17 @@ mod edge {
     ) -> Result<(u16, String, bool)> {
         let request: serde_json::Value =
             serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
-        let tx_hash = request
-            .get("txHash")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let sender = request
-            .get("senderAccountId")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let (tx_hash, sender) = match crate::vault::parse_receipt_request(&request) {
+            Ok(pair) => pair,
+            Err((status, message)) => {
+                return Ok((
+                    status,
+                    serde_json::json!({"error":"validation_error","message":message,"settled":false})
+                        .to_string(),
+                    false,
+                ));
+            }
+        };
         let Some(index) = arena
             .book
             .matches
@@ -1500,7 +1512,7 @@ mod edge {
                 false,
             ));
         }
-        let tx = match rpc_call(
+        let (http_status, text) = match rpc_exchange(
             &rpc,
             "EXPERIMENTAL_tx_status",
             serde_json::json!({
@@ -1511,18 +1523,50 @@ mod edge {
         )
         .await
         {
-            Ok(tx) => tx,
+            Ok(pair) => pair,
             Err(_) => {
                 return Ok((
                     503,
-                    r#"{"error":"chain_unavailable","message":"The settlement receipt could not be read."}"#
+                    r#"{"error":"chain_unavailable","message":"The settlement receipt could not be read.","settled":false}"#
                         .into(),
                     false,
                 ));
             }
         };
-        let result = tx.get("result").cloned().unwrap_or(tx);
-        match crate::vault::confirm_vault_receipt(&pot, &tx_hash, &result) {
+        let result = match crate::vault::read_tx_response(http_status, &text) {
+            Ok(result) => result,
+            Err((status, message)) => {
+                let error = match status {
+                    503 => "chain_unavailable",
+                    404 => "not_found",
+                    _ => "validation_error",
+                };
+                return Ok((
+                    status,
+                    serde_json::json!({"error":error,"message":message,"settled":false})
+                        .to_string(),
+                    false,
+                ));
+            }
+        };
+        let facts = match heist_pot_facts(feed, match_id).await {
+            Ok(facts) => facts,
+            Err(()) => {
+                return Ok((
+                    503,
+                    r#"{"error":"chain_unavailable","message":"The pot could not be read.","settled":false}"#
+                        .into(),
+                    false,
+                ));
+            }
+        };
+        let mut pot = pot;
+        if pot.creator.is_empty() {
+            if let Some(creator) = facts.creator {
+                pot.creator = creator;
+            }
+        }
+        match crate::vault::confirm_vault_receipt(&pot, &tx_hash, &result, facts.pot_yocto) {
             Ok(next) => {
                 if let Some(vault) = arena.book.matches[index].vault.as_mut() {
                     vault.pot = Some(next.clone());
@@ -1540,6 +1584,45 @@ mod edge {
                 false,
             )),
         }
+    }
+
+    struct PotFacts {
+        creator: Option<String>,
+        pot_yocto: u128,
+    }
+
+    async fn heist_pot_facts(feed: &SpectatorFeed, match_id: &str) -> Result<PotFacts, ()> {
+        let heist = env_string(&feed.env, "FE2VI_HEIST_ID");
+        let rpc = env_string(&feed.env, "FE2VI_RPC_URL");
+        if heist.is_empty() || rpc.is_empty() {
+            return Err(());
+        }
+        let args = serde_json::json!({ "game_id": match_id });
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&args).map_err(|_| ())?);
+        let (status, text) = rpc_exchange(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": heist,
+                "method_name": "get_heist",
+                "args_base64": encoded,
+            }),
+        )
+        .await
+        .map_err(|_| ())?;
+        if status >= 400 {
+            return Err(());
+        }
+        let view = contract_result_text(&text).map_err(|_| ())?;
+        if view.trim() == "null" {
+            return Err(());
+        }
+        let creator = pull_json_string(&view, "creator");
+        let pot_yocto = crate::vault::pull_u128(&view, "pot_yocto").ok_or(())?;
+        Ok(PotFacts { creator, pot_yocto })
     }
 
     async fn heist_pot(feed: &SpectatorFeed, match_id: &str) -> crate::vault::PotAuthorization {

@@ -3024,7 +3024,33 @@ fn openapi() -> String {
                     "type": "object",
                     "properties": {
                         "error": { "type": "string" },
-                        "message": { "type": "string" }
+                        "message": { "type": "string" },
+                        "settled": { "type": "boolean" }
+                    }
+                },
+                "VaultReceiptRequest": {
+                    "type": "object",
+                    "required": ["txHash", "senderAccountId"],
+                    "properties": {
+                        "txHash": { "type": "string", "description": "FINAL transaction hash. A missing or malformed hash is 400 and is not a chain outage." },
+                        "senderAccountId": { "type": "string", "description": "Account that signed settle_vault." }
+                    }
+                },
+                "VaultPot": {
+                    "type": "object",
+                    "properties": {
+                        "outcome": { "type": "string", "enum": ["win", "draw", "cancel", "unmapped"] },
+                        "rule": { "type": "string", "description": "winner-takes-all, equal-split, or creator-refund." },
+                        "payRule": { "type": "string" },
+                        "settlementMethod": { "type": "string", "description": "settle_vault. This is not permissionless resolve()." },
+                        "contractWouldAcceptResolve": { "type": "boolean", "description": "False for settle_vault. It only describes resolve()." },
+                        "finality": { "type": "string", "description": "FINAL after the receipt is accepted." },
+                        "pays": { "type": "boolean", "description": "True means this receipt already paid. A replay sends no transaction." },
+                        "settled": { "type": "boolean" },
+                        "txHash": { "type": "string" },
+                        "creator": { "type": "string" },
+                        "winner": { "type": "string" },
+                        "participants": { "type": "array", "items": { "type": "string" } }
                     }
                 }
             }
@@ -3069,6 +3095,20 @@ fn openapi() -> String {
                 "delete": { "operationId": "leaveQueue", "security": [{ "bearer": [] }] }
             },
             "/v1/matches/{matchId}": { "get": { "operationId": "match" } },
+            "/v1/internal/vault/matches/{matchId}/receipt": {
+                "post": {
+                    "operationId": "recordVaultReceipt",
+                    "security": [{ "bearer": [] }],
+                    "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultReceiptRequest" } } } },
+                    "responses": {
+                        "200": { "description": "Same transaction. settled true means it already paid.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultPot" } } } },
+                        "400": { "description": "Missing or malformed hash or sender.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+                        "404": { "description": "Unknown match or transaction.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+                        "409": { "description": "Wrong game, payee, outcome, amount, nonfinal, or failed receipt. A different hash does not replace a settled record.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+                        "503": { "description": "The receipt reader or the pot view could not be reached. This is not proof the receipt was rejected.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+                    }
+                }
+            },
             "/v1/matches/{matchId}/actions": { "post": { "operationId": "act", "security": [{ "bearer": [] }] } },
             "/v1/matches/{matchId}/react": { "post": { "operationId": "reactToMatch" } },
             "/v1/war/challenges/sandbox-page": { "get": { "operationId": "sandboxPage" } },

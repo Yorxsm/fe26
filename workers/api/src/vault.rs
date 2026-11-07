@@ -80,9 +80,18 @@ pub struct PotAuthorization {
     pub outcome: String,
     #[serde(default)]
     pub reason: String,
-    /// `winner-takes-all` for a Vault result. Empty for an action-score resolve check.
+    /// Pay rule for this result: `winner-takes-all`, `equal-split`, or `creator-refund`.
     #[serde(default)]
     pub rule: String,
+    /// Same value as `rule` for a Vault result. Empty for an action-score resolve check.
+    #[serde(default)]
+    pub pay_rule: String,
+    /// `settle_vault` for a Vault result. Empty when this row is only a resolve() check.
+    #[serde(default)]
+    pub settlement_method: String,
+    /// `FINAL` only after the matching settlement receipt is accepted.
+    #[serde(default)]
+    pub finality: String,
     #[serde(default)]
     pub winner: String,
     #[serde(default)]
@@ -550,7 +559,11 @@ impl VaultMatch {
             "results": results,
             "rounds": self.round_results(handles),
             "revealed": self.ended,
-            "pot": self.pot,
+            "pot": self.pot.as_ref().map(|pot| {
+                let mut pot = pot.clone();
+                normalize_vault_pot(&mut pot);
+                pot
+            }),
         })
     }
 
@@ -568,12 +581,12 @@ impl VaultMatch {
             || self
                 .pot
                 .as_ref()
-                .is_some_and(|pot| pot.rule == "winner-takes-all")
+                .is_some_and(|pot| pot.settlement_method == "settle_vault")
         {
             return;
         }
         let mut pot = stored_pot(match_id);
-        pot.rule = "winner-takes-all".to_string();
+        pot.settlement_method = "settle_vault".to_string();
         pot.pays = false;
         pot.contract_would_accept_resolve = false;
         let mapped = seats.iter().all(|(_, _, near)| near.is_some());
@@ -592,11 +605,15 @@ impl VaultMatch {
             Ok(fe2vi_core::VaultPotCall::Win { winner }) => {
                 pot.outcome = "win".to_string();
                 pot.winner = winner;
-                pot.reason = "The unique high score takes the whole testnet pot through factory settle_vault. Arena points are not NEAR. A second settlement is already resolved.".to_string();
+                pot.rule = "winner-takes-all".to_string();
+                pot.pay_rule = pot.rule.clone();
+                pot.reason = "The unique high score takes the whole testnet pot through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
             }
             Ok(fe2vi_core::VaultPotCall::Draw) => {
                 pot.outcome = "draw".to_string();
-                pot.reason = "Tied scores split the testnet pot equally through factory settle_vault. Arena points are not NEAR. A second settlement is already resolved.".to_string();
+                pot.rule = "equal-split".to_string();
+                pot.pay_rule = pot.rule.clone();
+                pot.reason = "Tied scores split the testnet pot equally through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
             }
             Ok(fe2vi_core::VaultPotCall::Cancel) | Err(_) => {
                 pot.outcome = "unmapped".to_string();
@@ -641,12 +658,142 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         reason: "The contract view has not been read. A stored match row is not a payout."
             .to_string(),
         rule: String::new(),
+        pay_rule: String::new(),
+        settlement_method: String::new(),
+        finality: String::new(),
         winner: String::new(),
         participants: Vec::new(),
         settled: false,
         tx_hash: String::new(),
         creator: String::new(),
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn fill_creator(body: &str, creator: &str) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let pot = value.pointer_mut("/vault/pot")?;
+    if pot
+        .get("creator")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .is_empty()
+    {
+        pot["creator"] = serde_json::Value::String(creator.to_string());
+    }
+    serde_json::to_string(&value).ok()
+}
+
+pub fn normalize_vault_pot(pot: &mut PotAuthorization) {
+    let Some(rule) = pay_rule_for(&pot.outcome) else {
+        return;
+    };
+    pot.rule = rule.to_string();
+    pot.pay_rule = rule.to_string();
+    pot.settlement_method = "settle_vault".to_string();
+    pot.contract_would_accept_resolve = false;
+    if pot.settled {
+        pot.finality = "FINAL".to_string();
+        pot.pays = true;
+        pot.reason = "pays is true because this FINAL settle_vault receipt already paid. A replay sends no transaction. contractWouldAcceptResolve is only the permissionless resolve() check and stays false on this path.".to_string();
+    }
+}
+
+fn pay_rule_for(outcome: &str) -> Option<&'static str> {
+    match outcome {
+        "win" => Some("winner-takes-all"),
+        "draw" => Some("equal-split"),
+        "cancel" => Some("creator-refund"),
+        _ => None,
+    }
+}
+
+/// Body checks that do not read the chain. A bad hash is not a chain outage.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn parse_receipt_request(
+    body: &serde_json::Value,
+) -> Result<(String, String), (u16, &'static str)> {
+    let tx_hash = body
+        .get("txHash")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if tx_hash.is_empty() {
+        return Err((400, "tx hash required"));
+    }
+    if !valid_tx_hash(tx_hash) {
+        return Err((400, "tx hash is malformed"));
+    }
+    let sender = body
+        .get("senderAccountId")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    if sender.is_empty() {
+        return Err((400, "sender account required"));
+    }
+    if !(2..=64).contains(&sender.len())
+        || !sender
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return Err((400, "sender account is malformed"));
+    }
+    Ok((tx_hash.to_string(), sender.to_string()))
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn valid_tx_hash(hash: &str) -> bool {
+    let bytes = hash.as_bytes();
+    (43..=44).contains(&bytes.len())
+        && bytes.iter().all(|byte| {
+            matches!(
+                byte,
+                b'1'..=b'9' | b'A'..=b'H' | b'J'..=b'N' | b'P'..=b'Z' | b'a'..=b'k' | b'm'..=b'z'
+            )
+        })
+}
+
+/// Classify one tx-status HTTP body. Transport failure is 503. A missing or
+/// rejected transaction is a 4xx and does not prove the receipt was checked.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn read_tx_response(
+    http_status: u16,
+    body: &str,
+) -> Result<serde_json::Value, (u16, &'static str)> {
+    if http_status == 0 || http_status >= 500 {
+        return Err((503, "The settlement receipt could not be read."));
+    }
+    let value: serde_json::Value = match serde_json::from_str(body) {
+        Ok(value) => value,
+        Err(_) if http_status >= 400 => {
+            return Err((503, "The settlement receipt could not be read."))
+        }
+        Err(_) => return Err((400, "tx status was not readable")),
+    };
+    if let Some(err) = value.get("error").filter(|item| !item.is_null()) {
+        let message = err
+            .get("data")
+            .and_then(|data| data.as_str())
+            .or_else(|| err.get("message").and_then(|item| item.as_str()))
+            .unwrap_or("");
+        let lower = message.to_ascii_lowercase();
+        if lower.contains("doesn't exist")
+            || lower.contains("does not exist")
+            || lower.contains("unknown transaction")
+            || lower.contains("db not found")
+        {
+            return Err((404, "transaction was not found"));
+        }
+        if http_status >= 400 || lower.contains("invalid") || lower.contains("parse") {
+            return Err((400, "tx hash was rejected"));
+        }
+        return Err((400, "tx hash was rejected"));
+    }
+    if http_status >= 400 {
+        return Err((503, "The settlement receipt could not be read."));
+    }
+    Ok(value.get("result").cloned().unwrap_or(value))
 }
 
 /// Accept a settlement only when the FINAL receipt pays the recorded result.
@@ -656,24 +803,25 @@ pub fn confirm_vault_receipt(
     pot: &PotAuthorization,
     tx_hash: &str,
     tx_result: &serde_json::Value,
+    pot_yocto: u128,
 ) -> Result<PotAuthorization, &'static str> {
     let tx_hash = tx_hash.trim();
     if tx_hash.is_empty() {
         return Err("tx hash required");
     }
+    if !valid_tx_hash(tx_hash) {
+        return Err("tx hash is malformed");
+    }
     if pot.settled {
         return if pot.tx_hash == tx_hash {
-            Ok(pot.clone())
+            let mut same = pot.clone();
+            normalize_vault_pot(&mut same);
+            Ok(same)
         } else {
             Err("already settled")
         };
     }
-    if pot.rule != "winner-takes-all"
-        || matches!(
-            pot.outcome.as_str(),
-            "unmapped" | "awaiting_contract_view" | ""
-        )
-    {
+    if pay_rule_for(&pot.outcome).is_none() {
         return Err("match is not ready to settle");
     }
     let status = tx_result
@@ -682,6 +830,10 @@ pub fn confirm_vault_receipt(
     let success = status
         .map(|value| value.get("SuccessValue").is_some() || value.get("successValue").is_some())
         .unwrap_or(false);
+    if status.is_some_and(|value| value.get("Failure").is_some() || value.get("failure").is_some())
+    {
+        return Err("transaction failed");
+    }
     if !success {
         return Err("transaction is not final success");
     }
@@ -726,8 +878,12 @@ pub fn confirm_vault_receipt(
         "cancel" => fe2vi_core::VaultPotCall::Cancel,
         _ => return Err("match is not ready to settle"),
     };
-    let mut expected = fe2vi_core::vault_pot_shares(total, &pot.creator, &pot.participants, &call)
-        .map_err(|_| "receipt payees do not match the match")?;
+    if pot_yocto == 0 || total != pot_yocto {
+        return Err("receipt amount does not match the pot");
+    }
+    let mut expected =
+        fe2vi_core::vault_pot_shares(pot_yocto, &pot.creator, &pot.participants, &call)
+            .map_err(|_| "receipt payees do not match the match")?;
     expected.sort();
     got.sort();
     if got != expected {
@@ -737,8 +893,7 @@ pub fn confirm_vault_receipt(
     next.settled = true;
     next.pays = true;
     next.tx_hash = tx_hash.to_string();
-    next.reason =
-        "FINAL vault_settled receipt matches this result. A replay does not pay again.".to_string();
+    normalize_vault_pot(&mut next);
     Ok(next)
 }
 
@@ -846,6 +1001,24 @@ pub fn replace_pot(body: &str, pot: &PotAuthorization) -> Option<String> {
     value.pointer("/vault/pot")?;
     value["vault"]["pot"] = serde_json::to_value(pot).ok()?;
     serde_json::to_string(&value).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn pull_u128(text: &str, field: &str) -> Option<u128> {
+    let needle = format!("\"{field}\"");
+    let index = text.find(&needle)?;
+    let rest = text[index + needle.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"').unwrap_or(rest);
+    let digits: String = rest
+        .chars()
+        .take_while(|byte| byte.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -1003,7 +1176,12 @@ mod tests {
                 ("b".into(), 2, Some("bob.testnet".into())),
             ],
         );
-        assert_eq!(draw.pot.unwrap().outcome, "draw");
+        let draw = draw.pot.unwrap();
+        assert_eq!(draw.outcome, "draw");
+        assert_eq!(draw.rule, "equal-split");
+        assert_eq!(draw.pay_rule, "equal-split");
+        assert_eq!(draw.settlement_method, "settle_vault");
+        assert!(!draw.contract_would_accept_resolve);
         let mut missing = VaultMatch::start(&["a".into()]);
         missing.ended = true;
         missing.seal_vault_result("mt_none", &[("a".into(), 1, None)]);
@@ -1026,13 +1204,17 @@ mod tests {
                 }
             }]
         });
-        let settled = confirm_vault_receipt(&pot, "tx1", &tx).unwrap();
+        let settled = confirm_vault_receipt(&pot, &"A".repeat(44), &tx, 10).unwrap();
         assert!(settled.settled && settled.pays);
-        assert_eq!(settled.tx_hash, "tx1");
-        let again = confirm_vault_receipt(&settled, "tx1", &tx).unwrap();
-        assert_eq!(again, settled);
+        let hash = "A".repeat(44);
+        assert_eq!(settled.tx_hash, hash);
+        assert_eq!(settled.finality, "FINAL");
+        assert_eq!(settled.settlement_method, "settle_vault");
+        assert!(!settled.contract_would_accept_resolve);
+        let again = confirm_vault_receipt(&settled, &hash, &tx, 10).unwrap();
+        assert_eq!(again.tx_hash, hash);
         assert_eq!(
-            confirm_vault_receipt(&settled, "tx2", &tx).unwrap_err(),
+            confirm_vault_receipt(&settled, &"B".repeat(44), &tx, 10).unwrap_err(),
             "already settled"
         );
         let wrong = serde_json::json!({
@@ -1045,14 +1227,144 @@ mod tests {
             }]
         });
         assert_eq!(
-            confirm_vault_receipt(&pot, "tx3", &wrong).unwrap_err(),
+            confirm_vault_receipt(&pot, &"C".repeat(44), &wrong, 10).unwrap_err(),
             "receipt payees do not match the match"
         );
         pot.outcome = "unmapped".to_string();
         assert_eq!(
-            confirm_vault_receipt(&pot, "tx4", &tx).unwrap_err(),
+            confirm_vault_receipt(&pot, &"D".repeat(44), &tx, 10).unwrap_err(),
             "match is not ready to settle"
         );
+    }
+
+    fn captured(hash_game: &str, outcome: &str, payouts: &str) -> serde_json::Value {
+        let line = format!(
+            "EVENT_JSON:{{\"event\":\"vault_settled\",\"data\":[{{\"id\":\"{hash_game}\",\"outcome\":\"{outcome}\",\"payouts\":{payouts}}}]}}"
+        );
+        serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{
+                "outcome": {"status": {"SuccessValue": ""}, "logs": [line]}
+            }]
+        })
+    }
+
+    #[test]
+    fn captured_final_receipts_reject_a_cross_match_and_a_wrong_amount() {
+        // Read-only copies of the FINAL events from
+        // 8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61 and
+        // AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy.
+        // This is not a new transaction and not a production HTTP call.
+        let pot_yocto = 20_000_000_000_000_000_000_000_u128;
+        let win_tx = captured(
+            "mt_730a1559a8f36fd0",
+            "win",
+            r#"[{"account":"fe2vidisp7a3c.testnet","amount":"20000000000000000000000"}]"#,
+        );
+        let draw_tx = captured(
+            "mt_41f001a70efa3af0",
+            "draw",
+            r#"[{"account":"fe2vibuyer7a3c.testnet","amount":"10000000000000000000000"},{"account":"fe2vidisp7a3c.testnet","amount":"10000000000000000000000"}]"#,
+        );
+        let mut win = stored_pot("mt_730a1559a8f36fd0");
+        win.outcome = "win".to_string();
+        win.winner = "fe2vidisp7a3c.testnet".to_string();
+        win.participants = vec![
+            "fe2vidisp7a3c.testnet".into(),
+            "fe2vibuyer7a3c.testnet".into(),
+        ];
+        win.creator = "fe2vidisp7a3c.testnet".to_string();
+        let mut draw = stored_pot("mt_41f001a70efa3af0");
+        draw.outcome = "draw".to_string();
+        draw.participants = win.participants.clone();
+        draw.creator = win.creator.clone();
+        let win_hash = "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61";
+        let draw_hash = "AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy";
+        let settled = confirm_vault_receipt(&win, win_hash, &win_tx, pot_yocto).unwrap();
+        assert!(settled.settled);
+        assert_eq!(settled.rule, "winner-takes-all");
+        assert_eq!(
+            confirm_vault_receipt(&settled, win_hash, &win_tx, pot_yocto)
+                .unwrap()
+                .tx_hash,
+            win_hash
+        );
+        assert_eq!(
+            confirm_vault_receipt(&win, draw_hash, &draw_tx, pot_yocto).unwrap_err(),
+            "receipt is for a different game"
+        );
+        assert_eq!(
+            confirm_vault_receipt(&draw, win_hash, &win_tx, pot_yocto).unwrap_err(),
+            "receipt is for a different game"
+        );
+        let short = captured(
+            "mt_730a1559a8f36fd0",
+            "win",
+            r#"[{"account":"fe2vidisp7a3c.testnet","amount":"1"}]"#,
+        );
+        assert_eq!(
+            confirm_vault_receipt(&win, win_hash, &short, pot_yocto).unwrap_err(),
+            "receipt amount does not match the pot"
+        );
+        let failed = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{
+                "outcome": {"status": {"Failure": {"ActionError": {}}}, "logs": []}
+            }]
+        });
+        assert_eq!(
+            confirm_vault_receipt(&win, win_hash, &failed, pot_yocto).unwrap_err(),
+            "vault_settled receipt missing"
+        );
+        let pending = serde_json::json!({"status": {}, "receipts_outcome": []});
+        assert_eq!(
+            confirm_vault_receipt(&win, win_hash, &pending, pot_yocto).unwrap_err(),
+            "transaction is not final success"
+        );
+        let other_event = serde_json::json!({
+            "status": {"SuccessValue": ""},
+            "receipts_outcome": [{
+                "outcome": {
+                    "status": {"SuccessValue": ""},
+                    "logs": ["EVENT_JSON:{\"event\":\"game_resolved\",\"data\":[{\"id\":\"mt_730a1559a8f36fd0\"}]}"]
+                }
+            }]
+        });
+        assert_eq!(
+            confirm_vault_receipt(&win, win_hash, &other_event, pot_yocto).unwrap_err(),
+            "vault_settled receipt missing"
+        );
+    }
+
+    #[test]
+    fn a_bad_receipt_request_is_not_a_chain_outage() {
+        assert_eq!(
+            parse_receipt_request(&serde_json::json!({})).unwrap_err().0,
+            400
+        );
+        assert_eq!(
+            parse_receipt_request(&serde_json::json!({"txHash":"not-a-hash","senderAccountId":"fe2vidisp7a3c.testnet"}))
+                .unwrap_err()
+                .0,
+            400
+        );
+        assert_eq!(read_tx_response(0, "").unwrap_err().0, 503);
+        assert_eq!(
+            read_tx_response(
+                200,
+                r#"{"error":{"message":"Server error","data":"Transaction doesn't exist"}}"#
+            )
+            .unwrap_err(),
+            (404, "transaction was not found")
+        );
+        assert_eq!(
+            read_tx_response(400, r#"{"error":{"message":"Parse error"}}"#)
+                .unwrap_err()
+                .0,
+            400
+        );
+        let ok = read_tx_response(200, r#"{"result":{"status":{"SuccessValue":""}}}"#).unwrap();
+        assert!(ok.get("status").is_some());
     }
 
     #[test]
