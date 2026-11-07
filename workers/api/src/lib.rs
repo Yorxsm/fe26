@@ -360,12 +360,17 @@ mod edge {
                                 );
                             }
                             Ok(None) => {}
-                            Err(_) => {
+                            Err(failure) => {
+                                let message =
+                                    format!("Could not read the passport contract ({failure}).");
+                                let body = serde_json::json!({
+                                    "error": "passport_lookup_unavailable",
+                                    "message": message,
+                                    "source": "unavailable",
+                                })
+                                .to_string();
                                 return with_cors(
-                                    Response::ok(
-                                        r#"{"error":"passport_lookup_unavailable","message":"Could not read the passport contract. Try again."}"#,
-                                    )?
-                                    .with_status(503),
+                                    Response::ok(body)?.with_status(503),
                                     "application/json",
                                 );
                             }
@@ -1249,7 +1254,7 @@ mod edge {
     ) -> Result<serde_json::Value> {
         let encoded = base64::engine::general_purpose::STANDARD
             .encode(serde_json::to_vec(&args).map_err(|err| Error::RustError(err.to_string()))?);
-        let response = rpc_call(
+        let (status, text) = rpc_exchange(
             url,
             "query",
             serde_json::json!({
@@ -1261,25 +1266,15 @@ mod edge {
             }),
         )
         .await?;
-        if response.get("error").is_some() || !response["result"]["error"].is_null() {
-            return Err(Error::RustError("view failed".into()));
-        }
-        let Some(rows) = response["result"]["result"].as_array() else {
-            return Err(Error::RustError("view had no result".into()));
-        };
-        let bytes: Vec<u8> = rows
-            .iter()
-            .filter_map(serde_json::Value::as_u64)
-            .map(|value| value as u8)
-            .collect();
-        serde_json::from_slice(&bytes).map_err(|err| Error::RustError(err.to_string()))
+        indexer::interpret_rpc_query(status, &text)
+            .map_err(|failure| Error::RustError(failure.label()))
     }
 
-    async fn rpc_call(
+    async fn rpc_exchange(
         url: &str,
         method: &str,
         params: serde_json::Value,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<(u16, String)> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "fe2vi",
@@ -1295,8 +1290,21 @@ mod edge {
         init.with_body(Some(wasm_bindgen::JsValue::from_str(&body)));
         let request = Request::new_with_init(url, &init)?;
         let mut response = Fetch::Request(request).send().await?;
+        let status = response.status_code();
         let text = response.text().await?;
-        serde_json::from_str(&text).map_err(|err| Error::RustError(err.to_string()))
+        Ok((status, text))
+    }
+
+    async fn rpc_call(
+        url: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let (status, text) = rpc_exchange(url, method, params).await?;
+        if status >= 400 {
+            return Err(Error::RustError(format!("http {status}")));
+        }
+        serde_json::from_str(&text).map_err(|_| Error::RustError("decode".into()))
     }
 
     async fn reconcile_token(
@@ -1337,7 +1345,7 @@ mod edge {
         let args = serde_json::to_vec(&serde_json::json!({ "token_id": token_id }))
             .map_err(|err| Error::RustError(err.to_string()))?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(args);
-        let response = rpc_call(
+        let (status, text) = rpc_exchange(
             &rpc,
             "query",
             serde_json::json!({
@@ -1348,24 +1356,13 @@ mod edge {
                 "args_base64": encoded,
             }),
         )
-        .await?;
-        if !response["result"]["error"].is_null() {
-            return Ok(None);
+        .await
+        .map_err(|_| Error::RustError("transport".into()))?;
+        match indexer::interpret_rpc_query(status, &text) {
+            Ok(value) if value.is_null() => Ok(None),
+            Ok(value) => Ok(Some(value)),
+            Err(failure) => Err(Error::RustError(failure.label())),
         }
-        let Some(rows) = response["result"]["result"].as_array() else {
-            return Ok(None);
-        };
-        let bytes: Vec<u8> = rows
-            .iter()
-            .filter_map(serde_json::Value::as_u64)
-            .map(|value| value as u8)
-            .collect();
-        if bytes.is_empty() {
-            return Ok(None);
-        }
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|err| Error::RustError(err.to_string()))
     }
 
     fn socket_tag(game_id: &str) -> String {
@@ -1426,11 +1423,11 @@ mod edge {
                     match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
                         Ok(value) if value.is_null() => None,
                         Ok(value) => Some(value),
-                        Err(_) => {
+                        Err(error) => {
                             return market_error(
                                 503,
                                 "market_unavailable",
-                                "Could not read the last settlement.",
+                                &format!("Could not read the last settlement ({error})."),
                             )
                         }
                     };
@@ -1458,12 +1455,12 @@ mod edge {
             .await
             {
                 Ok(value) => value,
-                Err(_) => {
+                Err(error) => {
                     return market_error(
                         503,
                         "market_unavailable",
-                        "Could not read passport tokens.",
-                    )
+                        &format!("Could not read passport tokens ({error})."),
+                    );
                 }
             };
             let Some(tokens) = tokens.as_array() else {
@@ -1492,11 +1489,11 @@ mod edge {
                             listed.push(row);
                         }
                     }
-                    Err(_) => {
+                    Err(error) => {
                         return market_error(
                             503,
                             "market_unavailable",
-                            "Could not read a market listing.",
+                            &format!("Could not read a market listing ({error})."),
                         );
                     }
                 }
@@ -1505,11 +1502,11 @@ mod edge {
                 match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
                     Ok(value) if value.is_null() => None,
                     Ok(value) => Some(value),
-                    Err(_) => {
+                    Err(error) => {
                         return market_error(
                             503,
                             "market_unavailable",
-                            "Could not read the last settlement.",
+                            &format!("Could not read the last settlement ({error})."),
                         )
                     }
                 };

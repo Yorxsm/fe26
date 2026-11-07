@@ -177,12 +177,38 @@ struct Config {
     relay_key: Option<String>,
 }
 
+fn redact_line(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for name in ["FE2VI_SIGNER_SECRET_KEY", "FE2VI_PASSPORT_RELAY_KEY"] {
+        if let Ok(value) = std::env::var(name) {
+            if value.len() >= 8 {
+                redacted = redacted.replace(&value, "[redacted]");
+            }
+        }
+    }
+    let mut out = String::new();
+    let mut rest = redacted.as_str();
+    while let Some(index) = rest.find("ed25519:") {
+        out.push_str(&rest[..index]);
+        out.push_str("ed25519:[redacted]");
+        let after = &rest[index + "ed25519:".len()..];
+        let end = after
+            .char_indices()
+            .find(|(_, ch)| !ch.is_ascii_alphanumeric())
+            .map(|(offset, _)| offset)
+            .unwrap_or(after.len());
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn main() {
     let cli = Cli::parse();
     match run(&config_from_env(), cli.command) {
-        Ok(output) => println!("{output}"),
+        Ok(output) => println!("{}", redact_line(&output)),
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("error: {}", redact_line(&err));
             std::process::exit(1);
         }
     }
@@ -700,8 +726,8 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 }
             }
             if let Some(error) = error {
-                eprintln!("passport job {kind} {status}: {error}");
-                complete["error"] = serde_json::json!(error);
+                eprintln!("passport job {kind} {status}: {}", redact_line(&error));
+                complete["error"] = serde_json::json!(redact_line(&error));
             }
             if let Err(err) = api_post(
                 &client,
@@ -709,7 +735,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 key,
                 &complete,
             ) {
-                eprintln!("complete {job_id} failed: {err}");
+                eprintln!("complete {job_id} failed: {}", redact_line(&err));
             }
         }
         let summary = serde_json::json!({
@@ -1016,6 +1042,13 @@ mod tests {
             }
             _ => panic!("expected a function call"),
         }
+    }
+
+    #[test]
+    fn logs_redact_an_ed25519_secret() {
+        let line = redact_line("owner mismatch ed25519:Abcdefghijk123456789 and tail");
+        assert_eq!(line, "owner mismatch ed25519:[redacted] and tail");
+        assert!(!line.contains("Abcdefghijk"));
     }
 
     #[test]

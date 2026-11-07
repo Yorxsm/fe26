@@ -36,6 +36,111 @@ pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
     allow_chain_rpc("mainnet", url)
 }
 
+/// Why a NEAR `query` view could not be decoded. The label is safe to return
+/// to a client: a class, and for a JSON-RPC error the numeric code plus a
+/// short message. It never includes a key or the raw body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RpcViewFailure {
+    pub class: &'static str,
+    pub detail: String,
+}
+
+impl RpcViewFailure {
+    pub fn label(&self) -> String {
+        if self.detail.is_empty() {
+            self.class.to_string()
+        } else {
+            format!("{} {}", self.class, self.detail)
+        }
+    }
+}
+
+fn short_rpc_text(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if out.len() >= 80 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Decode one NEAR `query` HTTP body into the contract's JSON value.
+/// `http_status` 0 means the fetch failed before a status existed.
+pub fn interpret_rpc_query(
+    http_status: u16,
+    body: &str,
+) -> Result<serde_json::Value, RpcViewFailure> {
+    let value: serde_json::Value = match serde_json::from_str(body) {
+        Ok(value) => value,
+        Err(_) if http_status == 0 => {
+            return Err(RpcViewFailure {
+                class: "transport",
+                detail: String::new(),
+            })
+        }
+        Err(_) if http_status >= 400 => {
+            return Err(RpcViewFailure {
+                class: "http",
+                detail: http_status.to_string(),
+            })
+        }
+        Err(_) => {
+            return Err(RpcViewFailure {
+                class: "decode",
+                detail: String::new(),
+            })
+        }
+    };
+    if let Some(err) = value.get("error").filter(|item| !item.is_null()) {
+        let code = err
+            .get("code")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let message = err
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("rpc error");
+        return Err(RpcViewFailure {
+            class: "jsonrpc",
+            detail: format!("{code} {}", short_rpc_text(message)),
+        });
+    }
+    if http_status >= 400 {
+        return Err(RpcViewFailure {
+            class: "http",
+            detail: http_status.to_string(),
+        });
+    }
+    let Some(rows) = value
+        .pointer("/result/result")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Err(RpcViewFailure {
+            class: "shape",
+            detail: String::new(),
+        });
+    };
+    let bytes: Vec<u8> = rows
+        .iter()
+        .filter_map(serde_json::Value::as_u64)
+        .map(|item| item as u8)
+        .collect();
+    if bytes.is_empty() {
+        return Err(RpcViewFailure {
+            class: "shape",
+            detail: "empty".into(),
+        });
+    }
+    serde_json::from_slice(&bytes).map_err(|_| RpcViewFailure {
+        class: "decode",
+        detail: String::new(),
+    })
+}
+
 /// Heights still to scan. The window is bounded so a cron tick stays small.
 pub fn plan_heights(cursor: u64, head: u64) -> Vec<u64> {
     if head == 0 {
@@ -222,6 +327,19 @@ mod tests {
         assert!(allow_chain_rpc("testnet", "https://rpc.mainnet.near.org").is_err());
         assert!(allow_chain_rpc("mainnet", "https://rpc.testnet.near.org").is_err());
         assert!(allow_chain_rpc("", "https://rpc.testnet.near.org").is_err());
+        let rejected = r#"{"jsonrpc":"2.0","error":{"name":"REQUEST_VALIDATION_ERROR","cause":{"name":"PARSE_ERROR"},"code":-32700,"message":"Parse error","data":"Failed parsing args: unknown variant `view`, expected `call_function`"},"id":"fe2vi"}"#;
+        let failure = interpret_rpc_query(400, rejected).unwrap_err();
+        assert_eq!(failure.class, "jsonrpc");
+        assert!(failure.label().contains("-32700"));
+        assert!(!failure.label().contains("ed25519"));
+        let missing = interpret_rpc_query(0, "").unwrap_err();
+        assert_eq!(missing.class, "transport");
+        let ok = interpret_rpc_query(
+            200,
+            r#"{"jsonrpc":"2.0","result":{"result":[110,117,108,108],"logs":[]},"id":"fe2vi"}"#,
+        )
+        .unwrap();
+        assert!(ok.is_null());
         assert_eq!(plan_heights(0, 20), (13..=20).collect::<Vec<_>>());
         assert_eq!(plan_heights(20, 20), Vec::<u64>::new());
 
