@@ -502,6 +502,11 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               <RotateCw aria-hidden="true" strokeWidth={1.75} />
               Reload the city
             </button>
+            <a className="btn btn-secondary" href="/games/heist-night">Vault</a>
+            <a className="btn btn-secondary" href="/games/trading-cup">Cup</a>
+            <a className="btn btn-secondary" href="/village">Village</a>
+            <a className="btn btn-secondary" href="/war-room">War</a>
+            <a className="btn btn-secondary" href="/market">Market</a>
             <a className="btn btn-secondary" href="/leaderboard">
               <Trophy aria-hidden="true" strokeWidth={1.75} />
               Leaderboard

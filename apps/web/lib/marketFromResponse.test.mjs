@@ -6,7 +6,7 @@ test("a live empty book is not replaced with samples", () => {
   const view = marketFromResponse(true, {
     listings: [],
     sales: [],
-    contract: "market.fe2vi.testnet",
+    contract: "market.fe2vidisp7a3c.testnet",
     network: "testnet",
     source: "chain",
     stats: {
@@ -19,7 +19,7 @@ test("a live empty book is not replaced with samples", () => {
   });
   assert.equal(view.source, "chain");
   assert.equal(view.listings.length, 0);
-  assert.equal(view.contract, "market.fe2vi.testnet");
+  assert.equal(view.contract, "market.fe2vidisp7a3c.testnet");
   assert.equal(JSON.stringify(view).includes("Launch Stock"), false);
 });
 

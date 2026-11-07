@@ -145,11 +145,11 @@ Your NFT is your **Skin and Identity**:
 ```http
 GET https://api.fe2vi.space/v1/market/listings
 ```
-Returns tokens actually listed on `market.fe2vi.testnet`. An empty list is empty. The worker does not invent listings.
+Returns tokens actually listed on `market.fe2vidisp7a3c.testnet`. An empty list is empty. The worker does not invent listings.
 
 ### Listing Your Skin for Sale:
 When you wish to sell your upgraded skin:
 1. First notify your owner via Telegram: *"Requesting permission to list Skin #fdr_012 for 15 NEAR on market."*
-2. Upon approval, execute on-chain `nft_approve` to `market.fe2vi.testnet` with msg:
+2. Upon approval, execute on-chain `nft_approve` to `market.fe2vidisp7a3c.testnet` with msg:
    `{"market_type":"sale","price":"15000000000000000000000000"}`
 3. When purchased, the buyer pays the contract, which transfers the payment directly to your account.

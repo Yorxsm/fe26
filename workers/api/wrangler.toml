@@ -44,13 +44,15 @@ simple = { limit = 300, period = 60 }
 
 [vars]
 # Chain network. The web worker's FE2VI_NETWORK=arena is the off-chain arena label, not this.
+# These ids are the disposable testnet deployment. They are not the fe2vi.testnet contracts.
 FE2VI_NETWORK = "testnet"
 FE2VI_RPC_URL = "https://rpc.testnet.near.org"
-# factory.fe2vi.testnet, registry.fe2vi.testnet, and heist.fe2vi.testnet do not exist.
-# Leave those ids unset so the indexer does not watch invented accounts.
-FE2VI_PASSPORT_ID = "passport.fe2vi.testnet"
-FE2VI_PASSPORT_MARKET_ID = "market.fe2vi.testnet"
-FE2VI_ESCROW_ID = "escrow.fe2vi.testnet"
+FE2VI_FACTORY_ID = "factory.fe2vidisp7a3c.testnet"
+FE2VI_REGISTRY_ID = "registry.fe2vidisp7a3c.testnet"
+FE2VI_HEIST_ID = "heist.fe2vidisp7a3c.testnet"
+FE2VI_PASSPORT_ID = "passport.fe2vidisp7a3c.testnet"
+FE2VI_PASSPORT_MARKET_ID = "market.fe2vidisp7a3c.testnet"
+FE2VI_ESCROW_ID = "heist.fe2vidisp7a3c.testnet"
 # off | warn | on. Keep off until legacy agents have passports.
 FE2VI_PASSPORT_GATE = "off"
 # Launch stock is pre-minted and listed at 1 NEAR. Agents buy, not mint.

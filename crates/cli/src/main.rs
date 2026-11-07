@@ -15,8 +15,8 @@ use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEA
 use crate::tx::SignedCall;
 
 const DEFAULT_RPC: &str = "https://rpc.testnet.near.org";
-const DEFAULT_PASSPORT: &str = "passport.fe2vi.testnet";
-const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vi.testnet";
+const DEFAULT_PASSPORT: &str = "passport.fe2vidisp7a3c.testnet";
+const DEFAULT_PASSPORT_MARKET: &str = "market.fe2vidisp7a3c.testnet";
 const PASSPORT_MINT_DEPOSIT_YOCTO: u128 = ONE_NEAR / 50;
 
 #[derive(Parser, Debug)]
@@ -194,8 +194,10 @@ fn config_from_env() -> Config {
         signer_secret: std::env::var("FE2VI_SIGNER_SECRET_KEY")
             .ok()
             .filter(|value| !value.is_empty()),
-        registry_id: std::env::var("FE2VI_REGISTRY_ID").unwrap_or_default(),
-        heist_id: std::env::var("FE2VI_HEIST_ID").unwrap_or_default(),
+        registry_id: std::env::var("FE2VI_REGISTRY_ID")
+            .unwrap_or_else(|_| "registry.fe2vidisp7a3c.testnet".into()),
+        heist_id: std::env::var("FE2VI_HEIST_ID")
+            .unwrap_or_else(|_| "heist.fe2vidisp7a3c.testnet".into()),
         passport_id: std::env::var("FE2VI_PASSPORT_ID")
             .unwrap_or_else(|_| DEFAULT_PASSPORT.to_string()),
         passport_market_id: std::env::var("FE2VI_PASSPORT_MARKET_ID")

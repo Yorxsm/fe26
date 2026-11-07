@@ -8,7 +8,7 @@ export type ChainEconomy = {
 export function configuredEconomy(): ChainEconomy {
   return {
     network: process.env.NEXT_PUBLIC_FE2VI_CHAIN || "testnet",
-    market: process.env.NEXT_PUBLIC_FE2VI_MARKET_ID || "market.fe2vi.testnet",
+    market: process.env.NEXT_PUBLIC_FE2VI_MARKET_ID || "market.fe2vidisp7a3c.testnet",
     wallet: process.env.NEXT_PUBLIC_FE2VI_WALLET || "https://testnet.mynearwallet.com",
     explorer: process.env.NEXT_PUBLIC_FE2VI_EXPLORER || "https://testnet.nearblocks.io",
   };

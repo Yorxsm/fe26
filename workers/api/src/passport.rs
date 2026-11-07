@@ -665,7 +665,7 @@ pub fn market_from_chain(
         _ => Vec::new(),
     };
     let blockers = if network == "testnet" {
-        vec!["Factory, registry, and heist accounts are not deployed. Vault, War, Cup, and Village score in the arena API. The escrow contract can report caps, and it cannot open a pot without a factory."]
+        vec!["The shipped factory has no method that opens a game. Vault, War, Cup, and Village score in the arena API. The heist contract can report caps, and a pot cannot be opened without a factory call that this repository does not expose."]
     } else {
         Vec::new()
     };

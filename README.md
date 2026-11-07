@@ -55,9 +55,11 @@ Scored rooms use a passport NFT. The passport carries XP, rank, wins, losses, ma
 | Contract | Network | Account ID | Purpose |
 | --- | --- | --- | --- |
 | Master / Deployer | Testnet | `fe2vi.testnet` | Arena authority & launch inventory custodian |
-| Dynamic Passport | Testnet | `passport.fe2vi.testnet` | NEP-171 dynamic carrier NFT, career records, traits, and bindings |
-| Passport Market | Testnet | `market.fe2vi.testnet` | Fixed-price listings (1 NEAR), 0% platform fee, peer-to-peer settlement |
-| Pot Escrow | Testnet | `escrow.fe2vi.testnet` | Trustless 1v1 match pot escrow with automatic winner payout |
+| Dynamic Passport | Testnet | `passport.fe2vidisp7a3c.testnet` | Disposable NEP-171 passport. The earlier `passport.fe2vi.testnet` deployment was not modified. |
+| Passport Market | Testnet | `market.fe2vidisp7a3c.testnet` | Fixed-price listings, 0% platform fee. `disp_001` is the tested ask. |
+| Registry | Testnet | `registry.fe2vidisp7a3c.testnet` | Binds passports. Not the `fe2vi.testnet` registry. |
+| Factory | Testnet | `factory.fe2vidisp7a3c.testnet` | Caps and delist only. It has no method that opens a pot. |
+| Heist escrow | Testnet | `heist.fe2vidisp7a3c.testnet` | Caps view. A pot cannot be opened because the factory does not call `init_game`. |
 
 Verify all deployed contracts and live listings directly via public NEAR RPC using:
 ```bash
@@ -69,9 +71,10 @@ Buy and claim with the CLI:
 ```bash
 export FE2VI_ACCOUNT_ID=buyer.testnet
 export FE2VI_SIGNER_SECRET_KEY=...
-export FE2VI_PASSPORT_ID=passport.fe2vi.testnet
-export FE2VI_PASSPORT_MARKET_ID=market.fe2vi.testnet
-export FE2VI_ESCROW_ID=escrow.fe2vi.testnet
+export FE2VI_PASSPORT_ID=passport.fe2vidisp7a3c.testnet
+export FE2VI_PASSPORT_MARKET_ID=market.fe2vidisp7a3c.testnet
+export FE2VI_REGISTRY_ID=registry.fe2vidisp7a3c.testnet
+export FE2VI_ESCROW_ID=heist.fe2vidisp7a3c.testnet
 
 fe2vi passport buy --token-id fdr_001 --price 1
 ```
@@ -304,7 +307,7 @@ Over the limit, the API returns 429 `{"error":"rate_limited"}` and `Retry-After`
 - Idempotency rows are removed when the match ends, or after 24 hours.
 - `?now=` changes the clock only in tests, or in a binary compiled with `FE2VI_ALLOW_NOW=1`. Production uses the wall clock.
 - Historical contracts are not part of the running site. `contracts/passport` and `contracts/passport-market` are the live passport contracts.
-- Hyperliquid account reads are live mainnet data. The agent trades that account itself. The API chain network is testnet: `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and `escrow.fe2vi.testnet`. Factory, registry, and heist accounts are not deployed, so those commands stay closed. The web `FE2VI_NETWORK=arena` label is the off-chain arena, not the NEAR network.
+- Hyperliquid account reads are live mainnet data. The agent trades that account itself. The API chain is the disposable testnet deployment under `fe2vidisp7a3c.testnet`. The original `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and `escrow.fe2vi.testnet` contracts were not upgraded. The web `FE2VI_NETWORK=arena` label is the off-chain arena, not the NEAR network. Cup and Village still need the operator's own Hyperliquid account and NEAR Intents grant.
 
 ## Credits
 
