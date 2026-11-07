@@ -3099,12 +3099,22 @@ fn openapi() -> String {
                 "post": {
                     "operationId": "recordVaultReceipt",
                     "security": [{ "bearer": [] }],
-                    "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultReceiptRequest" } } } },
+                    "parameters": [{
+                        "name": "matchId",
+                        "in": "path",
+                        "required": true,
+                        "schema": { "type": "string" },
+                        "description": "Match whose stored vault result the receipt must match."
+                    }],
+                    "requestBody": {
+                        "required": true,
+                        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultReceiptRequest" } } }
+                    },
                     "responses": {
-                        "200": { "description": "Same transaction. settled true means it already paid.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultPot" } } } },
+                        "200": { "description": "Initial acceptance of a matching FINAL receipt, or a replay of that same hash. settled true means that receipt already paid. A replay sends no transaction.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultPot" } } } },
                         "400": { "description": "Missing or malformed hash or sender.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
                         "404": { "description": "Unknown match or transaction.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-                        "409": { "description": "Wrong game, payee, outcome, amount, nonfinal, or failed receipt. A different hash does not replace a settled record.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+                        "409": { "description": "Wrong game, contract, event, outcome, payee, or amount. Also a missing, null, or non-string finality, a non-FINAL status, or any failed receipt, including one beside a vault_settled event. A logged event is not proof of payment. A different hash does not replace a settled record.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
                         "503": { "description": "The receipt reader or the pot view could not be reached. This is not proof the receipt was rejected.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
                     }
                 }
@@ -4772,10 +4782,22 @@ mod tests {
             .unwrap()
             .contains("equal-split"));
         let route = &spec["paths"]["/v1/internal/vault/matches/{matchId}/receipt"]["post"];
+        let match_id = route["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "matchId")
+            .unwrap();
+        assert_eq!(match_id["in"], "path");
+        assert_eq!(match_id["required"], true);
+        assert_eq!(route["requestBody"]["required"], true);
         assert_eq!(
             route["requestBody"]["content"]["application/json"]["schema"]["$ref"],
             "#/components/schemas/VaultReceiptRequest"
         );
+        let accepted = route["responses"]["200"]["description"].as_str().unwrap();
+        assert!(accepted.contains("Initial acceptance"));
+        assert!(accepted.to_ascii_lowercase().contains("replay"));
         assert_eq!(
             route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
             "#/components/schemas/VaultPot"

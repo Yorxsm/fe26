@@ -837,13 +837,13 @@ pub fn confirm_vault_receipt(
     {
         return Err("transaction failed");
     }
-    if let Some(finality) = tx_result
+    // Absent, null, and non-string values are not FINAL. Top-level success does not fill this in.
+    if tx_result
         .get("final_execution_status")
         .and_then(|value| value.as_str())
+        != Some("FINAL")
     {
-        if finality != "FINAL" {
-            return Err("transaction is not final success");
-        }
+        return Err("transaction is not final success");
     }
     if !success {
         return Err("transaction is not final success");
@@ -925,6 +925,22 @@ pub fn confirm_vault_receipt(
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
+fn receipt_outcome_failed(receipt: &serde_json::Value) -> bool {
+    let Some(status) = receipt.pointer("/outcome/status") else {
+        return true;
+    };
+    if status.get("Failure").is_some() || status.get("failure").is_some() {
+        return true;
+    }
+    !(status.get("SuccessValue").is_some()
+        || status.get("successValue").is_some()
+        || status.get("SuccessReceiptId").is_some()
+        || status.get("successReceiptId").is_some())
+}
+
+/// A `vault_settled` log is not proof of payment. Every receipt outcome is
+/// checked before any event is accepted. One failed receipt rejects the tx.
+#[cfg(any(test, target_arch = "wasm32"))]
 fn vault_settled_event(
     tx_result: &serde_json::Value,
 ) -> Result<Option<(serde_json::Value, String)>, &'static str> {
@@ -934,15 +950,11 @@ fn vault_settled_event(
     else {
         return Ok(None);
     };
-    let mut saw_failure = false;
+    if receipts.iter().any(receipt_outcome_failed) {
+        return Err("transaction failed");
+    }
+    let mut found = None;
     for receipt in receipts {
-        let status = receipt.pointer("/outcome/status");
-        if status
-            .is_some_and(|value| value.get("Failure").is_some() || value.get("failure").is_some())
-        {
-            saw_failure = true;
-            continue;
-        }
         let Some(logs) = receipt
             .pointer("/outcome/logs")
             .and_then(|value| value.as_array())
@@ -975,14 +987,12 @@ fn vault_settled_event(
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_string();
-            return Ok(Some((data, executor)));
+            if found.is_none() {
+                found = Some((data, executor));
+            }
         }
     }
-    if saw_failure {
-        Err("transaction failed")
-    } else {
-        Ok(None)
-    }
+    Ok(found)
 }
 
 /// Apply `fe2vi_core::resolve_call` to a `get_heist` body. `pays` stays false.
@@ -1256,6 +1266,7 @@ mod tests {
         pot.winner = "ann.testnet".to_string();
         pot.participants = vec!["ann.testnet".into(), "bob.testnet".into()];
         let tx = serde_json::json!({
+            "final_execution_status": "FINAL",
             "status": {"SuccessValue": ""},
             "receipts_outcome": [{
                 "outcome": {
@@ -1278,6 +1289,7 @@ mod tests {
             "already settled"
         );
         let wrong = serde_json::json!({
+            "final_execution_status": "FINAL",
             "status": {"SuccessValue": ""},
             "receipts_outcome": [{
                 "outcome": {
@@ -1302,6 +1314,7 @@ mod tests {
             "EVENT_JSON:{{\"event\":\"vault_settled\",\"data\":[{{\"id\":\"{hash_game}\",\"outcome\":\"{outcome}\",\"payouts\":{payouts}}}]}}"
         );
         serde_json::json!({
+            "final_execution_status": "FINAL",
             "status": {"SuccessValue": ""},
             "receipts_outcome": [{
                 "outcome": {"status": {"SuccessValue": ""}, "logs": [line]}
@@ -1367,6 +1380,7 @@ mod tests {
             "receipt amount does not match the pot"
         );
         let failed = serde_json::json!({
+            "final_execution_status": "FINAL",
             "status": {"SuccessValue": ""},
             "receipts_outcome": [{
                 "outcome": {"status": {"Failure": {"ActionError": {}}}, "logs": []}
@@ -1382,6 +1396,7 @@ mod tests {
             "transaction is not final success"
         );
         let other_event = serde_json::json!({
+            "final_execution_status": "FINAL",
             "status": {"SuccessValue": ""},
             "receipts_outcome": [{
                 "outcome": {
@@ -1505,6 +1520,108 @@ mod tests {
             "already settled"
         );
         assert_eq!(settled.tx_hash, hash);
+    }
+
+    #[test]
+    fn a_failed_receipt_beside_a_settlement_event_is_not_payment() {
+        // Synthetic. The valid settlement receipt stays in the array. A failed
+        // receipt is inserted before it, then after it. This is not a live
+        // transaction and not a production HTTP call.
+        let pot_yocto = 20_000_000_000_000_000_000_000_u128;
+        let hash = "E".repeat(44);
+        let mut win = stored_pot("mt_730a1559a8f36fd0");
+        win.outcome = "win".to_string();
+        win.winner = "fe2vidisp7a3c.testnet".to_string();
+        win.participants = vec![
+            "fe2vibuyer7a3c.testnet".into(),
+            "fe2vidisp7a3c.testnet".into(),
+        ];
+        win.creator = "fe2vidisp7a3c.testnet".to_string();
+        let valid = captured(
+            "mt_730a1559a8f36fd0",
+            "win",
+            r#"[{"account":"fe2vidisp7a3c.testnet","amount":"20000000000000000000000"}]"#,
+        );
+        let before = win.clone();
+        let accepted = confirm_vault_receipt(&win, &hash, &valid, pot_yocto, "", "").unwrap();
+        assert_eq!(accepted.tx_hash, hash);
+        assert!(accepted.pays);
+        let event_line = valid["receipts_outcome"][0]["outcome"]["logs"][0].clone();
+        let failed_receipt = serde_json::json!({
+            "outcome": {
+                "status": {"Failure": {"ActionError": {"kind": "FunctionCallError"}}},
+                "logs": [event_line]
+            }
+        });
+        let mut failure_first = valid.clone();
+        failure_first["receipts_outcome"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, failed_receipt.clone());
+        assert_eq!(
+            confirm_vault_receipt(&win, &hash, &failure_first, pot_yocto, "", "").unwrap_err(),
+            "transaction failed"
+        );
+        assert_eq!(win, before);
+        let mut failure_last = valid.clone();
+        failure_last["receipts_outcome"]
+            .as_array_mut()
+            .unwrap()
+            .push(failed_receipt);
+        assert_eq!(
+            confirm_vault_receipt(&win, &hash, &failure_last, pot_yocto, "", "").unwrap_err(),
+            "transaction failed"
+        );
+        assert_eq!(win, before);
+        assert!(!win.settled && win.tx_hash.is_empty());
+    }
+
+    #[test]
+    fn finality_must_be_the_explicit_string_final() {
+        // Synthetic edits of one FINAL-shaped body. Absent, null, and non-string
+        // finality are rejected. Restoring the string FINAL still accepts it.
+        let pot_yocto = 20_000_000_000_000_000_000_000_u128;
+        let hash = "F".repeat(44);
+        let mut win = stored_pot("mt_730a1559a8f36fd0");
+        win.outcome = "win".to_string();
+        win.winner = "fe2vidisp7a3c.testnet".to_string();
+        win.participants = vec![
+            "fe2vibuyer7a3c.testnet".into(),
+            "fe2vidisp7a3c.testnet".into(),
+        ];
+        win.creator = "fe2vidisp7a3c.testnet".to_string();
+        let mut body = captured(
+            "mt_730a1559a8f36fd0",
+            "win",
+            r#"[{"account":"fe2vidisp7a3c.testnet","amount":"20000000000000000000000"}]"#,
+        );
+        let before = win.clone();
+        body.as_object_mut()
+            .unwrap()
+            .remove("final_execution_status");
+        assert_eq!(
+            confirm_vault_receipt(&win, &hash, &body, pot_yocto, "", "").unwrap_err(),
+            "transaction is not final success"
+        );
+        assert_eq!(win, before);
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(1),
+            serde_json::json!(true),
+            serde_json::json!({"status": "FINAL"}),
+        ] {
+            body["final_execution_status"] = value;
+            assert_eq!(
+                confirm_vault_receipt(&win, &hash, &body, pot_yocto, "", "").unwrap_err(),
+                "transaction is not final success"
+            );
+            assert_eq!(win, before);
+        }
+        body["final_execution_status"] = serde_json::json!("FINAL");
+        let settled = confirm_vault_receipt(&win, &hash, &body, pot_yocto, "", "").unwrap();
+        assert_eq!(settled.tx_hash, hash);
+        assert_eq!(settled.finality, "FINAL");
+        assert!(settled.pays);
     }
 
     #[test]
