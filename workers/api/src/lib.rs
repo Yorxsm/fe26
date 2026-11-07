@@ -1497,10 +1497,29 @@ mod edge {
             ));
         };
         if pot.settled && pot.tx_hash == tx_hash {
+            let mut same = pot;
+            if same.creator.is_empty() {
+                if let Ok(facts) = heist_pot_facts(feed, match_id).await {
+                    if let Some(creator) = facts.creator.filter(|account| !account.is_empty()) {
+                        same.creator = creator;
+                    }
+                }
+            }
+            crate::vault::normalize_vault_pot(&mut same);
+            let changed = arena.book.matches[index]
+                .vault
+                .as_ref()
+                .and_then(|vault| vault.pot.as_ref())
+                != Some(&same);
+            if changed {
+                if let Some(vault) = arena.book.matches[index].vault.as_mut() {
+                    vault.pot = Some(same.clone());
+                }
+            }
             return Ok((
                 200,
-                serde_json::to_string(&pot).unwrap_or_else(|_| "{}".into()),
-                false,
+                serde_json::to_string(&same).unwrap_or_else(|_| "{}".into()),
+                changed,
             ));
         }
         let network = env_string(&feed.env, "FE2VI_NETWORK");
@@ -1560,13 +1579,30 @@ mod edge {
                 ));
             }
         };
+        let factory = env_string(&feed.env, "FE2VI_FACTORY_ID");
+        let heist = env_string(&feed.env, "FE2VI_HEIST_ID");
+        if factory.is_empty() || heist.is_empty() {
+            return Ok((
+                503,
+                r#"{"error":"chain_unavailable","message":"The pot could not be read.","settled":false}"#
+                    .into(),
+                false,
+            ));
+        }
         let mut pot = pot;
         if pot.creator.is_empty() {
             if let Some(creator) = facts.creator {
                 pot.creator = creator;
             }
         }
-        match crate::vault::confirm_vault_receipt(&pot, &tx_hash, &result, facts.pot_yocto) {
+        match crate::vault::confirm_vault_receipt(
+            &pot,
+            &tx_hash,
+            &result,
+            facts.pot_yocto,
+            &factory,
+            &heist,
+        ) {
             Ok(next) => {
                 if let Some(vault) = arena.book.matches[index].vault.as_mut() {
                     vault.pot = Some(next.clone());

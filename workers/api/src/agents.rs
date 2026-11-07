@@ -4741,6 +4741,63 @@ mod tests {
     }
 
     #[test]
+    fn receipt_route_publishes_request_and_error_schemas() {
+        let spec: serde_json::Value = serde_json::from_str(&openapi()).unwrap();
+        let request = &spec["components"]["schemas"]["VaultReceiptRequest"];
+        assert_eq!(request["required"][0], "txHash");
+        assert_eq!(request["required"][1], "senderAccountId");
+        let pot = &spec["components"]["schemas"]["VaultPot"]["properties"];
+        for field in [
+            "outcome",
+            "rule",
+            "payRule",
+            "settlementMethod",
+            "contractWouldAcceptResolve",
+            "finality",
+            "pays",
+            "settled",
+            "txHash",
+            "creator",
+            "winner",
+            "participants",
+        ] {
+            assert!(pot.get(field).is_some(), "{field}");
+        }
+        assert!(pot["pays"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("already paid"));
+        assert!(pot["rule"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("equal-split"));
+        let route = &spec["paths"]["/v1/internal/vault/matches/{matchId}/receipt"]["post"];
+        assert_eq!(
+            route["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/VaultReceiptRequest"
+        );
+        assert_eq!(
+            route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/VaultPot"
+        );
+        for status in ["400", "404", "409", "503"] {
+            assert_eq!(
+                route["responses"][status]["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/Error",
+                "{status}"
+            );
+        }
+        assert!(route["responses"]["503"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("not proof"));
+        assert!(route["responses"]["400"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("malformed"));
+    }
+
+    #[test]
     fn readme_path_check_rejects_an_unknown_route() {
         let templates = openapi_templates();
         assert!(path_is_documented("/v1/agents/register", &templates));
