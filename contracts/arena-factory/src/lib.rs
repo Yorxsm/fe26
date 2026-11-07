@@ -1,11 +1,12 @@
-//! Arena board. The shipped games are fixed. This contract does not accept a
-//! visitor listing or a creator deposit. One moderator account can delist a
-//! game. Delist does not choose a payout recipient and cannot seize the pot.
+//! Arena board. Visitors cannot open a pot. The owner can open one game by
+//! forwarding the exact pot deposit to the heist contract. This contract keeps
+//! no fee. One moderator account can delist a game. Delist does not choose a
+//! payout recipient and cannot seize the pot.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use fe2vi_core::{
-    absolute_ceiling, default_platform_caps, event_json, validate_platform_caps, GameRules,
-    PlatformCaps,
+    absolute_ceiling, default_platform_caps, event_json, pin_hash, validate_platform_caps,
+    validate_rules, GameRules, PlatformCaps,
 };
 use near_sdk::serde::Serialize;
 use near_sdk::store::IterableMap;
@@ -61,6 +62,87 @@ impl ArenaFactory {
             next_id: 1,
             games: IterableMap::new(b"g"),
         }
+    }
+
+    /// Owner-only. The attached deposit must equal `rules.pot_yocto` and is
+    /// forwarded to `heist.init_game`. The factory does not keep it.
+    #[payable]
+    pub fn open_game(&mut self, game_id: String, rules: GameRules, creator: AccountId) -> Promise {
+        require!(
+            env::predecessor_account_id() == self.owner,
+            "only the owner can open a game"
+        );
+        require!(!game_id.is_empty(), "game id required");
+        require!(self.games.get(&game_id).is_none(), "game exists");
+        validate_rules(&rules, &self.caps).unwrap_or_else(|err| env::panic_str(&err.to_string()));
+        let deposit = env::attached_deposit().as_yoctonear();
+        require!(deposit == rules.pot_yocto, "pot deposit mismatch");
+        let game_md_hash = pin_hash(&rules);
+        self.games.insert(
+            game_id.clone(),
+            StoredGame {
+                creator: creator.clone(),
+                rules: rules.clone(),
+                game_md_hash: game_md_hash.clone(),
+                delisted: false,
+                created_at_ns: env::block_timestamp(),
+            },
+        );
+        env::log_str(&event_json(
+            "game_opened",
+            near_sdk::serde_json::json!({
+                "id": game_id,
+                "creator": creator,
+                "pot_yocto": deposit.to_string(),
+            }),
+        ));
+        Promise::new(self.heist.clone()).function_call(
+            "init_game".to_string(),
+            near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+                "game_id": game_id,
+                "rules": rules,
+                "creator": creator,
+                "game_md_hash": game_md_hash,
+            }))
+            .unwrap_or_else(|_| env::panic_str("open args")),
+            NearToken::from_yoctonear(deposit),
+            Gas::from_tgas(80),
+        )
+    }
+
+    /// Owner-only. This is one operator account, not a trustless proof.
+    /// Forwards a Vault result to heist `settle_vault`. The heist contract
+    /// rejects a second settlement. Heist Night and Cup keep action-score resolve.
+    pub fn settle_vault(
+        &mut self,
+        game_id: String,
+        outcome: String,
+        winner: Option<AccountId>,
+    ) -> Promise {
+        require!(
+            env::predecessor_account_id() == self.owner,
+            "only the owner can settle a vault"
+        );
+        let game = self
+            .games
+            .get(&game_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("game not found"));
+        require!(
+            game.rules.template_id == fe2vi_core::TEMPLATE_VAULT,
+            "not a vault result pot"
+        );
+        Promise::new(self.heist.clone()).function_call(
+            "settle_vault".to_string(),
+            near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+                "game_id": game_id,
+                "outcome": outcome,
+                "winner": winner,
+            }))
+            .unwrap_or_else(|_| env::panic_str("settle args")),
+            NearToken::from_yoctonear(0),
+            Gas::from_tgas(80),
+        )
     }
 
     /// Single moderator. Players and the game contract cannot delist.
@@ -251,6 +333,59 @@ mod tests {
     }
 
     #[test]
+    fn only_the_owner_can_open_a_pot_and_the_deposit_is_forwarded() {
+        let mut factory = setup();
+        let mut rules = heist_night_example();
+        rules.pot_yocto = ONE_NEAR / 20;
+        let creator: AccountId = "creator.fe2vi.testnet".parse().unwrap();
+
+        use_pred("visitor.fe2vi.testnet", rules.pot_yocto);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            factory.open_game("pot1".into(), rules.clone(), creator.clone());
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("only the owner can open a game"));
+
+        use_pred("owner.fe2vi.testnet", rules.pot_yocto - 1);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            factory.open_game("pot1".into(), rules.clone(), creator.clone());
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("pot deposit mismatch"));
+
+        use_pred("owner.fe2vi.testnet", rules.pot_yocto);
+        factory.open_game("pot1".into(), rules.clone(), creator.clone());
+        let stored = factory.get_game("pot1".into()).unwrap();
+        assert_eq!(stored.creator, creator);
+        assert_eq!(stored.game_md_hash, pin_hash(&rules));
+        assert!(!stored.delisted);
+
+        let mut forwarded = false;
+        for receipt in get_created_receipts() {
+            assert_eq!(receipt.receiver_id.as_str(), "heist.fe2vi.testnet");
+            for action in receipt.actions {
+                if let near_sdk::mock::MockAction::FunctionCallWeight {
+                    method_name,
+                    attached_deposit,
+                    args,
+                    ..
+                } = action
+                {
+                    if method_name == b"init_game" {
+                        forwarded = true;
+                        assert_eq!(attached_deposit.as_yoctonear(), rules.pot_yocto);
+                        let parsed: near_sdk::serde_json::Value =
+                            near_sdk::serde_json::from_slice(&args).unwrap();
+                        assert_eq!(parsed["game_id"], "pot1");
+                        assert_eq!(parsed["game_md_hash"], pin_hash(&rules));
+                    }
+                }
+            }
+        }
+        assert!(forwarded, "open_game must call heist.init_game");
+    }
+
+    #[test]
     fn game_cannot_raise_platform_caps() {
         let mut factory = setup();
         let original = factory.get_platform_caps();
@@ -264,5 +399,37 @@ mod tests {
         assert!(panic_text(err).contains("game cannot raise platform caps"));
         assert_eq!(factory.get_platform_caps(), original);
         assert!(factory.list_games().is_empty());
+    }
+
+    #[test]
+    fn only_the_owner_can_settle_a_vault_result() {
+        let mut factory = setup();
+        let mut rules = heist_night_example();
+        rules.template_id = fe2vi_core::TEMPLATE_VAULT.to_string();
+        factory.games.insert(
+            "vault1".into(),
+            StoredGame {
+                creator: "creator.fe2vi.testnet".parse().unwrap(),
+                rules,
+                game_md_hash: "ab".into(),
+                delisted: false,
+                created_at_ns: 0,
+            },
+        );
+        use_pred("visitor.fe2vi.testnet", 0);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            factory.settle_vault("vault1".into(), "cancel".into(), None);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("only the owner can settle a vault"));
+        use_pred("owner.fe2vi.testnet", 0);
+        factory.settle_vault("vault1".into(), "cancel".into(), None);
+        let forwarded = get_created_receipts().iter().any(|receipt| {
+            receipt.receiver_id.as_str() == "heist.fe2vi.testnet"
+                && receipt.actions.iter().any(|action| {
+                    matches!(action, near_sdk::mock::MockAction::FunctionCallWeight { method_name, .. } if method_name == b"settle_vault")
+                })
+        });
+        assert!(forwarded, "settlement must be sent to the heist contract");
     }
 }

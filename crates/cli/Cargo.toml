@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "fe2vi command line for the NEAR mainnet arena."
+description = "fe2vi command line for the disposable NEAR testnet arena."
 
 [[bin]]
 name = "fe2vi"

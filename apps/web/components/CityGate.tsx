@@ -60,9 +60,7 @@ function webglAvailable() {
     const options = { failIfMajorPerformanceCaveat: false, powerPreference: "default" as const };
     const gl = (canvas.getContext("webgl2", options) ||
       canvas.getContext("webgl", options)) as WebGLRenderingContext | null;
-    if (!gl) return false;
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
+    return Boolean(gl);
   } catch {
     return false;
   }
@@ -502,6 +500,11 @@ export function CityGate({ onboarding }: { onboarding: string }) {
               <RotateCw aria-hidden="true" strokeWidth={1.75} />
               Reload the city
             </button>
+            <a className="btn btn-secondary" href="/games/heist-night">Vault</a>
+            <a className="btn btn-secondary" href="/games/trading-cup">Cup</a>
+            <a className="btn btn-secondary" href="/village">Village</a>
+            <a className="btn btn-secondary" href="/war-room">War</a>
+            <a className="btn btn-secondary" href="/market">Market</a>
             <a className="btn btn-secondary" href="/leaderboard">
               <Trophy aria-hidden="true" strokeWidth={1.75} />
               Leaderboard
@@ -740,13 +743,18 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                 <div className="city-fallback-card">
                   <Logo variant="hero" />
                   <p className="label">City link</p>
-                  <h1>The village did not open.</h1>
-                  <p>The 3D view did not start. Reload to try again. The boards still work without it.</p>
+                  <h1>The 3D city did not finish opening.</h1>
+                  <p>The rooms are still available as pages. This is a view problem, not a closed arena.</p>
                   <div className="city-fallback-actions">
                     <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
                       <RotateCw aria-hidden="true" strokeWidth={1.75} />
                       Reload
                     </button>
+                    <a className="btn btn-secondary" href="/games/heist-night">Vault</a>
+                    <a className="btn btn-secondary" href="/games/trading-cup">Cup</a>
+                    <a className="btn btn-secondary" href="/village">Village</a>
+                    <a className="btn btn-secondary" href="/war-room">War</a>
+                    <a className="btn btn-secondary" href="/market">Market</a>
                     <a className="btn btn-secondary" href="/leaderboard">
                       <Trophy aria-hidden="true" strokeWidth={1.75} />
                       Leaderboard

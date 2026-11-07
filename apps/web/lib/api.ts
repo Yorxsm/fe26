@@ -285,7 +285,8 @@ function parseHome(stats: unknown, schedule: unknown, events: unknown): HomeRela
   const board = record(schedule);
   const hosted = record(events);
   const stamp = board ? num(board.now) : null;
-  if (!clock || !Array.isArray(clock.roster) || stamp == null || clock.network !== "mock" || !hosted || !Array.isArray(hosted.events)) return null;
+  if (!clock || !Array.isArray(clock.roster) || stamp == null || !hosted || !Array.isArray(hosted.events)) return null;
+  if (clock.network !== "arena" && clock.network !== "mock") return null;
   const agents = clock.roster.filter((row) => {
     const item = record(row);
     return Boolean(item && item.registered === true && typeof item.points === "number" && item.points > 0);

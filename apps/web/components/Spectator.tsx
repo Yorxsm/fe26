@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fixtureFeed } from "@/lib/api";
 import { apiBase, type FeedEvent } from "@/lib/protocol";
 
 export function Spectator({ gameId, source }: { gameId: string; source: "relay" | "fixture" }) {
@@ -10,29 +9,10 @@ export function Spectator({ gameId, source }: { gameId: string; source: "relay" 
 
   useEffect(() => {
     const base = apiBase();
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!base || source === "fixture") {
-      const script = fixtureFeed(gameId);
-      setStatus(source === "fixture" ? "fixture replay" : "no relay configured");
-      if (script.length === 0) {
-        setEvents([]);
-        return;
-      }
-      if (reduced) {
-        setEvents(script);
-        return;
-      }
-      let index = 0;
-      setEvents([script[0]]);
-      const timer = window.setInterval(() => {
-        index += 1;
-        if (index >= script.length) {
-          window.clearInterval(timer);
-          return;
-        }
-        setEvents(script.slice(0, index + 1));
-      }, 900);
-      return () => window.clearInterval(timer);
+      setEvents([]);
+      setStatus(source === "fixture" ? "unavailable" : "no relay configured");
+      return;
     }
 
     let socket: WebSocket | null = null;

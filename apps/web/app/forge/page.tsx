@@ -4,15 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SkinPreview } from "@/components/SkinPreview";
 import { loadLeaderboard, type PublicRow } from "@/lib/api";
-import { FALLBACK_SKINS, fetchSkins, skinTraits, unlockLabel, type Skin } from "@/lib/skins";
+import { fetchSkins, skinTraits, unlockLabel, type Skin } from "@/lib/skins";
 import { PAINT_COLORS, ROLE_NAMES, SCREEN_COLORS, TRAIL_NAMES } from "@/lib/skin";
 
 export default function ForgePage() {
-  const [skins, setSkins] = useState<Skin[]>(FALLBACK_SKINS);
-  const [source, setSource] = useState<"arena" | "fixture">("fixture");
+  const [skins, setSkins] = useState<Skin[]>([]);
+  const [source, setSource] = useState<"arena" | "fixture" | "loading">("loading");
   const [selectedId, setSelectedId] = useState("ingot");
   const [rows, setRows] = useState<PublicRow[]>([]);
-  const [boardSource, setBoardSource] = useState<"relay" | "fixture">("fixture");
+  const [boardSource, setBoardSource] = useState<"relay" | "fixture" | "loading">("loading");
 
   useEffect(() => {
     let alive = true;
@@ -31,8 +31,8 @@ export default function ForgePage() {
     };
   }, []);
 
-  const selected = skins.find((skin) => skin.id === selectedId) ?? skins[0];
-  const preview = skinTraits(selected);
+  const selected = skins.find((skin) => skin.id === selectedId) ?? skins[0] ?? null;
+  const preview = selected ? skinTraits(selected) : null;
 
   return (
     <main className="board">
@@ -41,10 +41,18 @@ export default function ForgePage() {
         Off-chain skins for arena agents. Points unlock a body. Nothing is minted, sold, or custodied, and no wallet is required.
       </p>
       <p className="meta">
-        {source === "arena" ? "Live skin catalog from the arena." : "Fixture catalog. The arena API did not answer."}
+        {source === "loading"
+          ? "Reading the skin catalog."
+          : source === "arena"
+            ? skins.length
+              ? "Live skin catalog from the arena."
+              : "The arena catalog is empty."
+            : "The arena API did not answer. This page is not showing a sample catalog."}
       </p>
 
       <div className="forge-stage">
+        {selected && preview ? (
+        <>
         <section className="lobby-panel">
           <SkinPreview traits={preview} />
           <p className="meta">Drag to orbit. The model is the same agent rig the village uses.</p>
@@ -76,16 +84,21 @@ export default function ForgePage() {
             <Link href="/agents">agent page</Link> if you want spectators to see it.
           </p>
         </section>
+        </>
+        ) : (
+          <p className="meta">No skins to show.</p>
+        )}
       </div>
 
       <section>
         <h2>Catalog</h2>
         <div className="forge-tabs">
+          {skins.length === 0 ? <p className="meta">No skins to show.</p> : null}
           {skins.map((skin) => (
             <button
               key={skin.id}
               type="button"
-              aria-selected={skin.id === selected.id}
+              aria-selected={skin.id === selected?.id}
               onClick={() => setSelectedId(skin.id)}
             >
               {skin.name}
@@ -98,7 +111,7 @@ export default function ForgePage() {
       <section>
         <div className="row">
           <h2>Trophy shelf</h2>
-          <span className="meta">{boardSource === "relay" ? "live arena points" : "fixture board"}</span>
+          <span className="meta">{boardSource === "relay" ? "live arena points" : boardSource === "loading" ? "reading the board" : "the board could not be read"}</span>
         </div>
         {rows.length === 0 ? (
           <p className="muted">No scored agents yet. The first vault run fills this shelf.</p>

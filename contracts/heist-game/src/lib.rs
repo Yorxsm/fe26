@@ -7,9 +7,10 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use fe2vi_core::{
-    action_price, authorize_spend, default_platform_caps, event_json, pin_hash, round_index,
-    score_actions, split_pot, tape_winner, validate_rules, ActionKind, GameRules, PlatformCaps,
-    SpendRequest, SubmittedAction, TEMPLATE_CUP,
+    action_price, authorize_spend, default_platform_caps, event_json, pin_hash, resolve_call,
+    round_index, score_actions, split_pot, tape_winner, validate_rules, vault_pot_shares,
+    ActionKind, GameRules, PlatformCaps, SpendRequest, SubmittedAction, VaultPotCall, TEMPLATE_CUP,
+    TEMPLATE_VAULT,
 };
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
@@ -377,23 +378,80 @@ impl HeistGame {
         self.games.insert(game_id, game);
     }
 
+    /// Owner path: the factory is the only caller. A win pays the named player the
+    /// whole pot. A draw splits it equally. Cancel returns it to the creator.
+    /// Arena points are not an amount. A second call hits `already resolved`.
+    pub fn settle_vault(&mut self, game_id: String, outcome: String, winner: Option<AccountId>) {
+        require!(
+            env::predecessor_account_id() == self.factory,
+            "only factory can settle a vault"
+        );
+        let mut game = self.take_game(&game_id);
+        require!(
+            game.rules.template_id == TEMPLATE_VAULT,
+            "not a vault result pot"
+        );
+        require!(!game.resolved, "already resolved");
+        let players: Vec<String> = game
+            .players
+            .iter()
+            .map(|player| player.to_string())
+            .collect();
+        let call = match outcome.as_str() {
+            "win" => VaultPotCall::Win {
+                winner: winner
+                    .as_ref()
+                    .map(|account| account.to_string())
+                    .unwrap_or_default(),
+            },
+            "draw" => VaultPotCall::Draw,
+            "cancel" => VaultPotCall::Cancel,
+            _ => env::panic_str("unknown vault outcome"),
+        };
+        let shares = vault_pot_shares(game.rules.pot_yocto, game.creator.as_ref(), &players, &call)
+            .unwrap_or_else(|err| env::panic_str(err));
+        let payouts = accounts_from_shares(shares);
+        game.resolved = true;
+        self.games.insert(game_id.clone(), game);
+        let escrow = env::current_account_id();
+        let pot = pot_token(&game_id);
+        for (account, amount) in &payouts {
+            if *amount == 0 {
+                continue;
+            }
+            self.transfer_internal(&escrow, account, &pot, *amount);
+            Promise::new(account.clone()).transfer(NearToken::from_yoctonear(*amount));
+        }
+        env::log_str(&event_json(
+            "vault_settled",
+            near_sdk::serde_json::json!({
+                "id": game_id,
+                "outcome": outcome,
+                "payouts": payouts.iter().map(|(account, amount)| near_sdk::serde_json::json!({
+                    "account": account,
+                    "amount": amount.to_string(),
+                })).collect::<Vec<_>>(),
+            }),
+        ));
+    }
+
     /// Permissionless settlement. Delist does not let the moderator pick a payee:
     /// a delisted game splits the pot across joined players, or returns it to
     /// the creator when nobody joined. A finished game splits by score.
     pub fn resolve(&mut self, game_id: String) {
         let mut game = self.take_game(&game_id);
-        require!(!game.resolved, "already resolved");
+        if game.rules.template_id == TEMPLATE_VAULT {
+            env::panic_str("vault result uses settle_vault");
+        }
         let now = env::block_timestamp();
-        let duration_ns = game
-            .rules
-            .duration_seconds
-            .checked_mul(1_000_000_000)
-            .unwrap_or_else(|| env::panic_str("duration overflow"));
-        if !game.delisted {
-            require!(
-                now >= game.started_at_ns.saturating_add(duration_ns),
-                "game still running"
-            );
+        if let Err(reason) = resolve_call(
+            game.resolved,
+            game.delisted,
+            game.started_at_ns,
+            game.rules.duration_seconds,
+            now,
+        ) {
+            env::panic_str(reason);
         }
         game.resolved = true;
         let payouts = payouts_for(&game);
@@ -1739,6 +1797,118 @@ mod tests {
             Default::default(),
             results,
         );
+    }
+
+    fn vault_rules() -> fe2vi_core::GameRules {
+        let mut rules = heist_night_example();
+        rules.template_id = fe2vi_core::TEMPLATE_VAULT.to_string();
+        rules.pot_yocto = 10;
+        rules
+    }
+
+    fn boot_vault() -> (HeistGame, String) {
+        use_pred("deployer.fe2vi.testnet", 0, 1_000);
+        let mut game = HeistGame::new(
+            "registry.fe2vi.testnet".parse().unwrap(),
+            "factory.fe2vi.testnet".parse().unwrap(),
+        );
+        let rules = vault_rules();
+        use_pred("factory.fe2vi.testnet", rules.pot_yocto, 1_000);
+        let id = "vault-1".to_string();
+        game.init_game(
+            id.clone(),
+            rules.clone(),
+            "creator.fe2vi.testnet".parse().unwrap(),
+            pin_hash(&rules),
+        );
+        use_pred("registry.fe2vi.testnet", 0, 1_000);
+        game.import_agent("alice.fe2vi.testnet".parse().unwrap(), false);
+        game.import_agent("bob.fe2vi.testnet".parse().unwrap(), false);
+        use_pred("alice.fe2vi.testnet", 0, 1_000);
+        game.join(id.clone());
+        use_pred("bob.fe2vi.testnet", 0, 1_000);
+        game.join(id.clone());
+        (game, id)
+    }
+
+    fn near_transfers() -> Vec<(String, u128)> {
+        let mut rows = Vec::new();
+        for receipt in get_created_receipts() {
+            let receiver = receipt.receiver_id.to_string();
+            for action in receipt.actions {
+                if let near_sdk::mock::MockAction::Transfer { deposit, .. } = action {
+                    rows.push((receiver.clone(), deposit.as_yoctonear()));
+                }
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn vault_win_pays_the_winner_and_a_second_call_does_not() {
+        let (mut game, id) = boot_vault();
+        use_pred("alice.fe2vi.testnet", 0, 2_000);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            game.settle_vault(
+                id.clone(),
+                "win".into(),
+                Some("alice.fe2vi.testnet".parse().unwrap()),
+            );
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("only factory can settle a vault"));
+
+        use_pred("factory.fe2vi.testnet", 0, 2_000);
+        game.settle_vault(
+            id.clone(),
+            "win".into(),
+            Some("alice.fe2vi.testnet".parse().unwrap()),
+        );
+        assert_eq!(near_transfers(), vec![("alice.fe2vi.testnet".into(), 10)]);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            game.settle_vault(
+                id.clone(),
+                "win".into(),
+                Some("alice.fe2vi.testnet".parse().unwrap()),
+            );
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("already resolved"));
+    }
+
+    #[test]
+    fn vault_draw_splits_and_cancel_refunds_and_resolve_is_refused() {
+        let (mut game, id) = boot_vault();
+        use_pred("factory.fe2vi.testnet", 0, 2_000);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            game.settle_vault(
+                id.clone(),
+                "win".into(),
+                Some("stranger.fe2vi.testnet".parse().unwrap()),
+            );
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("winner is not a player"));
+        game.settle_vault(id.clone(), "draw".into(), None);
+        let mut paid = near_transfers();
+        paid.sort();
+        assert_eq!(
+            paid,
+            vec![
+                ("alice.fe2vi.testnet".into(), 5),
+                ("bob.fe2vi.testnet".into(), 5),
+            ]
+        );
+
+        let (mut game, id) = boot_vault();
+        use_pred("factory.fe2vi.testnet", 0, 2_000);
+        game.settle_vault(id.clone(), "cancel".into(), None);
+        assert_eq!(near_transfers(), vec![("creator.fe2vi.testnet".into(), 10)]);
+
+        let (mut game, id) = boot_vault();
+        use_pred("anyone.fe2vi.testnet", 0, 5_000_000_000_000);
+        let err = catch_unwind(AssertUnwindSafe(|| game.resolve(id))).unwrap_err();
+        assert!(panic_text(err).contains("vault result uses settle_vault"));
     }
 
     fn receipt_method_names() -> Vec<String> {

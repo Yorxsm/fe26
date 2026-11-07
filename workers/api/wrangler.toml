@@ -43,20 +43,23 @@ namespace_id = "1003"
 simple = { limit = 300, period = 60 }
 
 [vars]
-FE2VI_NETWORK = "mainnet"
-FE2VI_RPC_URL = "https://rpc.mainnet.near.org"
-FE2VI_FACTORY_ID = "factory.fe2vi.near"
-FE2VI_REGISTRY_ID = "registry.fe2vi.near"
-FE2VI_HEIST_ID = "heist.fe2vi.near"
-FE2VI_PASSPORT_ID = "passport.fe2vi.near"
-FE2VI_PASSPORT_MARKET_ID = "passport-market.fe2vi.near"
+# Chain network. The web worker's FE2VI_NETWORK=arena is the off-chain arena label, not this.
+# These ids are the disposable testnet deployment. They are not the fe2vi.testnet contracts.
+FE2VI_NETWORK = "testnet"
+FE2VI_RPC_URL = "https://rpc.testnet.fastnear.com"
+FE2VI_FACTORY_ID = "factory.fe2vidisp7a3c.testnet"
+FE2VI_REGISTRY_ID = "registry.fe2vidisp7a3c.testnet"
+FE2VI_HEIST_ID = "heist.fe2vidisp7a3c.testnet"
+FE2VI_PASSPORT_ID = "passport.fe2vidisp7a3c.testnet"
+FE2VI_PASSPORT_MARKET_ID = "market.fe2vidisp7a3c.testnet"
+FE2VI_ESCROW_ID = "heist.fe2vidisp7a3c.testnet"
 # off | warn | on. Keep off until legacy agents have passports.
 FE2VI_PASSPORT_GATE = "off"
 # Launch stock is pre-minted and listed at 1 NEAR. Agents buy, not mint.
 FE2VI_PASSPORT_MINT = "off"
 # FE2VI_PASSPORT_RELAY_KEY is a secret: `wrangler secret put FE2VI_PASSPORT_RELAY_KEY`.
 # The CLI relay uses the same value in its environment.
-# Deployed to api.fe2vi.space (see routes above). Mainnet.
+# Deployed to api.fe2vi.space (see routes above). Chain calls use the testnet RPC above.
 # The Intents partner key is a secret. Do not put it in [vars].
 # It is used only for the read-only policy check at link time. Execution calls stay off.
 FE2VI_INTENTS_LIVE = "0"

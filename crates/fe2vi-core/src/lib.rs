@@ -6,11 +6,13 @@ mod caps;
 mod events;
 mod game_md;
 mod hash;
+mod pot;
 mod price;
 mod score;
 mod scoring;
 mod skin;
 mod types;
+mod vault_pot;
 mod venue;
 mod village;
 
@@ -32,6 +34,7 @@ pub use game_md::{
     extract_rules_json, game_md_violations, render_game_md, GamePointer, REQUIRED_GAME_MD_PHRASES,
 };
 pub use hash::{canonical_rules_json, pin_hash, valid_pin_hash};
+pub use pot::resolve_call;
 pub use price::{select_price, simulated_price_micros, PriceSource, WRAP_NEAR};
 pub use score::{
     action_price, round_index, score_actions, split_pot, tape_winner, ActionKind, SubmittedAction,
@@ -47,8 +50,9 @@ pub use skin::{
 pub use types::{
     absolute_ceiling, default_platform_caps, heist_night_example, trading_cup_example, GameRules,
     PlatformCaps, MIN_AGENT_DEPOSIT_YOCTO, ONE_NEAR, SCOPED_METHODS, SCOPED_METHOD_LIST,
-    TEMPLATE_CUP, TEMPLATE_HEIST,
+    TEMPLATE_CUP, TEMPLATE_HEIST, TEMPLATE_VAULT,
 };
+pub use vault_pot::{vault_pot_shares, vault_result_call, VaultPotCall};
 pub use venue::{
     default_venue, refuse_testnet, venue_notes, MockVenue, Quote, Venue, VenueNote,
     HYPERLIQUID_INFO, HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,

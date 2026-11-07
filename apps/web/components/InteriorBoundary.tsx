@@ -10,6 +10,10 @@ export class InteriorBoundary extends Component<{ children: ReactNode; onLeave: 
     return { failed: true };
   }
 
+  componentDidCatch(error: Error) {
+    console.error("room failed to open", error);
+  }
+
   render() {
     if (!this.state.failed) return this.props.children;
     return (

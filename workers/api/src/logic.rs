@@ -12,6 +12,12 @@ use serde::{Deserialize, Serialize};
 
 const HISTORY_LIMIT: usize = 200;
 
+/// Set `FE2VI_GIT_SHA` for the wasm build. `unset` means that variable was absent.
+pub const BUILD_SHA: &str = match option_env!("FE2VI_GIT_SHA") {
+    Some(sha) if !sha.is_empty() => sha,
+    _ => "unset",
+};
+
 pub fn history_limit() -> usize {
     HISTORY_LIMIT
 }
@@ -41,6 +47,18 @@ pub struct ArenaState {
     pub passport_gate: crate::passport::PassportGate,
     #[serde(skip)]
     pub passport_mint: bool,
+    /// Chain network from `FE2VI_NETWORK`. This is not the web arena label.
+    #[serde(skip)]
+    pub chain_network: String,
+    /// Worker var `FE2VI_PASSPORT_ID`.
+    #[serde(skip)]
+    pub passport_contract: String,
+    /// Worker var `FE2VI_PASSPORT_MARKET_ID`. Not a chain read by itself.
+    #[serde(skip)]
+    pub market_contract: String,
+    /// Worker var `FE2VI_ESCROW_ID`.
+    #[serde(skip)]
+    pub escrow_contract: String,
 }
 
 impl Default for ArenaState {
@@ -59,6 +77,10 @@ impl Default for ArenaState {
             live: crate::live::LiveBook::default(),
             passport_gate: crate::passport::PassportGate::default(),
             passport_mint: true,
+            chain_network: String::new(),
+            passport_contract: String::new(),
+            market_contract: String::new(),
+            escrow_contract: String::new(),
         }
     }
 }
@@ -175,13 +197,27 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
     }
     let parts = split_path(incoming.path);
     match (incoming.method, parts.as_slice()) {
-        ("GET", ["health"]) | ("GET", ["v1", "health"]) => http(
-            200,
-            "application/json",
-            r#"{"ok":true,"network":"mainnet"}"#.into(),
-            false,
-            None,
-        ),
+        ("GET", ["health"]) | ("GET", ["v1", "health"]) => {
+            let network = if state.chain_network.is_empty() {
+                "unset"
+            } else {
+                state.chain_network.as_str()
+            };
+            json(
+                200,
+                &serde_json::json!({
+                    "ok": true,
+                    "build": BUILD_SHA,
+                    "network": network,
+                    "arena": "off-chain",
+                    "passport": state.passport_contract,
+                    "market": state.market_contract,
+                    "escrow": state.escrow_contract,
+                }),
+                false,
+                None,
+            )
+        }
         ("POST", ["v1", "index"]) => http(
             403,
             "application/json",
@@ -267,6 +303,7 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ),
         ("GET", ["v1", "rules"]) => crate::surface::point_rules(),
         ("GET", ["v1", "heist", "leaderboard"]) => crate::surface::heist_board(
+            state,
             query_param(incoming.path, "window"),
             query_now(incoming.path),
         ),
@@ -973,6 +1010,8 @@ mod tests {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(json["window"], "week");
+                assert_eq!(json["source"], "arena");
+                assert!(json["rows"].as_array().unwrap().is_empty());
                 assert_eq!(json["now"], 1_790_812_800u64);
             }
             Outcome::Websocket { .. } => panic!("expected http"),
@@ -1014,10 +1053,10 @@ mod tests {
         ) {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-                assert_eq!(json["network"], "mock");
-                assert_eq!(json["source"], "mock");
-                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
-                assert_eq!(json["agents"], 10);
+                assert_eq!(json["network"], "arena");
+                assert_eq!(json["source"], "arena");
+                assert!(json["roster"].as_array().unwrap().is_empty());
+                assert_eq!(json["agents"], 0);
                 assert_eq!(json["now"], fe2vi_core::DEMO_EPOCH);
                 assert_eq!(json["live_games"], 0);
                 assert_eq!(json["heist_live"], false);
@@ -1047,8 +1086,8 @@ mod tests {
         ) {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-                assert_eq!(json["agents"], 11);
-                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
+                assert_eq!(json["agents"], 0);
+                assert!(json["roster"].as_array().unwrap().is_empty());
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }
