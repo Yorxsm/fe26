@@ -408,13 +408,8 @@ impl HeistGame {
             "cancel" => VaultPotCall::Cancel,
             _ => env::panic_str("unknown vault outcome"),
         };
-        let shares = vault_pot_shares(
-            game.rules.pot_yocto,
-            game.creator.as_ref(),
-            &players,
-            &call,
-        )
-        .unwrap_or_else(|err| env::panic_str(err));
+        let shares = vault_pot_shares(game.rules.pot_yocto, game.creator.as_ref(), &players, &call)
+            .unwrap_or_else(|err| env::panic_str(err));
         let payouts = accounts_from_shares(shares);
         game.resolved = true;
         self.games.insert(game_id.clone(), game);
