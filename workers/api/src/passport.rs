@@ -240,13 +240,12 @@ fn bind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
             }
             let owner =
                 owner_near.unwrap_or_else(|| state.book.passports[index].owner_near.clone());
+            state.book.passports[index].owner_near = owner.clone();
             state.book.passports[index].status = "pending_bind".to_string();
             state.book.passports[index].updated_unix = now;
-            (
-                state.book.passports[index].passport_id.clone(),
-                owner,
-                Some(state.book.passports[index].clone()),
-            )
+            let passport_id = state.book.passports[index].passport_id.clone();
+            let pending = state.book.passports[index].clone();
+            (passport_id, owner, Some(pending))
         }
         Some(index) => {
             let Some(owner) = owner_near else {
@@ -298,6 +297,16 @@ fn bind(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
         created_unix: now,
         updated_unix: now,
     };
+    let queued_passport = job.passport_id.clone();
+    for old in &mut state.book.passport_jobs {
+        if old.passport_id == queued_passport
+            && old.kind == "bind"
+            && (old.status == "pending" || old.status == "in_progress")
+        {
+            old.status = "failed".to_string();
+            old.updated_unix = now;
+        }
+    }
     state.book.passport_jobs.push(job.clone());
     json(
         202,
@@ -455,7 +464,13 @@ fn complete(state: &mut ArenaState, incoming: &Incoming<'_>, job_id: &str, now: 
             state.book.passports[index].updated_unix = now;
         }
     } else {
-        let failed = state.book.passport_jobs[job_index].attempts >= 5;
+        let mismatch = body
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains("owner mismatch");
+        let failed = mismatch || state.book.passport_jobs[job_index].attempts >= 5;
         state.book.passport_jobs[job_index].status =
             if failed { "failed" } else { "pending" }.to_string();
         state.book.passport_jobs[job_index].updated_unix = now;
@@ -608,6 +623,7 @@ pub fn yocto_to_near(yocto: &str) -> String {
 }
 
 /// One chain listing. Missing or zero prices are skipped so the API cannot invent an ask.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn listed_passport(
     token: &serde_json::Value,
     listing: &serde_json::Value,
@@ -697,9 +713,9 @@ pub fn market_from_chain(
         Vec::new()
     };
     let floor_near = if floor.is_empty() {
-        "0".to_string()
+        None
     } else {
-        yocto_to_near(&floor)
+        Some(yocto_to_near(&floor))
     };
     serde_json::json!({
         "listings": listings,
@@ -1057,7 +1073,8 @@ mod tests {
         );
         assert_eq!(status, 200);
         assert_eq!(body["passport"]["status"], "bind_failed");
-        let (status, _) = call(
+        assert_eq!(body["job"]["status"], "failed");
+        let (status, again) = call(
             &mut state,
             "POST",
             &format!("/v1/agents/me/passport/bind?now={NOW}"),
@@ -1065,6 +1082,39 @@ mod tests {
             Some(&token),
         );
         assert_eq!(status, 202);
+        assert_eq!(again["passport"]["ownerNear"], "buyer.near");
+        let retry_id = again["job"]["jobId"].as_str().unwrap().to_string();
+        let (_, claimed) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/claim?now={NOW}"),
+            r#"{"limit":10}"#,
+            None,
+        );
+        let jobs = claimed["jobs"].as_array().unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0]["jobId"], retry_id);
+        assert_eq!(jobs[0]["ownerNear"], "buyer.near");
+        let (status, done) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{retry_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"fdr_002","txHash":"retry","lastSyncSeq":1,"career":{"xp":0,"wins":0}}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(done["passport"]["status"], "active");
+        assert_eq!(done["passport"]["ownerNear"], "buyer.near");
+        assert!(done["passport"]["career"].is_object());
+        let (status, replay) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/internal/passport/jobs/{retry_id}/complete?now={NOW}"),
+            r#"{"status":"done","tokenId":"fdr_002","txHash":"retry","lastSyncSeq":1,"career":{"xp":0,"wins":0}}"#,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(replay["passport"]["status"], "active");
     }
 
     #[test]
@@ -1213,6 +1263,7 @@ mod tests {
         assert_eq!(body["listings"].as_array().unwrap().len(), 0);
         assert_eq!(body["contract"], "market.fe2vi.testnet");
         assert_eq!(body["stats"]["listedCount"], 0);
+        assert!(body["stats"]["floorPriceNear"].is_null());
         assert_eq!(body["stats"]["totalSalesCount"], serde_json::Value::Null);
         assert!(body["lastSettlement"].is_null());
         assert_eq!(body["stats"]["totalVolumeNear"], serde_json::Value::Null);

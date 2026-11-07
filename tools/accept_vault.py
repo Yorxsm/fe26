@@ -36,6 +36,18 @@ def call(api, method, path, body=None, token=None):
         return err.code, parsed
 
 
+def brief_leaked(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "brief" and isinstance(item, str) and item.strip():
+                return True
+            if brief_leaked(item):
+                return True
+    elif isinstance(value, list):
+        return any(brief_leaked(item) for item in value)
+    return False
+
+
 def register(api, handle):
     status, body = call(
         api,
@@ -63,6 +75,8 @@ def main():
     bravo_handle = f"test-vault-b-{stamp}"
     alpha, alpha_id = register(api, alpha_handle)
     bravo, bravo_id = register(api, bravo_handle)
+    gamma_handle = f"test-vault-c-{stamp}"
+    gamma, _gamma_id = register(api, gamma_handle)
     for token in (alpha, bravo):
         status, body = call(api, "POST", "/v1/arenas/vault/queue", {}, token)
         if status != 200:
@@ -93,6 +107,13 @@ def main():
     for turn in range(1, 6):
         thief_token = alpha if role == "thief" else bravo
         guard_token = bravo if thief_token is alpha else alpha
+        if turn == 1:
+            status, spectate = call(api, "GET", f"/v1/matches/{match_id}")
+            if brief_leaked(spectate):
+                raise SystemExit("public match leaked a private brief while live")
+            status, blocked = act(gamma, turn, "crack", f"{stamp}-outsider")
+            if status != 403:
+                raise SystemExit(f"outsider action expected 403, got {status} {blocked}")
         status, first = act(thief_token, turn, "crack", f"{stamp}-crack-{turn}")
         if status != 200:
             raise SystemExit(f"crack {turn} {status} {first}")
@@ -125,20 +146,25 @@ def main():
     if loser in rows and rows[loser].get("points") not in (0, None):
         raise SystemExit(f"loser should score 0, board {rows.get(loser)}")
     status, spectate = call(api, "GET", f"/v1/matches/{match_id}")
-    if "brief" in json.dumps(spectate):
+    if brief_leaked(spectate):
         raise SystemExit("public match leaked a private brief")
+    status, gamma_matches = call(api, "GET", "/v1/agents/me/matches", token=gamma)
+    if any((row.get("match") or {}).get("matchId") == match_id for row in gamma_matches.get("matches") or []):
+        raise SystemExit("outsider can see the private match")
 
     time.sleep(0.2)
     status, again_board = call(api, "GET", "/v1/leaderboard?window=all&room=vault")
     again_points = {row.get("agent"): row.get("points") for row in again_board.get("rows") or []}
     if again_points.get(winner) != 3:
         raise SystemExit(f"leaderboard changed on reload {again_points}")
-    for handle in (alpha_handle, bravo_handle):
+    for handle, expect in ((winner, 3), (loser, 0)):
         status, profile = call(api, "GET", f"/v1/agents/{handle}")
         if status != 200:
             raise SystemExit(f"profile {handle} {status} {profile}")
         if "apiToken" in profile:
             raise SystemExit("profile leaked the token")
+        if profile.get("points") != expect:
+            raise SystemExit(f"profile {handle} points {profile.get('points')} expected {expect}")
     dup, _ = call(
         api,
         "POST",

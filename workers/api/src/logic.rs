@@ -296,6 +296,7 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
         ),
         ("GET", ["v1", "rules"]) => crate::surface::point_rules(),
         ("GET", ["v1", "heist", "leaderboard"]) => crate::surface::heist_board(
+            state,
             query_param(incoming.path, "window"),
             query_now(incoming.path),
         ),
@@ -1002,6 +1003,8 @@ mod tests {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
                 assert_eq!(json["window"], "week");
+                assert_eq!(json["source"], "arena");
+                assert!(json["rows"].as_array().unwrap().is_empty());
                 assert_eq!(json["now"], 1_790_812_800u64);
             }
             Outcome::Websocket { .. } => panic!("expected http"),
@@ -1043,10 +1046,10 @@ mod tests {
         ) {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-                assert_eq!(json["network"], "mock");
-                assert_eq!(json["source"], "mock");
-                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
-                assert_eq!(json["agents"], 10);
+                assert_eq!(json["network"], "arena");
+                assert_eq!(json["source"], "arena");
+                assert!(json["roster"].as_array().unwrap().is_empty());
+                assert_eq!(json["agents"], 0);
                 assert_eq!(json["now"], fe2vi_core::DEMO_EPOCH);
                 assert_eq!(json["live_games"], 0);
                 assert_eq!(json["heist_live"], false);
@@ -1076,8 +1079,8 @@ mod tests {
         ) {
             Outcome::Http { body, .. } => {
                 let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-                assert_eq!(json["agents"], 11);
-                assert_eq!(json["roster"].as_array().unwrap().len(), 10);
+                assert_eq!(json["agents"], 0);
+                assert!(json["roster"].as_array().unwrap().is_empty());
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }

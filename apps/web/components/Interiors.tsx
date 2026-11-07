@@ -6,9 +6,9 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
 import { seasonBoardRows, type SeasonBoardRow } from "@/lib/seasonBoard";
-import { useHeistNow, useRoomClocks, useScheduleClock } from "@/lib/clock";
+import { useRoomClocks, useScheduleClock } from "@/lib/clock";
 import { apiBase } from "@/lib/protocol";
-import { CHALLENGES, formatCountdown, mockQuotes } from "@/lib/schedule";
+import { CHALLENGES, formatCountdown } from "@/lib/schedule";
 
 const ROOMS: Record<string, { url: string; position: [number, number, number] }> = {
   "vault-quarter": { url: "/models/interior-vault.glb", position: [-42, 0, 18] },
@@ -373,7 +373,6 @@ function useSeasonBoard(id: string) {
 }
 
 function RoomBoards({ id }: { id: string }) {
-  const now = useHeistNow();
   const clock = useScheduleClock();
   const rooms = useRoomClocks();
   const clockRow: BoardRow = {
@@ -388,7 +387,6 @@ function RoomBoards({ id }: { id: string }) {
         { label: "SEASON", value: "1", tone: "orange" as const },
         { label: "FORMAT", value: "BEST OF 5" },
       ];
-  const quotes = mockQuotes(now ?? 0);
   const screen = (name: string, rows: BoardRow[], href?: string) => {
     const board = placed(id, name);
     if (!board) return null;
@@ -407,21 +405,13 @@ function RoomBoards({ id }: { id: string }) {
       <>
         {screen(
           "TICKER",
-          [{ label: "SAMPLE", value: "NOT LIVE", tone: "orange" as const }, ...quotes.map((row) => ({
-            label: row.symbol,
-            value: (row.mark / 1_000_000).toFixed(2),
-            tone: (row.pnlMicros >= 0 ? "green" : "orange") as "green" | "orange",
-          }))],
+          [{ label: "QUOTES", value: "NONE", tone: "orange" as const }, { label: "STATUS", value: "NO LIVE FEED" }],
           "/village",
         )}
         {screen(
           "PNL",
-          quotes.map((row) => ({
-            label: `${row.fundingBps} BPS`,
-            value: (row.pnlMicros / 1_000_000).toFixed(2),
-            tone: row.pnlMicros >= 0 ? "green" : "orange",
-          })),
-          "/market",
+          [{ label: "PNL", value: "UNAVAILABLE", tone: "orange" as const }],
+          "/village",
         )}
       </>
     );

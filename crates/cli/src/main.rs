@@ -700,6 +700,7 @@ fn relay(config: &Config, once: bool) -> Result<String, String> {
                 }
             }
             if let Some(error) = error {
+                eprintln!("passport job {kind} {status}: {error}");
                 complete["error"] = serde_json::json!(error);
             }
             if let Err(err) = api_post(
@@ -851,11 +852,12 @@ fn nft_owner(config: &Config, token_id: &str) -> Result<String, String> {
             "args_base64": encoded,
         }),
     )?;
-    if !response["result"]["error"].is_null() {
-        return Err(format!("nft_token: {}", response["result"]["error"]));
+    if let Some(err) = response.get("error").filter(|value| !value.is_null()) {
+        return Err(format!("nft_token: {err}"));
     }
-    let bytes = response["result"]["result"]
-        .as_array()
+    let bytes = response
+        .get("result")
+        .and_then(serde_json::Value::as_array)
         .ok_or("nft_token: missing result")?
         .iter()
         .map(|value| value.as_u64().unwrap_or_default() as u8)
@@ -883,11 +885,12 @@ fn passport_state(config: &Config, token_id: &str) -> Result<serde_json::Value, 
             "args_base64": encoded,
         }),
     )?;
-    if !response["result"]["error"].is_null() {
-        return Err(format!("passport: {}", response["result"]["error"]));
+    if let Some(err) = response.get("error").filter(|value| !value.is_null()) {
+        return Err(format!("passport: {err}"));
     }
-    let bytes = response["result"]["result"]
-        .as_array()
+    let bytes = response
+        .get("result")
+        .and_then(serde_json::Value::as_array)
         .ok_or("passport: missing result")?
         .iter()
         .map(|value| value.as_u64().unwrap_or_default() as u8)

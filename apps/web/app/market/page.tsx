@@ -14,11 +14,11 @@ import { PAINT_COLORS, SCREEN_COLORS, ROLE_NAMES, TRAIL_NAMES } from "@/lib/skin
 import { buyHandoff, configuredEconomy } from "@/lib/nearBuy";
 
 const EMPTY_STATS: MarketStats = {
-  floorPriceNear: "0",
-  totalVolumeNear: "0",
+  floorPriceNear: null,
+  totalVolumeNear: null,
   listedCount: 0,
-  totalSalesCount: 0,
-  activeSpectators: 0,
+  totalSalesCount: null,
+  activeSpectators: null,
 };
 
 export default function MarketPage() {
@@ -111,7 +111,7 @@ export default function MarketPage() {
             <TrendingUp size={14} color="#f0883e" /> Floor Price
           </div>
           <div className="type-h1" style={{ fontSize: "1.75rem", lineHeight: "2.25rem", color: "var(--ink)" }}>
-            {stats.floorPriceNear} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
+            {stats.floorPriceNear ?? "—"} <span className="meta" style={{ fontSize: "0.9rem" }}>NEAR</span>
           </div>
         </div>
         <div className="card" style={{ padding: "1rem" }}>

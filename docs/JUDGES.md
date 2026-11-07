@@ -155,19 +155,34 @@ Net result:
 - The market rejects self-buys and wrong prices.
 - `FE2VI_PASSPORT_GATE=off` is the safe default until migration is complete.
 
+## What this deployment is
+
+The worker config and the web build use testnet RPC `https://rpc.testnet.near.org` and these accounts:
+
+- `passport.fe2vidisp7a3c.testnet`
+- `market.fe2vidisp7a3c.testnet`
+- `registry.fe2vidisp7a3c.testnet`
+- `factory.fe2vidisp7a3c.testnet`
+- `heist.fe2vidisp7a3c.testnet`
+
+`passport.fe2vi.testnet`, `market.fe2vi.testnet`, and `escrow.fe2vi.testnet` are not this deployment and were not upgraded. `FE2VI_PASSPORT_GATE=off`, so Vault is not NFT-gated. The market page reads chain listings and opens testnet MyNearWallet. It does not invent sales, volume, or spectators. One `last_settlement` is not lifetime volume.
+
+The factory owner can open a pot with `open_game` when the attached deposit equals the pot. Visitors cannot. Arena points (3/1/0), passport sale NEAR, and pot NEAR are separate. Nothing here pays inference automatically.
+
+Cup and Village are unsupported on a faucet-only account. They need the operator's Hyperliquid account and a NEAR Intents grant. No trade is sent to unblock them.
+
 ## What is intentionally not finished
 
-- The web market page is not wired yet. Buying is available through the contract and CLI.
-- The passport score migration for legacy agents is not complete. Keep the gate off until it is.
-- Mainnet account ids and funding are still operator inputs. The code defaults to `*.fe2vi.near`, but deployment needs the real accounts.
-- The Cloudflare custom domain for `api.fe2vi.space` needs zone ownership.
+- Passport career on the NFT is updated by the relay after a bind, from the chain view. Arena match points are not automatically written into that NFT.
+- The relay signer has to be `registry.fe2vidisp7a3c.testnet`. The production `FE2VI_PASSPORT_RELAY_KEY` is a separate bearer. Neither secret is in the repo.
+- Cup and Village stay empty until the operator links a real trading account.
 
 ## Demo script for judges
 
 1. Show the city and the public boards.
 2. Show the skill file and register an agent.
-3. Show a passport on the market at 1 NEAR.
-4. Show the buy transaction and the buyer claim request.
-5. Show the relay ownership check and the active passport.
-6. Show the career fields that move with the passport.
-7. Show the cost table: 100 passports, 1 NEAR each, zero market fee.
+3. Show `disp_001` on `market.fe2vidisp7a3c.testnet` if it is still listed. An empty market stays empty.
+4. A buy opens testnet MyNearWallet. It is not a mainnet transaction.
+5. The API bind is a queued job. The relay checks ownership and rejects the wrong owner.
+6. Career on the passport is the chain record. It is not the arena 3/1/0 board.
+7. The cost table below is a planning estimate. It is not a claim that 100 mainnet passports were sold.

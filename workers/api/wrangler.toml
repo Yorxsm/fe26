@@ -59,7 +59,7 @@ FE2VI_PASSPORT_GATE = "off"
 FE2VI_PASSPORT_MINT = "off"
 # FE2VI_PASSPORT_RELAY_KEY is a secret: `wrangler secret put FE2VI_PASSPORT_RELAY_KEY`.
 # The CLI relay uses the same value in its environment.
-# Deployed to api.fe2vi.space (see routes above). Mainnet.
+# Deployed to api.fe2vi.space (see routes above). Chain calls use the testnet RPC above.
 # The Intents partner key is a secret. Do not put it in [vars].
 # It is used only for the read-only policy check at link time. Execution calls stay off.
 FE2VI_INTENTS_LIVE = "0"

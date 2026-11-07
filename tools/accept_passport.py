@@ -108,13 +108,21 @@ def main():
     )
     if status not in (202, 409):
         raise SystemExit(f"bind queue failed {status}")
+    print(json.dumps({"queued": status, "bodyKeys": sorted((body or {}).keys())}, indent=2))
     relay = subprocess.run(["fe2vi", "passport", "relay", "--once"], env=env, text=True, capture_output=True)
+    summary = relay.stdout.strip()
+    if "ed25519:" in summary or "private_key" in summary:
+        summary = "redacted"
     if relay.returncode != 0:
-        raise SystemExit("relay failed for the owner")
+        raise SystemExit(f"relay failed for the owner {summary}")
     status, me = call(api, "GET", "/v1/agents/me/passport", token=token)
     passport = me.get("passport") or {}
     if passport.get("status") != "active":
-        raise SystemExit(f"passport did not activate {me}")
+        safe = {key: me.get(key) for key in ("mint_enabled", "required")}
+        safe["status"] = passport.get("status")
+        safe["ownerNear"] = passport.get("ownerNear")
+        safe["relay"] = summary
+        raise SystemExit(f"passport did not activate {safe}")
     if passport.get("ownerNear") != args.owner:
         raise SystemExit("owner was not stored")
     if not isinstance(passport.get("career"), dict):

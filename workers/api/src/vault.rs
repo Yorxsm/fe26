@@ -467,7 +467,7 @@ impl VaultMatch {
                     "handle": handle(handles, &seat.agent_id),
                     "role": if self.ended { serde_json::Value::String(seat.role.clone()) } else { serde_json::Value::Null },
                     "objective": if self.ended { serde_json::Value::String(seat.objective.clone()) } else { serde_json::Value::Null },
-                    "brief": if self.ended { serde_json::Value::String(seat.brief.clone()) } else { serde_json::Value::Null },
+                    "brief": serde_json::Value::Null,
                     "intel": seat.intel,
                     "tools": seat.tools,
                     "heat": seat.heat,

@@ -8,9 +8,6 @@ import {
 } from "./marketView";
 
 export {
-  FALLBACK_LISTINGS,
-  FALLBACK_SALES,
-  FALLBACK_STATS,
   marketFromResponse,
   type MarketListing,
   type MarketPayload,

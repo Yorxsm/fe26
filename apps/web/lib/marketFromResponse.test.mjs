@@ -28,4 +28,7 @@ test("a failed market request stays empty", () => {
   assert.equal(view.source, "unavailable");
   assert.equal(view.listings.length, 0);
   assert.equal(view.sales.length, 0);
+  assert.equal(view.stats.totalVolumeNear, null);
+  assert.equal(view.stats.totalSalesCount, null);
+  assert.equal(view.stats.activeSpectators, null);
 });

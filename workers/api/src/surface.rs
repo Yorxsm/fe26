@@ -2,7 +2,7 @@
 //! mark an event verified, and none of them call the hosted Intents API.
 
 use fe2vi_core::{
-    districts, follow as follow_edge, unfollow as unfollow_edge, PointRoom, PublicRow, Venue,
+    districts, follow as follow_edge, unfollow as unfollow_edge, PointRoom, PublicRow,
 };
 use fe2vi_intents::{
     issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
@@ -265,7 +265,7 @@ pub fn point_rules() -> Outcome {
     )
 }
 
-pub fn heist_board(window_raw: Option<&str>, now: u64) -> Outcome {
+pub fn heist_board(state: &ArenaState, window_raw: Option<&str>, now: u64) -> Outcome {
     let Some(window) = fe2vi_core::HeistWindow::parse(window_raw.unwrap_or("today")) else {
         return http(
             400,
@@ -275,12 +275,29 @@ pub fn heist_board(window_raw: Option<&str>, now: u64) -> Outcome {
             None,
         );
     };
+    let board_window = match window {
+        fe2vi_core::HeistWindow::Today => fe2vi_core::BoardWindow::Today,
+        fe2vi_core::HeistWindow::Week => fe2vi_core::BoardWindow::Week,
+        fe2vi_core::HeistWindow::Season => fe2vi_core::BoardWindow::Season,
+    };
+    let rows: Vec<serde_json::Value> =
+        crate::agents::registered_rows(state, now, board_window, Some(PointRoom::Vault))
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "agent": row.agent,
+                    "name": row.name,
+                    "points": row.points,
+                })
+            })
+            .collect();
     json(
         200,
         &serde_json::json!({
             "window": window_raw.unwrap_or("today"),
+            "source": "arena",
             "now": now,
-            "rows": fe2vi_core::heist_leaderboard(now, window),
+            "rows": rows,
         }),
         false,
         None,
@@ -288,7 +305,6 @@ pub fn heist_board(window_raw: Option<&str>, now: u64) -> Outcome {
 }
 
 pub fn venues(now: u64) -> Outcome {
-    let quotes = fe2vi_core::default_venue().quotes(now);
     let notes: Vec<serde_json::Value> = fe2vi_core::venue_notes()
         .iter()
         .map(|note| {
@@ -302,9 +318,12 @@ pub fn venues(now: u64) -> Outcome {
     json(
         200,
         &serde_json::json!({
-            "network": "mock",
-            "quotes": quotes,
+            "network": "unsupported",
+            "source": "unsupported",
+            "now": now,
+            "quotes": [],
             "notes": notes,
+            "note": "Cup and Village have no faucet-funded quote feed. An empty list is empty.",
         }),
         false,
         None,
@@ -374,37 +393,34 @@ pub fn events(now: u64) -> Outcome {
 }
 
 pub fn spectator_stats(state: &ArenaState, now: u64) -> Outcome {
-    let mut ids: std::collections::BTreeSet<String> =
-        fe2vi_core::agent_roster().into_iter().collect();
-    for agent in &state.agents {
-        if !agent.account_id.is_empty() {
-            ids.insert(agent.account_id.clone());
-        }
-    }
-    let mut roster: Vec<serde_json::Value> = fe2vi_core::city_roster()
+    let rows = crate::agents::registered_rows(state, now, fe2vi_core::BoardWindow::All, None);
+    let roster: Vec<serde_json::Value> = rows
         .iter()
-        .map(|agent| serde_json::json!({ "account_id": agent.account_id, "name": agent.name }))
+        .map(|row| {
+            serde_json::json!({
+                "account_id": row.agent,
+                "name": row.name,
+                "registered": true,
+                "points": row.points,
+            })
+        })
         .collect();
-    for row in crate::agents::registered_rows(state, now, fe2vi_core::BoardWindow::All, None) {
-        roster.push(serde_json::json!({
-            "account_id": row.agent,
-            "name": row.name,
-            "registered": true,
-            "points": row.points,
-        }));
-        ids.insert(row.agent.clone());
-    }
-    let live_games = fe2vi_core::open_slots(now).len() + fe2vi_core::live_events(now).len();
+    let live_games = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.status == "live")
+        .count();
     json(
         200,
         &serde_json::json!({
-            "network": "mock",
-            "source": "mock",
+            "network": "arena",
+            "source": "arena",
             "now": now,
-            "agents": ids.len(),
+            "agents": roster.len(),
             "roster": roster,
             "live_games": live_games,
-            "heist_live": fe2vi_core::heist_live(now),
+            "heist_live": state.book.matches.iter().any(|play| play.status == "live" && play.arena_id == "vault"),
             "countdown_secs": fe2vi_core::countdown_secs(now),
         }),
         false,
