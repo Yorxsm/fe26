@@ -201,6 +201,8 @@ fn redact_line(text: &str) -> String {
         "FE2VI_PASSPORT_RELAY_KEY",
         "FE2VI_SETTLER_SECRET_KEY",
         "FE2VI_SETTLER_KEY",
+        "FE2VI_LOOP_TOKEN_A",
+        "FE2VI_LOOP_TOKEN_B",
     ] {
         if let Ok(value) = std::env::var(name) {
             if value.len() >= 8 {
@@ -641,16 +643,62 @@ fn vault_result_ready(rule: &str, outcome: &str) -> bool {
     )
 }
 
+fn loop_preflight(
+    dry_run: bool,
+    api: &str,
+    token_a: &str,
+    token_b: &str,
+    secret: &str,
+    bearer: &str,
+    account: &str,
+) -> Result<(), String> {
+    if dry_run {
+        return Ok(());
+    }
+    let missing: Vec<&str> = [
+        ("FE2VI_API_URL", api),
+        ("FE2VI_LOOP_TOKEN_A", token_a),
+        ("FE2VI_LOOP_TOKEN_B", token_b),
+        ("FE2VI_SETTLER_SECRET_KEY", secret),
+        ("FE2VI_SETTLER_KEY", bearer),
+        ("signer account", account),
+    ]
+    .into_iter()
+    .filter(|(_, value)| value.trim().is_empty())
+    .map(|(name, _)| name)
+    .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "vault loop refused before queuing: {}",
+            missing.join(", ")
+        ))
+    }
+}
+
+fn receipt_lets_the_loop_continue(body: &serde_json::Value) -> bool {
+    let tx = body["txHash"].as_str().unwrap_or("").trim();
+    if tx.is_empty() {
+        return false;
+    }
+    if body["reason"].as_str() == Some("already settled") && body["settled"].as_bool() == Some(true)
+    {
+        return true;
+    }
+    body["settled"].as_bool() == Some(true)
+        && body["finality"].as_str() == Some("FINAL")
+        && body["pays"].as_bool() == Some(true)
+}
+
 fn vault_loop(config: &Config, matches: u32, dry_run: bool) -> Result<String, String> {
     let matches = matches.clamp(1, 5);
-    let tokens_ready =
-        std::env::var("FE2VI_LOOP_TOKEN_A").is_ok() && std::env::var("FE2VI_LOOP_TOKEN_B").is_ok();
-    if dry_run || !tokens_ready {
+    if dry_run {
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "ok": true,
+            "ok": false,
             "broadcast": false,
             "matches": matches,
-            "reason": if dry_run { "dry-run" } else { "FE2VI_LOOP_TOKEN_A and FE2VI_LOOP_TOKEN_B are unset" },
+            "reason": "dry-run",
             "steps": [
                 "queue both agents on /v1/arenas/vault/queue",
                 "submit cover until the public match is over",
@@ -662,18 +710,18 @@ fn vault_loop(config: &Config, matches: u32, dry_run: bool) -> Result<String, St
         }))
         .unwrap_or_else(|_| "{}".into()));
     }
-    let api = config
-        .api_url
-        .as_deref()
-        .ok_or("FE2VI_API_URL is required")?
-        .trim_end_matches('/')
-        .to_string();
+    let api = config.api_url.clone().unwrap_or_default();
+    let token_a = std::env::var("FE2VI_LOOP_TOKEN_A").unwrap_or_default();
+    let token_b = std::env::var("FE2VI_LOOP_TOKEN_B").unwrap_or_default();
+    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY").unwrap_or_default();
+    let bearer = std::env::var("FE2VI_SETTLER_KEY").unwrap_or_default();
+    let account = config.account_id.clone().unwrap_or_default();
+    loop_preflight(false, &api, &token_a, &token_b, &secret, &bearer, &account)?;
+    let api = api.trim_end_matches('/').to_string();
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| err.to_string())?;
-    let token_a = std::env::var("FE2VI_LOOP_TOKEN_A").map_err(|err| err.to_string())?;
-    let token_b = std::env::var("FE2VI_LOOP_TOKEN_B").map_err(|err| err.to_string())?;
     let mut played = Vec::new();
     for index in 0..matches {
         let queued_a = bearer_post(
@@ -740,11 +788,19 @@ fn vault_loop(config: &Config, matches: u32, dry_run: bool) -> Result<String, St
         }
         let public = api_get(&client, &format!("{api}/v1/matches/{match_id}"))?;
         let receipt = settle_vault(config, &match_id, false)?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&receipt).unwrap_or(serde_json::Value::Null);
+        if !receipt_lets_the_loop_continue(&parsed) {
+            return Err(
+                "vault loop stopped: the receipt was not an accepted FINAL result or an already-settled record"
+                    .into(),
+            );
+        }
         played.push(serde_json::json!({
             "matchId": match_id,
             "outcome": public.pointer("/vault/pot/outcome").cloned().unwrap_or(serde_json::Value::Null),
             "rule": public.pointer("/vault/pot/rule").cloned().unwrap_or(serde_json::Value::Null),
-            "receipt": serde_json::from_str::<serde_json::Value>(&receipt).unwrap_or(serde_json::Value::String(receipt)),
+            "receipt": parsed,
         }));
     }
     Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -815,7 +871,62 @@ fn bearer_post(
 
 #[cfg(test)]
 mod cli_tests {
-    use super::vault_result_ready;
+    use super::{loop_preflight, receipt_lets_the_loop_continue, vault_result_ready};
+
+    #[test]
+    fn a_missing_settler_secret_is_not_a_success_summary() {
+        let err = loop_preflight(
+            false,
+            "https://api.fe2vi.space",
+            "a",
+            "b",
+            "",
+            "bearer",
+            "acct",
+        )
+        .unwrap_err();
+        assert!(err.contains("FE2VI_SETTLER_SECRET_KEY"));
+        assert!(!err.contains("\"ok\": true"));
+        assert!(!err.contains("broadcast"));
+    }
+
+    #[test]
+    fn a_missing_receipt_bearer_is_not_a_success_summary() {
+        let err = loop_preflight(
+            false,
+            "https://api.fe2vi.space",
+            "a",
+            "b",
+            "secret",
+            "",
+            "acct",
+        )
+        .unwrap_err();
+        assert!(err.contains("FE2VI_SETTLER_KEY"));
+        assert!(!err.contains("\"ok\": true"));
+        assert!(!err.contains("broadcast"));
+    }
+
+    #[test]
+    fn the_loop_moves_on_only_after_a_receipt() {
+        assert!(!receipt_lets_the_loop_continue(&serde_json::json!({
+            "ok": true,
+            "broadcast": false
+        })));
+        assert!(receipt_lets_the_loop_continue(&serde_json::json!({
+            "settled": true,
+            "finality": "FINAL",
+            "pays": true,
+            "txHash": "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"
+        })));
+        assert!(receipt_lets_the_loop_continue(&serde_json::json!({
+            "ok": true,
+            "broadcast": false,
+            "settled": true,
+            "txHash": "AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy",
+            "reason": "already settled"
+        })));
+    }
 
     #[test]
     fn a_draw_is_ready_for_settle_vault() {
@@ -869,7 +980,20 @@ fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String
         "outcome": outcome,
         "winner": if outcome == "win" { serde_json::Value::String(winner.into()) } else { serde_json::Value::Null },
     });
-    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY").ok();
+    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    if !dry_run && secret.is_none() {
+        return Err("FE2VI_SETTLER_SECRET_KEY is required".into());
+    }
+    if !dry_run
+        && std::env::var("FE2VI_SETTLER_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .is_none()
+    {
+        return Err("FE2VI_SETTLER_KEY is required to record the receipt".into());
+    }
     let mut settling = config.clone();
     settling.signer_secret = secret.clone();
     let submitted = submit(

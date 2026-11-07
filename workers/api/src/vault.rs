@@ -108,6 +108,20 @@ pub struct PotAuthorization {
     /// Payees copied from the accepted FINAL receipt. Empty until that receipt matches.
     #[serde(default)]
     pub payouts: Vec<VaultPayout>,
+    /// Token bound to each seated agent when the match ended. Empty means no credit.
+    #[serde(default)]
+    pub seat_links: Vec<SeatTokenLink>,
+}
+
+/// The agent who held a seat, and the token bound to that agent then.
+/// `source` is `seat-at-match-end` or `unbound-at-match-end`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatTokenLink {
+    pub agent_id: String,
+    pub near_account: String,
+    pub token_id: String,
+    pub source: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,6 +692,7 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         tx_hash: String::new(),
         creator: String::new(),
         payouts: Vec::new(),
+        seat_links: Vec::new(),
     }
 }
 
@@ -1868,6 +1883,15 @@ mod tests {
             &settled
         ));
         assert_eq!(career["vaultReceipts"]["wins"], 1);
+        let restored: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&career).unwrap()).unwrap();
+        let mut restarted = restored;
+        assert!(!apply_receipt_to_career(
+            &mut restarted,
+            "ann.testnet",
+            &settled
+        ));
+        assert_eq!(restarted["vaultReceipts"]["wins"], 1);
         let mut loser = serde_json::json!({});
         assert!(apply_receipt_to_career(&mut loser, "bob.testnet", &settled));
         assert_eq!(loser["vaultReceipts"]["losses"], 1);

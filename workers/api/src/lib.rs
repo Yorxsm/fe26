@@ -1607,11 +1607,7 @@ mod edge {
                 if let Some(vault) = arena.book.matches[index].vault.as_mut() {
                     vault.pot = Some(next.clone());
                 }
-                crate::passport::credit_passports(
-                    &arena.book.players,
-                    &mut arena.book.passports,
-                    &next,
-                );
+                crate::passport::credit_passports(&mut arena.book.passports, &next);
                 Ok((
                     200,
                     serde_json::to_string(&next).unwrap_or_else(|_| "{}".into()),

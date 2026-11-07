@@ -1943,7 +1943,7 @@ fn vault_settlements(state: &ArenaState) -> Outcome {
         200,
         &serde_json::json!({
             "source": "settled-receipts",
-            "note": "Only FINAL settle_vault receipts. Unsettled matches are omitted.",
+            "note": "Stored, accepted receipt state. A row is present only after a FINAL settle_vault receipt is recorded.",
             "matches": rows,
         }),
         false,
@@ -2096,6 +2096,7 @@ fn vault_act(
             .unwrap_or_else(|| value.to_string())
     });
     let near = near_by_agent(state);
+    let passports = state.book.passports.clone();
     let play = &mut state.book.matches[index];
     let (rows, ready, ended) = {
         let Some(vault) = play.vault.as_mut() else {
@@ -2131,7 +2132,7 @@ fn vault_act(
         play.turn = play.turn.saturating_add(1);
         if ended {
             play.status = "over".to_string();
-            seal_match_pot(&near, play);
+            seal_match_pot(&near, &passports, play);
         } else {
             play.deadline_unix = now.saturating_add(TURN_SECS);
         }
@@ -2365,6 +2366,7 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
 
 fn settle(state: &mut ArenaState, now: u64) -> bool {
     let near = near_by_agent(state);
+    let passports = state.book.passports.clone();
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
@@ -2388,7 +2390,7 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 play.turn = play.turn.saturating_add(1);
                 if ended {
                     play.status = "over".to_string();
-                    seal_match_pot(&near, play);
+                    seal_match_pot(&near, &passports, play);
                 } else {
                     play.deadline_unix = now.saturating_add(TURN_SECS);
                 }
@@ -2435,7 +2437,11 @@ fn near_by_agent(state: &ArenaState) -> HashMap<String, String> {
         .collect()
 }
 
-fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
+fn seal_match_pot(
+    near: &HashMap<String, String>,
+    passports: &[crate::agents::Passport],
+    play: &mut PlayMatch,
+) {
     let match_id = play.match_id.clone();
     let seats: Vec<(String, i64, Option<String>)> = play
         .seats
@@ -2449,8 +2455,14 @@ fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
             (seat.clone(), score, near.get(seat).cloned())
         })
         .collect();
+    let links = crate::passport::seat_token_links(&play.seats, near, passports);
     if let Some(vault) = play.vault.as_mut() {
         vault.seal_vault_result(&match_id, &seats);
+        if let Some(pot) = vault.pot.as_mut() {
+            if pot.seat_links.is_empty() {
+                pot.seat_links = links;
+            }
+        }
     }
 }
 
@@ -3104,6 +3116,32 @@ fn openapi() -> String {
                         "winner": { "type": "string" },
                         "participants": { "type": "array", "items": { "type": "string" } }
                     }
+                },
+                "VaultSettlementList": {
+                    "type": "object",
+                    "description": "Stored, accepted receipt state. Not a live chain read.",
+                    "required": ["source", "matches"],
+                    "properties": {
+                        "source": { "type": "string", "enum": ["settled-receipts"] },
+                        "note": { "type": "string" },
+                        "matches": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["matchId", "txHash", "finality", "pays", "source"],
+                                "properties": {
+                                    "matchId": { "type": "string" },
+                                    "outcome": { "type": "string" },
+                                    "rule": { "type": "string" },
+                                    "txHash": { "type": "string" },
+                                    "txUrl": { "type": "string" },
+                                    "finality": { "type": "string" },
+                                    "pays": { "type": "boolean" },
+                                    "source": { "type": "string", "enum": ["settled-receipts"] }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -3127,7 +3165,18 @@ fn openapi() -> String {
             "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
-            "/v1/vault/settlements": { "get": { "operationId": "vaultSettlements" } },
+            "/v1/vault/settlements": {
+                "get": {
+                    "operationId": "vaultSettlements",
+                    "description": "Stored, accepted receipt state. A match is listed only after its FINAL settle_vault receipt is recorded. This is not a live chain read.",
+                    "responses": {
+                        "200": {
+                            "description": "Stored, accepted FINAL receipts.",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultSettlementList" } } }
+                        }
+                    }
+                }
+            },
             "/v1/markets": { "get": { "operationId": "markets" } },
             "/v1/markets/candles": { "get": { "operationId": "candles" } },
             "/v1/market/listings": { "get": { "operationId": "marketListings" } },
