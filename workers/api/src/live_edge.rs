@@ -4,13 +4,13 @@
 use worker::{Date, Env, Fetch, Headers, Method, Request, RequestInit};
 
 use crate::live::{
-    apply_link_update, apply_policy_snapshot, mark_link_stale, mark_policy_mismatch, refresh_seats,
-    LinkUpdate, PolicyCheck, POLICY_MAX_AGE_SECS,
+    apply_link_update, apply_policy_snapshot, apply_season_career, mark_link_stale,
+    mark_policy_mismatch, refresh_seats, LinkUpdate, PolicyCheck, POLICY_MAX_AGE_SECS,
 };
 use crate::logic::ArenaState;
 
 const HISTORY_MS: u64 = 30 * 24 * 3600 * 1000;
-const DEFAULT_INTENTS_URL: &str = "https://api.agentsonintents.com";
+const DEFAULT_INTENTS_URL: &str = "https://www.usetidepool.tech";
 const POLICY_REFRESH_SECS: u64 = POLICY_MAX_AGE_SECS / 2;
 const POLICY_REFRESH_LIMIT: usize = 8;
 
@@ -94,6 +94,12 @@ fn intents_config(env: &Env) -> Result<(String, String), String> {
     let base = base.trim().trim_end_matches('/').to_string();
     if base.is_empty() {
         return Err("NEAR Intents API URL is empty.".into());
+    }
+    if fe2vi_intents::intents_host_allowed(&base).is_err() {
+        return Err(
+            "NEAR Intents mainnet is disabled. Set NEAR_INTENTS_AGENT_API_URL to a testnet sandbox."
+                .into(),
+        );
     }
     Ok((key, base))
 }
@@ -225,6 +231,7 @@ pub async fn refresh(arena: &mut ArenaState) -> usize {
         }
     }
     refresh_seats(&mut arena.live, now);
+    apply_season_career(&mut arena.book.passports, &arena.live.awards);
     arena.live.last_tick_unix = now;
     synced
 }

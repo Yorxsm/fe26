@@ -859,14 +859,20 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "borsh",
+ "bs58 0.5.1",
  "clap",
+ "ed25519-dalek",
  "fe2vi-core",
  "fe2vi-intents",
+ "hex",
+ "k256",
  "near-crypto",
  "near-primitives",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
+ "sha3",
 ]
 
 [[package]]

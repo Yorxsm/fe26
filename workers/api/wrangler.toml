@@ -63,4 +63,5 @@ FE2VI_PASSPORT_MINT = "off"
 # The Intents partner key is a secret. Do not put it in [vars].
 # It is used only for the read-only policy check at link time. Execution calls stay off.
 FE2VI_INTENTS_LIVE = "0"
-NEAR_INTENTS_AGENT_API_URL = "https://api.agentsonintents.com"
+# Testnet sandbox. The official Agent API host is mainnet and is refused.
+NEAR_INTENTS_AGENT_API_URL = "https://www.usetidepool.tech"

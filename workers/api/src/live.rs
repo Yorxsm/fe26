@@ -346,6 +346,7 @@ pub fn dispatch_live(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     let now = query_now(incoming.path);
     state.live.cleanup(now);
+    apply_season_career(&mut state.book.passports, &state.live.awards);
     match (incoming.method, parts.as_slice()) {
         ("POST", ["v1", "agents", "me", "hyperliquid-link", "challenge"]) => {
             Some(challenge(state, incoming, now))
@@ -1266,6 +1267,76 @@ pub fn mark_link_stale(book: &mut LiveBook, agent_id: &str) {
     }
 }
 
+/// Write Cup and Village awards onto the bound passport. The same label is
+/// recorded once. Agent keys are not part of this record.
+pub fn apply_season_career(
+    passports: &mut [crate::agents::Passport],
+    awards: &[LiveAward],
+) -> usize {
+    let mut wrote = 0;
+    for award in awards {
+        if award.room != "cup" && award.room != "village" {
+            continue;
+        }
+        let Some(passport) = passports
+            .iter_mut()
+            .find(|passport| passport.status == "active" && passport.agent_id == award.agent_id)
+        else {
+            continue;
+        };
+        let mut career = passport
+            .career
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if !career.is_object() {
+            career = serde_json::json!({});
+        }
+        let season = career
+            .as_object_mut()
+            .expect("object")
+            .entry("season")
+            .or_insert_with(|| serde_json::json!({ "records": [] }));
+        if !season.is_object() {
+            *season = serde_json::json!({ "records": [] });
+        }
+        let records = season
+            .as_object_mut()
+            .expect("season")
+            .entry("records")
+            .or_insert_with(|| serde_json::json!([]));
+        let Some(rows) = records.as_array_mut() else {
+            continue;
+        };
+        let already = rows.iter().any(|row| {
+            row.get("room").and_then(|value| value.as_str()) == Some(award.room.as_str())
+                && row.get("label").and_then(|value| value.as_str()) == Some(award.label.as_str())
+        });
+        if already {
+            continue;
+        }
+        rows.push(serde_json::json!({
+            "room": award.room,
+            "label": award.label,
+            "points": award.points,
+            "source": "live-score",
+        }));
+        let points_key = format!("{}Points", award.room);
+        let prior = season
+            .get(&points_key)
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        if let Some(object) = season.as_object_mut() {
+            object.insert(
+                points_key,
+                serde_json::json!(prior.saturating_add(u64::from(award.points))),
+            );
+        }
+        passport.career = Some(career);
+        wrote += 1;
+    }
+    wrote
+}
+
 pub fn refresh_seats(book: &mut LiveBook, now: u64) {
     let links = book.links.clone();
     for round in &mut book.rounds {
@@ -1494,6 +1565,22 @@ fn refresh_village(book: &mut LiveBook, agent_id: &str, now: u64) {
         };
         let drawdown_bps = history_drawdown_bps(&window.history);
         let score_bps = return_bps - 0.5 * (drawdown_bps - 100.0).max(0.0);
+        if key == "24h" {
+            let points = if score_bps > 0.0 {
+                fe2vi_core::MATCH_WIN
+            } else {
+                fe2vi_core::MATCH_LOSS
+            };
+            let day = now / 86_400;
+            book.push_award(LiveAward {
+                agent_id: agent_id.to_string(),
+                handle: link.handle.clone(),
+                room: "village".to_string(),
+                points,
+                unix: now,
+                label: format!("village 24h {day}"),
+            });
+        }
         book.village.push(VillageRow {
             agent_id: agent_id.to_string(),
             handle: link.handle.clone(),
@@ -1686,6 +1773,27 @@ mod tests {
                 == 0
         );
         assert_eq!(book.awards.len(), 2);
+        let mut passports = vec![crate::agents::Passport {
+            passport_id: "ppt_cup".into(),
+            token_id: Some("disp_cup".into()),
+            agent_id: "steady".into(),
+            owner_near: "steady.testnet".into(),
+            creator_near: "steady.testnet".into(),
+            status: "active".into(),
+            created_unix: 0,
+            updated_unix: 0,
+            last_sync_seq: 0,
+            career: None,
+        }];
+        assert_eq!(apply_season_career(&mut passports, &book.awards), 1);
+        assert_eq!(apply_season_career(&mut passports, &book.awards), 0);
+        let records = &passports[0].career.as_ref().unwrap()["season"]["records"];
+        assert_eq!(records[0]["room"], "cup");
+        assert_eq!(records[0]["points"], fe2vi_core::MATCH_WIN);
+        assert_eq!(
+            passports[0].career.as_ref().unwrap()["season"]["cupPoints"],
+            fe2vi_core::MATCH_WIN
+        );
     }
 
     #[test]

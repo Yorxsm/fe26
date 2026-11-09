@@ -3,7 +3,7 @@ import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata(
   "Trading Village",
-  "Coming soon. Linked Hyperliquid accounts appear only when the API has them.",
+  "Linked Hyperliquid testnet accounts, follows, and the public trade tape.",
   "/village",
 );
 

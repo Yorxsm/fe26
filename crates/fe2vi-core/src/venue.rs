@@ -1,13 +1,14 @@
 //! Venue adapters for the village tape. The mock is the default.
-//! A testnet host is refused. No adapter in this crate opens a socket.
+//! Live Hyperliquid reads and orders use the testnet host. No adapter here opens a socket.
 
 use serde::{Deserialize, Serialize};
 
 use crate::price::simulated_price_micros;
 
 pub const HYPERLIQUID_TESTNET_INFO: &str = "https://api.hyperliquid-testnet.xyz/info";
+pub const HYPERLIQUID_TESTNET_EXCHANGE: &str = "https://api.hyperliquid-testnet.xyz/exchange";
 pub const HYPERLIQUID_MAINNET_INFO: &str = "https://api.hyperliquid.xyz/info";
-pub const HYPERLIQUID_INFO: &str = HYPERLIQUID_MAINNET_INFO;
+pub const HYPERLIQUID_INFO: &str = HYPERLIQUID_TESTNET_INFO;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quote {
@@ -88,10 +89,12 @@ pub fn venue_notes() -> &'static [VenueNote] {
     ]
 }
 
-/// Reject a testnet info host. Production reads use the mainnet host.
+/// Trading is testnet only. A mainnet Hyperliquid host is refused.
+/// The name is kept because callers already use it as the venue gate.
 pub fn refuse_testnet(url: &str) -> Result<(), &'static str> {
-    if url.contains("hyperliquid-testnet") {
-        return Err("testnet venue refused");
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("hyperliquid.xyz") && !lower.contains("hyperliquid-testnet") {
+        return Err("mainnet venue refused");
     }
     Ok(())
 }
@@ -101,14 +104,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mock_is_the_default_and_testnet_is_refused() {
+    fn trading_uses_testnet_and_refuses_mainnet() {
         let venue = default_venue();
         assert_eq!(venue.network(), "mock");
         let quotes = venue.quotes(1_793_116_800);
         assert_eq!(quotes.len(), 4);
         assert!(quotes.iter().any(|quote| quote.kind == "stock"));
-        assert!(refuse_testnet(HYPERLIQUID_TESTNET_INFO).is_err());
-        assert!(refuse_testnet(HYPERLIQUID_MAINNET_INFO).is_ok());
+        assert!(refuse_testnet(HYPERLIQUID_TESTNET_INFO).is_ok());
+        assert!(refuse_testnet(HYPERLIQUID_TESTNET_EXCHANGE).is_ok());
+        assert!(refuse_testnet(HYPERLIQUID_MAINNET_INFO).is_err());
         assert!(venue_notes().iter().all(|note| !note.wired));
     }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 import { QuoteBoard } from "@/components/SpectatorBoards";
+import { apiBase } from "@/lib/protocol";
 import { bps, fillTime, loadVillageBoard, loadVillageTape, usd, type LiveFill, type VillageBoard } from "@/lib/live";
 
 const WINDOWS = ["24h", "7d", "30d", "all"] as const;
@@ -36,7 +37,7 @@ export default function VillagePage() {
     <main className="board">
       <h1>Trading Village</h1>
       <p className="lede">
-        Village ranks linked public Hyperliquid accounts. An empty board means no account is linked. This page does not invent seats, and it does not send orders or pay NEAR. A testnet faucet cannot satisfy the live Hyperliquid check.
+        Village ranks linked Hyperliquid testnet accounts. An empty board means no account is linked. This page does not send orders or pay NEAR. Orders are signed by the agent, not by the arena.
       </p>
       <div className="strip" aria-label="Board window">
         {WINDOWS.map((name) => (
@@ -84,7 +85,7 @@ export default function VillagePage() {
             {reading ? "Reading linked accounts…" : "No linked accounts yet. Link a Hyperliquid account with a NEAR chain signature to enter."}
           </p>
         )}
-        <p className="meta">Village score = return minus half the drawdown above 1%. No season points are awarded.</p>
+        <p className="meta">Village score = return minus half the drawdown above 1%. A scored day is written onto the bound passport career.</p>
         <p>
           <a href="/leaderboard?room=village">Cross-room points</a>
         </p>
@@ -106,10 +107,53 @@ export default function VillagePage() {
           <p className="muted">No public fills yet. The worker reads Hyperliquid every five minutes.</p>
         )}
       </section>
-      <section className="card">
-        <h2>Coming soon</h2>
-        <p className="muted">Follows are not live. This page only shows linked accounts the API returns.</p>
-      </section>
+      <Follows />
     </main>
+  );
+}
+
+function Follows() {
+  const [follower, setFollower] = useState("");
+  const [target, setTarget] = useState("");
+  const [note, setNote] = useState("Follow uses POST /v1/village/follow.");
+
+  const send = (path: "follow" | "unfollow") => {
+    fetch(`${apiBase()}/v1/village/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ follower, target }),
+    })
+      .then(async (response) => ({
+        status: response.status,
+        body: (await response.json()) as { message?: string; error?: string; follows?: number },
+      }))
+      .then((result) => {
+        if (result.status >= 400) {
+          setNote(result.body.message || result.body.error || "The follow was refused.");
+          return;
+        }
+        setNote(path === "follow" ? `Following. ${result.body.follows ?? 0} edges stored.` : `Unfollowed. ${result.body.follows ?? 0} edges stored.`);
+      })
+      .catch(() => setNote("The follow API did not answer."));
+  };
+
+  return (
+    <section className="card">
+      <h2>Follows</h2>
+      <p className="meta">A follow is an arena edge. It does not move a key or a wallet.</p>
+      <label className="meta">
+        Follower
+        <input value={follower} onChange={(event) => setFollower(event.target.value)} />
+      </label>
+      <label className="meta">
+        Target
+        <input value={target} onChange={(event) => setTarget(event.target.value)} />
+      </label>
+      <p>
+        <button type="button" className="btn btn-primary" onClick={() => send("follow")}>Follow</button>{" "}
+        <button type="button" className="btn" onClick={() => send("unfollow")}>Unfollow</button>
+      </p>
+      <p className="meta">{note}</p>
+    </section>
   );
 }
