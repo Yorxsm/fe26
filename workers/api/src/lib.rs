@@ -456,6 +456,30 @@ mod edge {
                     }
                 }
             }
+            if route_path == "/v1/judge" {
+                if arena.chain_network != "testnet" {
+                    let body = r#"{"error":"chain_mismatch","message":"The judge match runs on testnet only.","sendsNear":false}"#;
+                    return with_cors(Response::ok(body)?.with_status(403), "application/json");
+                }
+                let token_a = self
+                    .env
+                    .secret("FE2VI_JUDGE_TOKEN_A")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+                let token_b = self
+                    .env
+                    .secret("FE2VI_JUDGE_TOKEN_B")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+                let ready = !token_a.trim().is_empty() && !token_b.trim().is_empty();
+                crate::agents::set_judge_tokens(if ready {
+                    Some((token_a, token_b))
+                } else {
+                    None
+                });
+            }
             crate::logic::set_request_war_secret(war_secret);
             let chain_now = worker::Date::now().as_millis() / 1000;
             let ending =
@@ -478,6 +502,7 @@ mod edge {
                 },
             );
             crate::passport::set_match_end_chain(None);
+            crate::agents::set_judge_tokens(None);
             crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {

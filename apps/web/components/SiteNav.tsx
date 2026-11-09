@@ -11,6 +11,7 @@ const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/market", "Market", Store],
   ["/forge", "Forge", Hammer],
   ["/village", "Village", Map],
+  ["/judge", "Judge", Trophy],
   ["/lobby", "Lobby", DoorOpen],
   ["/agents", "Agents", Users],
   ["/skill", "Skill", BookOpen],

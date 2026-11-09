@@ -342,6 +342,8 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         }
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
         ("GET", ["v1", "vault", "settlements"]) => Some(vault_settlements(state)),
+        ("GET", ["v1", "judge"]) => Some(judge_view(state, now)),
+        ("POST", ["v1", "judge"]) => Some(judge_start(state, now)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
         ("GET", ["v1", "matches", id]) => Some(spectate(state, incoming, id)),
@@ -1060,6 +1062,8 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "tradeMode": trade_mode(state.live.public_link(handle).is_some()),
             "tradingAccount": state.live.public_link(handle),
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
+            "veteran": receipt_wins(state, &player.agent_id) > 0,
+            "receiptWins": receipt_wins(state, &player.agent_id),
         }),
         false,
         None,
@@ -1734,11 +1738,31 @@ fn join_queue(
         .iter()
         .any(|seat| seat.arena_id == arena_id && seat.agent_id == agent_id)
     {
-        state.book.queue.push(Queued {
-            arena_id: arena_id.to_string(),
-            agent_id: agent_id.clone(),
-            queued_unix: now,
-        });
+        let mine = receipt_wins(state, &agent_id);
+        let ahead: Vec<u64> = state
+            .book
+            .queue
+            .iter()
+            .map(|seat| {
+                if seat.arena_id == arena_id {
+                    receipt_wins(state, &seat.agent_id)
+                } else {
+                    u64::MAX
+                }
+            })
+            .collect();
+        let insert_at = ahead
+            .iter()
+            .position(|wins| *wins < mine)
+            .unwrap_or(state.book.queue.len());
+        state.book.queue.insert(
+            insert_at,
+            Queued {
+                arena_id: arena_id.to_string(),
+                agent_id: agent_id.clone(),
+                queued_unix: now,
+            },
+        );
     }
     pair_queue(state, arena_id, now);
     json(
@@ -3186,6 +3210,10 @@ fn openapi() -> String {
             "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
+            "/v1/judge": {
+                "get": { "operationId": "judgeStatus" },
+                "post": { "operationId": "judgeMatch", "description": "Queues the two configured testnet judge agents. Does not send NEAR. One match per 180 seconds." }
+            },
             "/v1/vault/settlements": {
                 "get": {
                     "operationId": "vaultSettlements",
@@ -3460,6 +3488,445 @@ fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
         }
     }
     (upserts, deletes)
+}
+
+const JUDGE_WINDOW_SECS: u64 = 180;
+const JUDGE_POT_CAP_NEAR: &str = "0.01";
+
+thread_local! {
+    static JUDGE_TOKENS: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// House agent tokens for `/v1/judge`. Never persisted and never returned.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn set_judge_tokens(tokens: Option<(String, String)>) {
+    JUDGE_TOKENS.with(|slot| *slot.borrow_mut() = tokens);
+}
+
+fn judge_tokens() -> Option<(String, String)> {
+    JUDGE_TOKENS.with(|slot| slot.borrow().clone())
+}
+
+fn receipt_wins(state: &ArenaState, agent_id: &str) -> u64 {
+    state
+        .book
+        .passports
+        .iter()
+        .find(|passport| passport.agent_id == agent_id && passport.status == "active")
+        .and_then(|passport| passport.career.as_ref())
+        .and_then(|career| career.pointer("/vaultReceipts/wins"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn judge_view(state: &ArenaState, now: u64) -> Outcome {
+    let play = state
+        .book
+        .matches
+        .iter()
+        .find(|play| play.match_id == state.judge_match_id);
+    let ended = play.is_some_and(|play| {
+        play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended)
+    });
+    let pot_outcome = play
+        .and_then(|play| play.vault.as_ref())
+        .and_then(|vault| vault.pot.as_ref())
+        .map(|pot| pot.outcome.clone())
+        .filter(|value| matches!(value.as_str(), "win" | "draw"));
+    let outcome = pot_outcome.clone().or_else(|| {
+        let play = play?;
+        if !ended {
+            return None;
+        }
+        let scores: Vec<i32> = play
+            .seats
+            .iter()
+            .map(|seat| {
+                play.vault
+                    .as_ref()
+                    .map(|vault| vault.score(seat))
+                    .unwrap_or(0)
+            })
+            .collect();
+        let best = scores.iter().copied().max().unwrap_or(0);
+        let leaders = scores.iter().filter(|score| **score == best).count();
+        if leaders == 1 {
+            Some("win".to_string())
+        } else {
+            Some("draw".to_string())
+        }
+    });
+    let receipt = play
+        .and_then(|play| play.vault.as_ref())
+        .and_then(|vault| vault.pot.as_ref());
+    let settled = receipt.is_some_and(|pot| {
+        pot.settled && pot.pays && pot.finality == "FINAL" && !pot.tx_hash.trim().is_empty()
+    });
+    let tx_hash = receipt
+        .filter(|_| settled)
+        .map(|pot| pot.tx_hash.clone())
+        .unwrap_or_default();
+    let career_done = play.is_some_and(|play| {
+        state.book.passports.iter().any(|passport| {
+            passport
+                .career
+                .as_ref()
+                .and_then(|career| career.pointer("/vaultReceipts/matchIds"))
+                .and_then(|value| value.as_array())
+                .is_some_and(|ids| {
+                    ids.iter()
+                        .any(|id| id.as_str() == Some(play.match_id.as_str()))
+                })
+        })
+    });
+    let pay_note = match pot_outcome.as_deref() {
+        Some("win") => "Winner would take 0.02 NEAR if each seat opened a 0.01 pot. This API does not send NEAR.",
+        Some("draw") => "Each seat would receive 0.01 NEAR if each seat opened a 0.01 pot. This API does not send NEAR.",
+        _ if ended => "The match finished. This API did not open a pot and does not send NEAR.",
+        _ => "The pay rule is recorded after the match ends. This API does not send NEAR.",
+    };
+    let step = |id: &str, state_name: &str, detail: serde_json::Value| serde_json::json!({ "id": id, "state": state_name, "detail": detail });
+    let steps = vec![
+        step(
+            "queued",
+            if play.is_some() { "done" } else { "pending" },
+            serde_json::json!(null),
+        ),
+        step(
+            "live",
+            if play.is_some() { "done" } else { "pending" },
+            serde_json::json!(play.map(|row| row.match_id.clone())),
+        ),
+        step(
+            "result",
+            if outcome.is_some() {
+                "done"
+            } else if ended {
+                "failed"
+            } else {
+                "pending"
+            },
+            serde_json::json!(outcome),
+        ),
+        step(
+            "receipt",
+            if settled { "done" } else { "pending" },
+            if settled {
+                serde_json::json!(format!("https://testnet.nearblocks.io/txns/{tx_hash}"))
+            } else {
+                serde_json::Value::Null
+            },
+        ),
+        step(
+            "career",
+            if career_done { "done" } else { "pending" },
+            serde_json::Value::Null,
+        ),
+    ];
+    let elapsed = now.saturating_sub(state.judge_unix);
+    let retry_after = if state.judge_unix == 0 || elapsed >= JUDGE_WINDOW_SECS {
+        0
+    } else {
+        JUDGE_WINDOW_SECS - elapsed
+    };
+    let agents: Vec<serde_json::Value> = state
+        .judge_agent_ids
+        .iter()
+        .filter_map(|agent_id| judge_agent(state, agent_id))
+        .collect();
+    let transfers: Vec<serde_json::Value> = state
+        .book
+        .passports
+        .iter()
+        .filter(|passport| {
+            passport.status != "active"
+                && passport
+                    .career
+                    .as_ref()
+                    .and_then(|career| career.pointer("/vaultReceipts"))
+                    .is_some()
+        })
+        .take(4)
+        .map(|passport| passport_card(state, passport))
+        .collect();
+    json(
+        200,
+        &serde_json::json!({
+            "configured": judge_tokens().is_some(),
+            "network": if state.chain_network.is_empty() { "testnet" } else { state.chain_network.as_str() },
+            "potCapNear": JUDGE_POT_CAP_NEAR,
+            "sendsNear": false,
+            "windowSecs": JUDGE_WINDOW_SECS,
+            "retryAfter": retry_after,
+            "match": play.map(|row| {
+                serde_json::json!({
+                    "matchId": row.match_id,
+                    "status": if ended { "over" } else { row.status.as_str() },
+                    "outcome": outcome,
+                    "seats": row.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
+                    "roomUrl": format!("{SITE_ORIGIN}/?room=vault"),
+                    "watchUrl": format!("{SITE_ORIGIN}/games/heist-night"),
+                    "payNote": pay_note,
+                    "txHash": if settled { serde_json::Value::String(tx_hash.clone()) } else { serde_json::Value::Null },
+                    "txUrl": if settled { serde_json::Value::String(format!("https://testnet.nearblocks.io/txns/{tx_hash}")) } else { serde_json::Value::Null },
+                })
+            }),
+            "steps": steps,
+            "agents": agents,
+            "transfers": transfers,
+        }),
+        false,
+        None,
+    )
+}
+
+fn judge_agent(state: &ArenaState, agent_id: &str) -> Option<serde_json::Value> {
+    let player = state
+        .book
+        .players
+        .iter()
+        .find(|player| player.agent_id == agent_id)?;
+    let passport = state
+        .book
+        .passports
+        .iter()
+        .find(|passport| passport.agent_id == agent_id);
+    let wins = receipt_wins(state, agent_id);
+    Some(serde_json::json!({
+        "handle": player.handle,
+        "name": player.name,
+        "veteran": wins > 0,
+        "receiptWins": wins,
+        "passport": passport.map(|row| passport_card(state, row)),
+    }))
+}
+
+fn passport_card(state: &ArenaState, passport: &Passport) -> serde_json::Value {
+    let record = passport
+        .career
+        .as_ref()
+        .and_then(|career| career.get("vaultReceipts"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let receipts: Vec<serde_json::Value> = state
+        .book
+        .matches
+        .iter()
+        .filter_map(|play| {
+            let pot = play.vault.as_ref()?.pot.as_ref()?;
+            if !pot.settled || pot.tx_hash.trim().is_empty() {
+                return None;
+            }
+            let linked = pot.seat_links.iter().any(|link| {
+                passport.token_id.as_deref() == Some(link.token_id.as_str())
+                    && !link.token_id.is_empty()
+            });
+            if !linked {
+                return None;
+            }
+            Some(serde_json::json!({
+                "matchId": play.match_id,
+                "txHash": pot.tx_hash,
+                "txUrl": format!("https://testnet.nearblocks.io/txns/{}", pot.tx_hash),
+                "outcome": pot.outcome,
+            }))
+        })
+        .collect();
+    serde_json::json!({
+        "tokenId": passport.token_id,
+        "status": passport.status,
+        "bound": passport.status == "active" && !passport.agent_id.is_empty(),
+        "agentId": passport.agent_id,
+        "ownerNear": passport.owner_near,
+        "career": record,
+        "receipts": receipts,
+    })
+}
+
+fn judge_start(state: &mut ArenaState, now: u64) -> Outcome {
+    if !state.chain_network.is_empty() && state.chain_network != "testnet" {
+        return json(
+            403,
+            &serde_json::json!({
+                "error": "chain_mismatch",
+                "message": "The judge match runs on testnet only.",
+                "sendsNear": false,
+            }),
+            false,
+            None,
+        );
+    }
+    let Some((token_a, token_b)) = judge_tokens() else {
+        return json(
+            503,
+            &serde_json::json!({
+                "error": "judge_unconfigured",
+                "message": "Set FE2VI_JUDGE_TOKEN_A and FE2VI_JUDGE_TOKEN_B. This route does not send NEAR.",
+                "sendsNear": false,
+            }),
+            false,
+            None,
+        );
+    };
+    if token_a == token_b {
+        return json(
+            503,
+            &serde_json::json!({
+                "error": "judge_unconfigured",
+                "message": "The two judge agents must be different. This route does not send NEAR.",
+                "sendsNear": false,
+            }),
+            false,
+            None,
+        );
+    }
+    let auth_a = format!("Bearer {token_a}");
+    let auth_b = format!("Bearer {token_b}");
+    let incoming_a = Incoming {
+        method: "POST",
+        path: "/v1/judge",
+        body: "",
+        authorization: Some(&auth_a),
+        ingest_token: None,
+        policy_check: None,
+    };
+    let incoming_b = Incoming {
+        method: "POST",
+        path: "/v1/judge",
+        body: "",
+        authorization: Some(&auth_b),
+        ingest_token: None,
+        policy_check: None,
+    };
+    let Some(agent_a) = authed_id(state, &incoming_a) else {
+        return fail(401, "unauthorized", "Judge agent A was not accepted.");
+    };
+    let Some(agent_b) = authed_id(state, &incoming_b) else {
+        return fail(401, "unauthorized", "Judge agent B was not accepted.");
+    };
+    if let Some(play) = state.book.matches.iter().find(|play| {
+        play.status == "live"
+            && play.arena_id == "vault"
+            && play
+                .seats
+                .iter()
+                .any(|seat| seat == &agent_a || seat == &agent_b)
+    }) {
+        state.judge_match_id = play.match_id.clone();
+        state.judge_agent_ids = vec![agent_a, agent_b];
+        return judge_view(state, now);
+    }
+    if state.judge_unix > 0 && now.saturating_sub(state.judge_unix) < JUDGE_WINDOW_SECS {
+        let retry = JUDGE_WINDOW_SECS - now.saturating_sub(state.judge_unix);
+        return json(
+            429,
+            &serde_json::json!({
+                "error": "rate_limited",
+                "message": "One judge match is allowed every 180 seconds.",
+                "retryAfter": retry,
+                "sendsNear": false,
+            }),
+            false,
+            None,
+        );
+    }
+    let queued_a = join_queue(
+        state,
+        &Incoming {
+            method: "POST",
+            path: "/v1/arenas/vault/queue",
+            body: "{}",
+            authorization: Some(&auth_a),
+            ingest_token: None,
+            policy_check: None,
+        },
+        "vault",
+        now,
+    );
+    if !outcome_ok(&queued_a) {
+        return queued_a;
+    }
+    let queued_b = join_queue(
+        state,
+        &Incoming {
+            method: "POST",
+            path: "/v1/arenas/vault/queue",
+            body: "{}",
+            authorization: Some(&auth_b),
+            ingest_token: None,
+            policy_check: None,
+        },
+        "vault",
+        now,
+    );
+    if !outcome_ok(&queued_b) {
+        return queued_b;
+    }
+    let Some(match_id) = state
+        .book
+        .matches
+        .iter()
+        .rev()
+        .find(|play| {
+            play.arena_id == "vault"
+                && play.seats.iter().any(|seat| seat == &agent_a)
+                && play.seats.iter().any(|seat| seat == &agent_b)
+        })
+        .map(|play| play.match_id.clone())
+    else {
+        return fail(
+            409,
+            "not_ready",
+            "The two judge agents did not sit in a Vault match.",
+        );
+    };
+    for _ in 0..6 {
+        let Some(play) = state
+            .book
+            .matches
+            .iter()
+            .find(|play| play.match_id == match_id)
+        else {
+            break;
+        };
+        if play.status != "live" {
+            break;
+        }
+        let turn = play.turn;
+        let path = format!("/v1/matches/{match_id}/actions");
+        for (auth, seat) in [(&auth_a, "a"), (&auth_b, "b")] {
+            let body = format!(
+                r#"{{"turn":{turn},"action":{{"type":"scout"}},"clientRequestId":"judge-{seat}-{turn}"}}"#
+            );
+            let incoming = Incoming {
+                method: "POST",
+                path: &path,
+                body: &body,
+                authorization: Some(auth),
+                ingest_token: None,
+                policy_check: None,
+            };
+            let played = act(state, &incoming, &match_id, now);
+            if !outcome_ok(&played) {
+                let still_live = state
+                    .book
+                    .matches
+                    .iter()
+                    .any(|play| play.match_id == match_id && play.status == "live");
+                if still_live {
+                    return played;
+                }
+            }
+        }
+    }
+    state.judge_unix = now;
+    state.judge_match_id = match_id;
+    state.judge_agent_ids = vec![agent_a, agent_b];
+    judge_view(state, now)
+}
+
+fn outcome_ok(outcome: &Outcome) -> bool {
+    matches!(outcome, Outcome::Http { status, .. } if *status < 300)
 }
 
 #[cfg(test)]
@@ -5138,6 +5605,119 @@ mod tests {
         assert!(is_websocket_upgrade(Some("websocket")));
         assert!(is_websocket_upgrade(Some("WebSocket")));
         assert!(is_websocket_upgrade(Some("keep-alive, websocket")));
+    }
+
+    #[test]
+    fn judge_match_ends_in_a_draw_and_sends_no_near() {
+        let mut state = ArenaState {
+            chain_network: "testnet".into(),
+            ..ArenaState::default()
+        };
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        set_judge_tokens(None);
+        let missing = call(
+            &mut state,
+            "POST",
+            &format!("/v1/judge?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(missing.0, 503);
+        assert_eq!(missing.1["sendsNear"], false);
+        set_judge_tokens(Some((alpha.clone(), bravo.clone())));
+        let (status, body) = call(
+            &mut state,
+            "POST",
+            &format!("/v1/judge?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["sendsNear"], false);
+        assert_eq!(body["potCapNear"], "0.01");
+        assert_eq!(body["match"]["outcome"], "draw");
+        assert_eq!(body["match"]["status"], "over");
+        assert!(body["match"]["txHash"].is_null());
+        assert_eq!(body["steps"][2]["state"], "done");
+        assert_eq!(body["steps"][3]["state"], "pending");
+        let again = call(
+            &mut state,
+            "POST",
+            &format!("/v1/judge?now={}", NOW + 10),
+            "",
+            None,
+        );
+        assert_eq!(again.0, 429, "{}", again.1);
+        assert!(again.1["retryAfter"].as_u64().unwrap() > 0);
+        state.chain_network = "mainnet".into();
+        let refused = call(
+            &mut state,
+            "POST",
+            &format!("/v1/judge?now={}", NOW + JUDGE_WINDOW_SECS),
+            "",
+            None,
+        );
+        assert_eq!(refused.0, 403);
+        set_judge_tokens(None);
+    }
+
+    #[test]
+    fn a_receipt_win_is_queued_ahead_and_badged() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        state.book.passports.push(Passport {
+            passport_id: "ppt_vet".into(),
+            token_id: Some("disp_vet".into()),
+            agent_id: alpha_id,
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 1,
+            career: Some(serde_json::json!({
+                "vaultReceipts": { "wins": 1, "source": "settled-receipts" }
+            })),
+        });
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        let first = state.book.matches[0].seats[0].clone();
+        assert_eq!(
+            state
+                .book
+                .players
+                .iter()
+                .find(|player| player.agent_id == first)
+                .unwrap()
+                .handle,
+            "alpha"
+        );
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/alpha?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(listed.1["veteran"], true);
+        assert_eq!(listed.1["receiptWins"], 1);
+        state.book.passports[0].status = "unbound".into();
+        state.book.passports[0].agent_id.clear();
+        let view = call(&mut state, "GET", &format!("/v1/judge?now={NOW}"), "", None);
+        assert_eq!(view.0, 200, "{}", view.1);
+        assert_eq!(view.1["transfers"][0]["status"], "unbound");
+        assert_eq!(view.1["transfers"][0]["career"]["wins"], 1);
     }
 
     #[test]
