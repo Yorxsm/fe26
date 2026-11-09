@@ -113,8 +113,9 @@ pub struct PotAuthorization {
     pub seat_links: Vec<SeatTokenLink>,
 }
 
-/// The agent who held a seat, and the token bound to that agent then.
-/// `source` is `seat-at-match-end` or `unbound-at-match-end`.
+/// The agent who held a seat, and the token the chain showed bound then.
+/// `source` is `seat-at-match-end`, `unbound-at-match-end`, or
+/// `unverified-at-match-end`. Only `seat-at-match-end` can receive credit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeatTokenLink {
@@ -495,7 +496,7 @@ impl VaultMatch {
             .collect()
     }
 
-    fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
+    pub(crate) fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
         if !self.ended || self.seats.is_empty() {
             return serde_json::Value::Null;
         }

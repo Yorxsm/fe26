@@ -7,8 +7,6 @@ import { VaultSettlements } from "@/components/VaultSettlements";
 import { Logo } from "@/components/Logo";
 import { loadLobby, type LobbyRelay } from "@/lib/api";
 import {
-  CHALLENGES,
-  EXAMPLE_EVENT,
   dailySlot,
   eventPhase,
   eventStatusLabel,
@@ -94,13 +92,12 @@ function fromRelay(relay: LobbyRelay, now: number): LobbyView {
 }
 
 function fromFixture(now: number, reason: "unset" | "unreachable"): LobbyView {
-  const clock = heistCountdown(now);
   return {
     source: "fixture",
-    note: reason === "unset" ? "Fixture. This build has no API URL." : "Fixture. The API did not answer.",
+    note: reason === "unset" ? "No API URL is set. No live lobby." : "The API did not answer. No live lobby.",
     now,
-    live: clock.live,
-    secs: clock.secs,
+    live: false,
+    secs: 0,
     seasonStart: SEASON_START,
     seasonEnd: SEASON_END,
     heist: {
@@ -109,18 +106,8 @@ function fromFixture(now: number, reason: "unset" | "unreachable"): LobbyView {
       season: [],
     },
     quotes: [],
-    challenges: CHALLENGES,
-    events: [
-      {
-        id: "example-week",
-        partner: EXAMPLE_EVENT.partner,
-        room: EXAMPLE_EVENT.room,
-        prize: EXAMPLE_EVENT.prize,
-        exampleOnly: true,
-        start: EXAMPLE_EVENT.start,
-        end: EXAMPLE_EVENT.end,
-      },
-    ],
+    challenges: [],
+    events: [],
   };
 }
 

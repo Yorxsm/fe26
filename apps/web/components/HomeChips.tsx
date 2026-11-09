@@ -6,7 +6,7 @@ import { loadHome, type HomeRelay } from "@/lib/api";
 import { formatClock, heistCountdown, openSlots } from "@/lib/schedule";
 
 type HomeView = {
-  source: "relay" | "fixture";
+  source: "relay" | "unavailable";
   note: string;
   agents: number;
   liveGames: number;
@@ -14,14 +14,14 @@ type HomeView = {
 };
 
 function derive(now: number, agents: number, events: HomeRelay["events"], source: HomeView["source"], note: string): HomeView {
-  const slots = openSlots(now).length;
-  const partners = events.filter((event) => !event.exampleOnly && now >= event.start && now < event.end).length;
+  const slots = source === "relay" ? openSlots(now).length : 0;
+  const partners = source === "relay" ? events.filter((event) => !event.exampleOnly && now >= event.start && now < event.end).length : 0;
   return {
     source,
     note,
     agents,
     liveGames: slots + partners,
-    secs: heistCountdown(now).secs,
+    secs: source === "relay" ? heistCountdown(now).secs : 0,
   };
 }
 
@@ -40,12 +40,11 @@ export function HomeChips() {
       if (loaded.ok) {
         relay.current = loaded.relay;
         heldAt.current = Date.now();
-        const note = loaded.relay.agentsFrom === "fixture" ? "Fixture. Roster is the offline city cast." : "";
-        setView(derive(loaded.relay.now, loaded.relay.agents, loaded.relay.events, loaded.relay.agentsFrom, note));
+        setView(derive(loaded.relay.now, loaded.relay.agents, loaded.relay.events, "relay", ""));
       } else {
         relay.current = null;
-        const note = loaded.reason === "unset" ? "Fixture. This build has no API URL." : "Fixture. The API did not answer.";
-        setView(derive(Math.floor(Date.now() / 1000), 0, [], "fixture", note));
+        const note = loaded.reason === "unset" ? "No API URL is set." : "The API did not answer.";
+        setView(derive(Math.floor(Date.now() / 1000), 0, [], "unavailable", note));
       }
     };
     void pull();
@@ -92,11 +91,13 @@ export function HomeChips() {
         <span className="num">{view.liveGames}</span>
         {view.liveGames === 1 ? "live game" : "live games"}
       </span>
-    ) : (
+    ) : view.source === "relay" ? (
       <span className="chip">
         <Clock aria-hidden="true" strokeWidth={1.75} />
         next heist in <span className="num">{formatClock(view.secs)}</span>
       </span>
+    ) : (
+      <span className="chip">No live activity</span>
     );
 
   return (
@@ -109,7 +110,7 @@ export function HomeChips() {
       {games}
       {view.note ? (
         <span className="chip" title={view.note}>
-          Fixture
+          {view.note}
         </span>
       ) : null}
     </p>

@@ -37,7 +37,7 @@ function Board() {
   const [windowName, setWindowName] = useState(initialWindow);
   const [room, setRoom] = useState(initialRoom);
   const [rows, setRows] = useState<PublicRow[]>([]);
-  const [source, setSource] = useState<"relay" | "fixture" | "loading">("loading");
+  const [source, setSource] = useState<"relay" | "unavailable" | "loading">("loading");
   const [selected, setSelected] = useState<string | null>(params.get("agent"));
   const [recent, setRecent] = useState<RecentPoint[]>([]);
 
@@ -61,7 +61,7 @@ function Board() {
     <main className="board leaderboard-page">
       <h1>Leaderboard</h1>
       <p className="lede">Points across the rooms. No sign-in. No money.</p>
-      <p className="meta">{source === "relay" ? "Off-chain arena points. Cup and Village are live-only." : source === "fixture" ? "Fixture. The API did not answer." : "Reading the board."}</p>
+      <p className="meta">{source === "relay" ? "Off-chain arena points. Cup and Village are not live in this build." : source === "unavailable" ? "The API did not answer. No sample board is shown." : "Reading the board."}</p>
       <div className="lobby-tabs" role="tablist" aria-label="Window">
         {WINDOWS.map((id) => (
           <button key={id} type="button" role="tab" aria-selected={windowName === id} onClick={() => setWindowName(id)}>

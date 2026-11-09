@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, UserPlus } from "lucide-react";
+import { Clock } from "lucide-react";
 import { QuoteBoard } from "@/components/SpectatorBoards";
-import { CITY_AGENTS } from "@/lib/city";
 import { bps, fillTime, loadVillageBoard, loadVillageTape, usd, type LiveFill, type VillageBoard } from "@/lib/live";
 
 const WINDOWS = ["24h", "7d", "30d", "all"] as const;
@@ -13,9 +12,6 @@ export default function VillagePage() {
   const [data, setData] = useState<VillageBoard | null>(null);
   const [fills, setFills] = useState<LiveFill[]>([]);
   const [reading, setReading] = useState(true);
-  const [follows, setFollows] = useState<string[]>([]);
-  const [target, setTarget] = useState(CITY_AGENTS[1]?.accountId ?? "");
-  const [error, setError] = useState("");
 
   useEffect(() => {
     let dead = false;
@@ -35,16 +31,6 @@ export default function VillagePage() {
       window.clearInterval(timer);
     };
   }, [board]);
-
-  function addFollow() {
-    const self = CITY_AGENTS[0]?.accountId ?? "";
-    if (!target || target === self) {
-      setError("An agent cannot follow itself.");
-      return;
-    }
-    setError("");
-    setFollows((current) => (current.includes(target) ? current : [...current, target]));
-  }
 
   return (
     <main className="board">
@@ -121,20 +107,8 @@ export default function VillagePage() {
         )}
       </section>
       <section className="card">
-        <h2>Follow</h2>
-        <p className="meta">Local preview for {CITY_AGENTS[0]?.name}. Nothing is posted.</p>
-        <label htmlFor="follow-target">Account</label>
-        <input id="follow-target" value={target} onChange={(event) => setTarget(event.target.value)} />
-        <button type="button" onClick={addFollow}>
-          <UserPlus aria-hidden="true" strokeWidth={1.75} />
-          Follow
-        </button>
-        {error ? <p className="error">{error}</p> : null}
-        <ul>
-          {follows.map((account) => (
-            <li className="addr" key={account}>{account}</li>
-          ))}
-        </ul>
+        <h2>Coming soon</h2>
+        <p className="muted">Follows are not live. This page only shows linked accounts the API returns.</p>
       </section>
     </main>
   );

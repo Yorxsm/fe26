@@ -1,8 +1,7 @@
-import { fixtureAgent, fixtureEvents, fixtureGames } from "./fixtures";
+import { fixtureEvents } from "./fixtures";
 import { apiBase, type AgentCard, type FeedEvent, type GameCard } from "./protocol";
-import { FIXTURE_AGENTS } from "./schedule";
 
-export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" | "fixture" }> {
+export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" | "unavailable" }> {
   const base = apiBase();
   if (base) {
     try {
@@ -12,13 +11,13 @@ export async function loadGames(): Promise<{ games: GameCard[]; source: "relay" 
         return { games, source: "relay" };
       }
     } catch {
-      // Fall through to the local fixture so the lobby still renders.
+      // The lobby shows an empty state. It does not invent a roster.
     }
   }
-  return { games: fixtureGames, source: "fixture" };
+  return { games: [], source: "unavailable" };
 }
 
-export async function loadGame(id: string): Promise<{ game: GameCard | null; source: "relay" | "fixture" }> {
+export async function loadGame(id: string): Promise<{ game: GameCard | null; source: "relay" | "unavailable" }> {
   const base = apiBase();
   if (base) {
     try {
@@ -26,14 +25,13 @@ export async function loadGame(id: string): Promise<{ game: GameCard | null; sou
       if (response.ok) return { game: (await response.json()) as GameCard, source: "relay" };
       if (response.status === 404) return { game: null, source: "relay" };
     } catch {
-      // Fixture below.
+      // Unavailable below.
     }
   }
-  const fixture = fixtureGames.find((game) => game.id === id);
-  return { game: fixture ?? null, source: "fixture" };
+  return { game: null, source: "unavailable" };
 }
 
-export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; source: "relay" | "fixture" }> {
+export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; source: "relay" | "unavailable" }> {
   const base = apiBase();
   if (base) {
     try {
@@ -41,10 +39,10 @@ export async function loadAgent(id: string): Promise<{ agent: AgentCard | null; 
       if (response.ok) return { agent: (await response.json()) as AgentCard, source: "relay" };
       if (response.status === 404) return { agent: null, source: "relay" };
     } catch {
-      // Fixture below.
+      // Unavailable below.
     }
   }
-  return { agent: fixtureAgent(id) ?? null, source: "fixture" };
+  return { agent: null, source: "unavailable" };
 }
 
 export type PublicRow = {
@@ -73,18 +71,18 @@ export async function loadLeaderboard(
   windowName: string,
   room: string,
   agent?: string,
-): Promise<{ source: "relay" | "fixture"; rows: PublicRow[]; recent: RecentPoint[] }> {
+): Promise<{ source: "relay" | "unavailable"; rows: PublicRow[]; recent: RecentPoint[] }> {
   const base = apiBase();
-  if (!base) return { source: "fixture", rows: [], recent: [] };
+  if (!base) return { source: "unavailable", rows: [], recent: [] };
   try {
     const query = new URLSearchParams({ window: windowName, room });
     if (agent) query.set("agent", agent);
     const response = await fetch(`${base}/v1/leaderboard?${query}`, { cache: "no-store" });
-    if (!response.ok) return { source: "fixture", rows: [], recent: [] };
+    if (!response.ok) return { source: "unavailable", rows: [], recent: [] };
     const body = (await response.json()) as { rows?: PublicRow[]; recent?: RecentPoint[] | null };
     return { source: "relay", rows: body.rows ?? [], recent: body.recent ?? [] };
   } catch {
-    return { source: "fixture", rows: [], recent: [] };
+    return { source: "unavailable", rows: [], recent: [] };
   }
 }
 
@@ -160,13 +158,7 @@ export async function loadHome(): Promise<
     const stats = statsRes.ok ? ((await statsRes.json()) as unknown) : null;
     const relay = parseHome(stats, schedule, events);
     if (relay) return { ok: true, relay };
-    const localAgents = parseHome(
-      { network: "mock", roster: FIXTURE_AGENTS.map((account_id) => ({ account_id, name: account_id })) },
-      schedule,
-      events,
-    );
-    if (!localAgents) return { ok: false, reason: "unreachable" };
-    return { ok: true, relay: { ...localAgents, agentsFrom: "fixture" } };
+    return { ok: false, reason: "unreachable" };
   } catch {
     return { ok: false, reason: "unreachable" };
   }
@@ -286,7 +278,7 @@ function parseHome(stats: unknown, schedule: unknown, events: unknown): HomeRela
   const hosted = record(events);
   const stamp = board ? num(board.now) : null;
   if (!clock || !Array.isArray(clock.roster) || stamp == null || !hosted || !Array.isArray(hosted.events)) return null;
-  if (clock.network !== "arena" && clock.network !== "mock") return null;
+  if (clock.network !== "arena") return null;
   const agents = clock.roster.filter((row) => {
     const item = record(row);
     return Boolean(item && item.registered === true && typeof item.points === "number" && item.points > 0);

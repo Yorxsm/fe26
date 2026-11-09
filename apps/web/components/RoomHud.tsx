@@ -136,7 +136,14 @@ export type RoomMatch = {
   deadlineAt: string | null;
   seats: string[];
   last: { type: string; handle: string; points: number } | null;
-  vault: { round: number; rounds: number; ended: boolean; scores: Array<{ handle: string; roundWins: number }> } | null;
+  vault: {
+    round: number;
+    rounds: number;
+    ended: boolean;
+    winner?: string | null;
+    scores: Array<{ handle: string; roundWins: number }>;
+    pot?: { outcome?: string; rule?: string; settled?: boolean; pays?: boolean; finality?: string; txHash?: string } | null;
+  } | null;
 };
 
 const LOBBY_SIGNS = [
@@ -219,11 +226,20 @@ function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: 
   }
   const seats = focus.seats.filter(Boolean).join(" · ") || "Open seats";
   const vault = focus.vault;
+  const result = vault?.ended ? (vault.winner ? `Result ${vault.winner}.` : "Result draw.") : "";
+  const pot = vault?.pot;
+  const settlement = !vault?.ended
+    ? ""
+    : pot?.settled && pot.finality === "FINAL" && pot.txHash
+      ? `Settled ${pot.rule || pot.outcome || "receipt"}.`
+      : pot
+        ? `Not settled${pot.outcome ? ` (${pot.outcome})` : ""}.`
+        : "No settlement row.";
   const summary = live
     ? vault
       ? `Round ${vault.round} of ${vault.rounds}. ${vault.scores.map((seat) => `${seat.handle} ${seat.roundWins}`).join(" · ") || seats}. Turn ${live.turn}.`
       : `${seats}. Turn ${live.turn}.`
-    : `Last match · ${focus.status}. ${seats}.`;
+    : `Last match · ${focus.status}. ${seats}. ${result} ${settlement}`.trim();
   const rows = mine
     .map((match) => match.last)
     .filter((row): row is NonNullable<RoomMatch["last"]> => Boolean(row?.type && row.handle))

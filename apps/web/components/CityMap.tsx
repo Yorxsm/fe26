@@ -50,7 +50,7 @@ function showPick(name: string, x: number, z: number) {
 function BuildingVolumes({ hideId }: { hideId: string | null }) {
   return (
     <group>
-      {DISTRICTS.filter((district) => district.status === "live" && district.id !== hideId).map((district) => {
+      {DISTRICTS.filter((district) => district.id !== hideId).map((district) => {
         const { hx, hz, height } = district.footprint;
         const bodyH = Math.min(height * 0.62, 9);
         return (
@@ -1555,9 +1555,14 @@ function AgentMesh({
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
+    const liveStand = agent.stand && !poster && !lineup && mode !== "cutscene" ? agent.stand : null;
     const walking = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
-    let pose: { x: number; y: number; z: number; rot: number } = walking;
-    if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
+    let pose: { x: number; y: number; z: number; rot: number } = liveStand
+      ? { x: liveStand.x, y: 0, z: liveStand.z, rot: liveStand.rot }
+      : walking;
+    if (liveStand) {
+      // Real seats stand at the district the API named. No synthetic walk.
+    } else if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
     else if ((poster === "lineup" || lineup) && index < LINEUP_SPOTS.length) {
       pose = { x: LINEUP_SPOTS[index][0], y: 0, z: LINEUP_SPOTS[index][1], rot: 0 };
     } else if ((poster === "front6" || poster === "q34") && index < 6) {
@@ -1585,11 +1590,11 @@ function AgentMesh({
       const spot = spots[index];
       pose = { x: spot[0], y: 0, z: spot[1], rot: 0 };
     }
-    const scripted = mode === "cutscene" ? (CUTSCENE_CAST[beat] ?? []).find((entry) => entry.index === index) : undefined;
-    const roomCrew = focusId && (frameMode === "in" || frameMode === "out") ? INTERIOR_CAST[focusId] : undefined;
+    const scripted = liveStand ? undefined : mode === "cutscene" ? (CUTSCENE_CAST[beat] ?? []).find((entry) => entry.index === index) : undefined;
+    const roomCrew = liveStand ? undefined : focusId && (frameMode === "in" || frameMode === "out") ? INTERIOR_CAST[focusId] : undefined;
     const stationed = scripted ? undefined : roomCrew?.find((entry) => entry.index === index);
     if (scripted) pose = { x: scripted.x, y: 0, z: scripted.z, rot: scripted.rot };
-    const crossing = focusId ? thresholdPose(focusId, index, frameMode === "in") : null;
+    const crossing = liveStand || !focusId ? null : thresholdPose(focusId, index, frameMode === "in");
     const gateHide = Boolean(crossing && !crossing.visible);
     const roomMove = stationed && focusId && !crossing ? interiorPose(focusId, index, state.clock.elapsedTime, roomBusy) : null;
     if (crossing) {
@@ -1599,7 +1604,7 @@ function AgentMesh({
     } else if (roomMove) {
       pose = { x: roomMove.x, y: roomMove.y, z: roomMove.z, rot: roomMove.rot };
     } else if (stationed) pose = { x: stationed.x, y: 0, z: stationed.z, rot: stationed.rot };
-    if (mode === "play" && !poster && !lineup && !(focusId && frameMode === "in")) {
+    if (!liveStand && mode === "play" && !poster && !lineup && !(focusId && frameMode === "in")) {
       const pad = padStand(index);
       pose = { x: pad.x, y: pad.y, z: pad.z + 5.2, rot: pad.rot };
     }
@@ -1608,8 +1613,8 @@ function AgentMesh({
       mood.current = nextMood;
       applyLook(scene, skin, nextMood);
     }
-    const speed = roomMove?.clip === "walk" ? 1.4 : scripted ? scripted.speed : stationed ? stationed.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
-    const planted = !poster && !stationed?.clip && speed < 0.4;
+    const speed = liveStand ? 0 : roomMove?.clip === "walk" ? 1.4 : scripted ? scripted.speed : stationed ? stationed.speed : "speed" in walking && typeof walking.speed === "number" ? walking.speed : 0;
+    const planted = Boolean(liveStand) || (!poster && !stationed?.clip && speed < 0.4);
     const fading = clipFade.current;
     if (fading.length) {
       clipFade.current = fading.filter((action) => {
@@ -1658,7 +1663,8 @@ function AgentMesh({
     }
     if (!paused || poster === "walk" || poster === "expressions" || poster === "street") mixer.update(poster === "walk" || poster === "expressions" ? 0 : delta);
     const shown =
-      mode === "cutscene" ? Boolean(scripted)
+      liveStand ? !(focusId && frameMode === "in" && liveStand.room !== focusId)
+      : mode === "cutscene" ? Boolean(scripted)
       : roomCrew ? Boolean(stationed)
       : poster === "face" ? index === 0
       : poster === "front6" || poster === "q34" ? index < 6
@@ -1678,8 +1684,8 @@ function AgentMesh({
       group.current.updateMatrixWorld(true);
       if (frameMode === "in" && focusId) {
         const shot = INTERIOR_SHOTS[focusId];
-        const crew = INTERIOR_CAST[focusId];
-        const inCrew = crew?.some((member) => member.index === index);
+        const crew = liveStand ? undefined : INTERIOR_CAST[focusId];
+        const inCrew = liveStand ? liveStand.room === focusId : crew?.some((member) => member.index === index);
         const cam = state.camera.position;
         const nearCam = Math.hypot(pose.x - cam.x, (pose.y || 0) - cam.y, pose.z - cam.z);
         const nearEntry = shot ? Math.hypot(pose.x - shot.eye[0], (pose.y || 0) - shot.eye[1], pose.z - shot.eye[2]) : nearCam;

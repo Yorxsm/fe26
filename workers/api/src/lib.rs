@@ -457,6 +457,15 @@ mod edge {
                 }
             }
             crate::logic::set_request_war_secret(war_secret);
+            let chain_now = worker::Date::now().as_millis() / 1000;
+            let ending =
+                crate::passport::seats_pending_chain_read(&arena, chain_now, method, route_path);
+            let chain_reads = if ending.is_empty() {
+                None
+            } else {
+                Some(read_match_end_bindings(&self.env, &ending).await)
+            };
+            crate::passport::set_match_end_chain(chain_reads);
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -468,6 +477,7 @@ mod edge {
                     policy_check: policy_check.as_ref(),
                 },
             );
+            crate::passport::set_match_end_chain(None);
             crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
@@ -1744,6 +1754,51 @@ mod edge {
             }
         };
         crate::vault::contract_pot(match_id, &view, now_ns)
+    }
+
+    async fn read_match_end_bindings(
+        env: &Env,
+        agent_ids: &[String],
+    ) -> std::collections::HashMap<String, crate::passport::ChainSeatBinding> {
+        let mut out = std::collections::HashMap::new();
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        let passport = env_string(env, "FE2VI_PASSPORT_ID");
+        let blocked = passport.is_empty()
+            || rpc.is_empty()
+            || indexer::allow_chain_rpc(&network, &rpc).is_err();
+        for agent_id in agent_ids {
+            if blocked {
+                out.insert(
+                    agent_id.clone(),
+                    crate::passport::ChainSeatBinding::Unverified,
+                );
+                continue;
+            }
+            match rpc_view(
+                &rpc,
+                &passport,
+                "agent_token",
+                serde_json::json!({ "agent_id": agent_id }),
+            )
+            .await
+            {
+                Ok(value) => {
+                    let token = value.as_str().map(str::trim).unwrap_or("").to_string();
+                    out.insert(
+                        agent_id.clone(),
+                        crate::passport::ChainSeatBinding::Token(token),
+                    );
+                }
+                Err(_) => {
+                    out.insert(
+                        agent_id.clone(),
+                        crate::passport::ChainSeatBinding::Unverified,
+                    );
+                }
+            }
+        }
+        out
     }
 
     async fn rpc_view(

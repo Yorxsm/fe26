@@ -25,6 +25,67 @@ impl PassportGate {
     }
 }
 
+/// What `agent_token` on the disposable testnet passport contract returned
+/// for one seated agent. `Token("")` means the chain shows no binding.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainSeatBinding {
+    Token(String),
+    /// The Fastnear read failed. This seat gets no credit.
+    Unverified,
+}
+
+thread_local! {
+    static MATCH_END_CHAIN: std::cell::RefCell<Option<std::collections::HashMap<String, ChainSeatBinding>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install the chain snapshot for this request. `None` means the read was not
+/// attempted, which match end treats as unverified.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn set_match_end_chain(reads: Option<std::collections::HashMap<String, ChainSeatBinding>>) {
+    MATCH_END_CHAIN.with(|slot| *slot.borrow_mut() = reads);
+}
+
+pub fn match_end_chain() -> Option<std::collections::HashMap<String, ChainSeatBinding>> {
+    MATCH_END_CHAIN.with(|slot| slot.borrow().clone())
+}
+
+/// Seated agents whose match can end on this request. A quiet read does not
+/// call the chain.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn seats_pending_chain_read(
+    state: &ArenaState,
+    now: u64,
+    method: &str,
+    path: &str,
+) -> Vec<String> {
+    let action_match = if method == "POST" {
+        path.strip_prefix("/v1/matches/")
+            .and_then(|rest| rest.strip_suffix("/actions"))
+            .filter(|id| !id.is_empty() && !id.contains('/'))
+    } else {
+        None
+    };
+    let mut ids = Vec::new();
+    for play in &state.book.matches {
+        if play.status != "live" || play.vault.is_none() {
+            continue;
+        }
+        let due = now >= play.deadline_unix;
+        let acted = action_match == Some(play.match_id.as_str());
+        if !due && !acted {
+            continue;
+        }
+        for seat in &play.seats {
+            if !ids.iter().any(|id| id == seat) {
+                ids.push(seat.clone());
+            }
+        }
+    }
+    ids
+}
+
 pub fn active_for_agent(state: &ArenaState, agent_id: &str) -> bool {
     state
         .book
@@ -793,8 +854,40 @@ pub fn market_from_chain(
     })
 }
 
+/// Token bound to a seated agent when the match ended, taken only from the
+/// chain snapshot. A missing read is unverified and gives no credit. The API
+/// passport book is not a source for this snapshot.
+pub fn seat_links_from_chain(
+    seats: &[String],
+    near: &std::collections::HashMap<String, String>,
+    reads: Option<&std::collections::HashMap<String, ChainSeatBinding>>,
+) -> Vec<crate::vault::SeatTokenLink> {
+    seats
+        .iter()
+        .map(|agent_id| {
+            let near_account = near.get(agent_id).cloned().unwrap_or_default();
+            let (token_id, source) = match reads.and_then(|map| map.get(agent_id)) {
+                Some(ChainSeatBinding::Token(token)) if !token.is_empty() => {
+                    (token.clone(), "seat-at-match-end")
+                }
+                Some(ChainSeatBinding::Token(_)) => (String::new(), "unbound-at-match-end"),
+                Some(ChainSeatBinding::Unverified) | None => {
+                    (String::new(), "unverified-at-match-end")
+                }
+            };
+            crate::vault::SeatTokenLink {
+                agent_id: agent_id.clone(),
+                near_account,
+                token_id,
+                source: source.to_string(),
+            }
+        })
+        .collect()
+}
+
 /// Token bound to a seated agent when the match ended. An empty `token_id`
 /// means the seat had no bound token, so the later receipt gives no credit.
+#[cfg(test)]
 pub fn seat_token_links(
     seats: &[String],
     near: &std::collections::HashMap<String, String>,
@@ -2159,6 +2252,66 @@ mod tests {
         };
         credit_passports(std::slice::from_mut(&mut newly), &later);
         assert!(newly.career.is_none());
+    }
+
+    #[test]
+    fn chain_snapshot_ignores_a_stale_book_and_fails_closed() {
+        use std::collections::HashMap;
+        let seats = vec!["agt".into()];
+        let near = HashMap::from([("agt".into(), "ann.testnet".into())]);
+        let unbound = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Token(String::new()),
+            )])),
+        );
+        assert_eq!(unbound[0].source, "unbound-at-match-end");
+        assert!(unbound[0].token_id.is_empty());
+        let failed = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Unverified,
+            )])),
+        );
+        assert_eq!(failed[0].source, "unverified-at-match-end");
+        assert!(failed[0].token_id.is_empty());
+        let missing = seat_links_from_chain(&seats, &near, None);
+        assert_eq!(missing[0].source, "unverified-at-match-end");
+        let bound = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Token("disp_ok".into()),
+            )])),
+        );
+        assert_eq!(bound[0].source, "seat-at-match-end");
+        assert_eq!(bound[0].token_id, "disp_ok");
+        let mut state = ArenaState::default();
+        state.book.matches.push(crate::agents::PlayMatch {
+            match_id: "mt_1".into(),
+            arena_id: "vault".into(),
+            status: "live".into(),
+            turn: 1,
+            deadline_unix: 50,
+            seats: vec!["a".into(), "b".into()],
+            actions: Vec::new(),
+            created_unix: 1,
+            vault: Some(crate::vault::VaultMatch::start(&["a".into(), "b".into()])),
+        });
+        assert!(seats_pending_chain_read(&state, 10, "GET", "/v1/matches").is_empty());
+        assert_eq!(
+            seats_pending_chain_read(&state, 50, "GET", "/v1/matches"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            seats_pending_chain_read(&state, 10, "POST", "/v1/matches/mt_1/actions").len(),
+            2
+        );
     }
 
     #[test]

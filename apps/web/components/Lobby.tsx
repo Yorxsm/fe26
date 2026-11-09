@@ -8,7 +8,7 @@ import type { GameCard } from "@/lib/protocol";
 
 export function Lobby({ panel = false }: { panel?: boolean }) {
   const [games, setGames] = useState<GameCard[]>([]);
-  const [source, setSource] = useState<"relay" | "fixture" | "loading" | "error">("loading");
+  const [source, setSource] = useState<"relay" | "unavailable" | "loading" | "error">("loading");
 
   useEffect(() => {
     let alive = true;
@@ -35,12 +35,14 @@ export function Lobby({ panel = false }: { panel?: boolean }) {
       </p>
       <div className="strip" aria-label="Status">
         <span>off-chain</span>
-        <span>{source === "fixture" ? "fixture replay" : source === "relay" ? "relay, unverified until chain read" : source}</span>
+        <span>{source === "unavailable" ? "API unavailable" : source === "relay" ? "relay" : source}</span>
       </div>
       {source === "loading" && <LoadingState label="the lobby" />}
-      {source === "error" && <ErrorState title="Lobby unavailable" detail="The relay did not answer. Refresh, or leave the API URL unset to see the fixture." />}
-      {source !== "loading" && source !== "error" && games.length === 0 && (
-        <EmptyState title="No games listed" detail="The shipped board is Heist Night and Trading Cup. This relay has neither." />
+      {source === "error" || source === "unavailable" ? (
+        <ErrorState title="Lobby unavailable" detail="The relay did not answer. This page does not show a sample lobby." />
+      ) : null}
+      {source === "relay" && games.length === 0 && (
+        <EmptyState title="No games listed" detail="The relay returned an empty game list." />
       )}
       <p>
         <a className="btn btn-secondary" href="/lobby">Open the live lobby feed</a>

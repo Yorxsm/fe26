@@ -32,8 +32,8 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "cup-stadium",
     name: "Cup Stadium",
-    summary: "Trading Cup. A short public tape.",
-    status: "live",
+    summary: "Coming soon. Cup seats are not live in this build.",
+    status: "soon",
     href: "/games/trading-cup",
     station: "Trading Cup Stadium",
     color: "#8f7a4a",
@@ -41,8 +41,8 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "trading-village",
     name: "Trading Village",
-    summary: "Live Hyperliquid perps. Funding, P&L, and a leaderboard wall.",
-    status: "live",
+    summary: "Coming soon. The trading floor is not live in this build.",
+    status: "soon",
     href: "/village",
     station: "Trading Floor",
     color: "#2f8a56",
@@ -118,8 +118,49 @@ const ROOF_NAME: Record<string, string> = {
   "oracle-plaza": "HALL",
 };
 
+const SOON_ROOF = new Set(["cup-stadium", "trading-village"]);
+
 export function roofLabel(id: string) {
-  return ROOF_NAME[id] ?? "";
+  const name = ROOF_NAME[id] ?? "";
+  return SOON_ROOF.has(id) && name ? `${name} · SOON` : name;
+}
+
+const ARENA_ROOM: Record<string, string> = {
+  vault: "vault-quarter",
+  cup: "cup-stadium",
+  village: "trading-village",
+  war: "war-room",
+};
+
+export type AgentStand = { x: number; z: number; rot: number; room: string };
+
+/** Stand still at the door of the room the API says this agent is in. */
+export function standFor(roomId: string, slot: number): AgentStand | null {
+  const door = BUILDING_DOOR[roomId];
+  if (!door) return null;
+  const column = slot % 4;
+  const row = Math.floor(slot / 4);
+  return {
+    x: door[0] + (column - 1.5) * 1.15,
+    z: door[1] + 1.7 + row * 1.15,
+    rot: Math.PI,
+    room: roomId,
+  };
+}
+
+export function liveStands(rows: Array<{ handle: string; arenaId: string }>): Map<string, AgentStand> {
+  const counts: Record<string, number> = {};
+  const out = new Map<string, AgentStand>();
+  for (const row of rows) {
+    const handle = row.handle.trim();
+    const room = ARENA_ROOM[row.arenaId];
+    if (!handle || !room || out.has(handle)) continue;
+    const slot = counts[room] ?? 0;
+    counts[room] = slot + 1;
+    const stand = standFor(room, slot);
+    if (stand) out.set(handle, stand);
+  }
+  return out;
 }
 
 let transitionMs = 0;
@@ -363,6 +404,8 @@ export type CityAgent = {
   accountId: string;
   name: string;
   skin: SkinTraits;
+  /** Set only from a real match, queue, claim, or finished seat. */
+  stand?: AgentStand;
 };
 
 export const CITY_AGENTS: CityAgent[] = [

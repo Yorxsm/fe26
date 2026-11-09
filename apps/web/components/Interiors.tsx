@@ -2,7 +2,7 @@
 
 import "@/lib/loadProgress";
 import { useGLTF } from "@react-three/drei";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { FRAME_BOARDS, type BoardSign, type FrameBoard } from "@/lib/boards";
 import { seasonBoardRows, type SeasonBoardRow } from "@/lib/seasonBoard";
@@ -636,53 +636,6 @@ function StadiumBeams() {
   );
 }
 
-function SeatCrowd() {
-  const bodies = useRef<THREE.InstancedMesh>(null);
-  const heads = useRef<THREE.InstancedMesh>(null);
-  const spots = useMemo(() => {
-    const list: Array<[number, number, number]> = [];
-    const north: Array<[number, number]> = [[-3.55, 0.32], [-4.4, 0.72], [-5.2, 1.12]];
-    north.forEach(([z, y]) => {
-      for (let seat = 0; seat < 7; seat += 1) list.push([-2.55 + seat * 0.85, y + 0.58, z]);
-    });
-    const sides: Array<[number, number]> = [[4.55, 0.38], [5.5, 0.8]];
-    sides.forEach(([x, y]) => {
-      for (const z of [-2.2, -1.3, -0.4, 0.5, 1.4]) {
-        list.push([x, y + 0.58, z]);
-        list.push([-x, y + 0.58, z]);
-      }
-    });
-    return list;
-  }, []);
-  useLayoutEffect(() => {
-    const dummy = new THREE.Object3D();
-    spots.forEach(([x, y, z], index) => {
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1, 1, 1);
-      dummy.updateMatrix();
-      bodies.current?.setMatrixAt(index, dummy.matrix);
-      dummy.position.set(x, y + 0.34, z);
-      dummy.updateMatrix();
-      heads.current?.setMatrixAt(index, dummy.matrix);
-    });
-    if (bodies.current) bodies.current.instanceMatrix.needsUpdate = true;
-    if (heads.current) heads.current.instanceMatrix.needsUpdate = true;
-  }, [spots]);
-  return (
-    <>
-      <instancedMesh ref={bodies} args={[undefined, undefined, spots.length]} frustumCulled={false}>
-        <capsuleGeometry args={[0.12, 0.22, 2, 6]} />
-        <meshStandardMaterial color="#3a2a24" roughness={0.72} />
-      </instancedMesh>
-      <instancedMesh ref={heads} args={[undefined, undefined, spots.length]} frustumCulled={false}>
-        <sphereGeometry args={[0.1, 8, 6]} />
-        <meshStandardMaterial color="#c4a484" roughness={0.6} />
-      </instancedMesh>
-    </>
-  );
-}
-
 export function Interiors({ focusId, frameMode }: { focusId: string | null; frameMode: "in" | "out" }) {
   if (frameMode !== "in" || !focusId || !ROOMS[focusId]) return null;
   const room = ROOMS[focusId];
@@ -697,7 +650,6 @@ export function Interiors({ focusId, frameMode }: { focusId: string | null; fram
         <pointLight key={lamp.at.join(",")} position={lamp.at} color={lamp.color} intensity={lamp.intensity} distance={lamp.distance} decay={2} />
       ))}
       <RoomBoards id={focusId} />
-      {focusId === "cup-stadium" ? <SeatCrowd /> : null}
     </group>
   );
 }

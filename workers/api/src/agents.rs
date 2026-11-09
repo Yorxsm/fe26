@@ -1807,14 +1807,31 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
                 })
             });
             let vault = play.vault.as_ref().map(|vault| {
+                let handles: HashMap<String, String> = play
+                    .seats
+                    .iter()
+                    .map(|seat| (seat.clone(), handle_of(state, seat)))
+                    .collect();
+                let pot = vault.pot.as_ref().map(|pot| {
+                    serde_json::json!({
+                        "outcome": pot.outcome,
+                        "rule": pot.rule,
+                        "settled": pot.settled,
+                        "pays": pot.pays,
+                        "finality": pot.finality,
+                        "txHash": pot.tx_hash,
+                    })
+                });
                 serde_json::json!({
                     "round": vault.round,
                     "rounds": crate::vault::MAX_ROUNDS,
                     "ended": vault.ended,
+                    "winner": vault.winner_handle(&handles),
                     "scores": vault.seats.iter().map(|seat| serde_json::json!({
                         "handle": handle_of(state, &seat.agent_id),
                         "roundWins": seat.round_wins,
                     })).collect::<Vec<_>>(),
+                    "pot": pot,
                 })
             });
             serde_json::json!({
@@ -2096,7 +2113,6 @@ fn vault_act(
             .unwrap_or_else(|| value.to_string())
     });
     let near = near_by_agent(state);
-    let passports = state.book.passports.clone();
     let play = &mut state.book.matches[index];
     let (rows, ready, ended) = {
         let Some(vault) = play.vault.as_mut() else {
@@ -2132,7 +2148,7 @@ fn vault_act(
         play.turn = play.turn.saturating_add(1);
         if ended {
             play.status = "over".to_string();
-            seal_match_pot(&near, &passports, play);
+            seal_match_pot(&near, play);
         } else {
             play.deadline_unix = now.saturating_add(TURN_SECS);
         }
@@ -2366,7 +2382,6 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
 
 fn settle(state: &mut ArenaState, now: u64) -> bool {
     let near = near_by_agent(state);
-    let passports = state.book.passports.clone();
     let mut changed = false;
     for play in &mut state.book.matches {
         while play.status == "live" && now >= play.deadline_unix {
@@ -2390,7 +2405,7 @@ fn settle(state: &mut ArenaState, now: u64) -> bool {
                 play.turn = play.turn.saturating_add(1);
                 if ended {
                     play.status = "over".to_string();
-                    seal_match_pot(&near, &passports, play);
+                    seal_match_pot(&near, play);
                 } else {
                     play.deadline_unix = now.saturating_add(TURN_SECS);
                 }
@@ -2437,11 +2452,7 @@ fn near_by_agent(state: &ArenaState) -> HashMap<String, String> {
         .collect()
 }
 
-fn seal_match_pot(
-    near: &HashMap<String, String>,
-    passports: &[crate::agents::Passport],
-    play: &mut PlayMatch,
-) {
+fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
     let match_id = play.match_id.clone();
     let seats: Vec<(String, i64, Option<String>)> = play
         .seats
@@ -2455,7 +2466,8 @@ fn seal_match_pot(
             (seat.clone(), score, near.get(seat).cloned())
         })
         .collect();
-    let links = crate::passport::seat_token_links(&play.seats, near, passports);
+    let reads = crate::passport::match_end_chain();
+    let links = crate::passport::seat_links_from_chain(&play.seats, near, reads.as_ref());
     if let Some(vault) = play.vault.as_mut() {
         vault.seal_vault_result(&match_id, &seats);
         if let Some(pot) = vault.pot.as_mut() {
@@ -4791,6 +4803,234 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"));
+    }
+
+    struct ChainReset;
+
+    impl Drop for ChainReset {
+        fn drop(&mut self) {
+            crate::passport::set_match_end_chain(None);
+        }
+    }
+
+    fn seat_passport(state: &mut ArenaState, agent_id: &str, token_id: &str) {
+        state.book.passports.push(Passport {
+            passport_id: format!("ppt_{token_id}"),
+            token_id: Some(token_id.to_string()),
+            agent_id: agent_id.to_string(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 0,
+            career: None,
+        });
+    }
+
+    fn creditable(links: Vec<crate::vault::SeatTokenLink>) -> crate::vault::PotAuthorization {
+        crate::vault::PotAuthorization {
+            idempotency_key: "pot:mt_chain".into(),
+            pays: true,
+            contract_would_accept_resolve: false,
+            outcome: "win".into(),
+            reason: "test".into(),
+            rule: "winner-takes-all".into(),
+            pay_rule: "winner-takes-all".into(),
+            settlement_method: "settle_vault".into(),
+            finality: "FINAL".into(),
+            winner: "ann.testnet".into(),
+            participants: vec!["ann.testnet".into(), "bob.testnet".into()],
+            settled: true,
+            tx_hash: "C".repeat(44),
+            creator: "ann.testnet".into(),
+            payouts: vec![crate::vault::VaultPayout {
+                account: "ann.testnet".into(),
+                amount: "9".into(),
+            }],
+            seat_links: links,
+        }
+    }
+
+    #[test]
+    fn a_stale_api_transfer_is_not_credited_at_match_end() {
+        let _reset = ChainReset;
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"ann.testnet"}"#,
+                Some(&alpha),
+            )
+            .0,
+            200
+        );
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"bob.testnet"}"#,
+                Some(&bravo),
+            )
+            .0,
+            200
+        );
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
+        seat_passport(&mut state, &alpha_id, "disp_stale");
+        let mut reads = std::collections::HashMap::new();
+        reads.insert(
+            alpha_id.clone(),
+            crate::passport::ChainSeatBinding::Token(String::new()),
+        );
+        reads.insert(
+            bravo_id.clone(),
+            crate::passport::ChainSeatBinding::Token(String::new()),
+        );
+        crate::passport::set_match_end_chain(Some(reads));
+        state.book.matches[0].vault.as_mut().unwrap().round = crate::vault::MAX_ROUNDS;
+        let match_id = state.book.matches[0].match_id.clone();
+        let turn = state.book.matches[0].turn;
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        for (token, kind) in [(&alpha, "a"), (&bravo, "b")] {
+            let body = format!(
+                r#"{{"turn":{turn},"action":{{"type":"scout"}},"clientRequestId":"stale-{kind}"}}"#
+            );
+            let response = call(&mut state, "POST", &act, &body, Some(token));
+            assert_eq!(response.0, 200, "{}", response.1);
+        }
+        assert_eq!(state.book.matches[0].status, "over");
+        let links = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap()
+            .seat_links
+            .clone();
+        let alpha_link = links.iter().find(|link| link.agent_id == alpha_id).unwrap();
+        assert_eq!(alpha_link.source, "unbound-at-match-end");
+        assert!(alpha_link.token_id.is_empty());
+        assert_eq!(alpha_link.near_account, "ann.testnet");
+        assert_eq!(state.book.passports[0].status, "active");
+        assert_eq!(
+            state.book.passports[0].token_id.as_deref(),
+            Some("disp_stale")
+        );
+        crate::passport::credit_passports(&mut state.book.passports, &creditable(links));
+        assert!(state.book.passports[0].career.is_none());
+    }
+
+    #[test]
+    fn an_rpc_failure_ends_the_match_without_credit() {
+        let _reset = ChainReset;
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"ann.testnet"}"#,
+                Some(&alpha),
+            )
+            .0,
+            200
+        );
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
+        seat_passport(&mut state, &alpha_id, "disp_live");
+        let mut reads = std::collections::HashMap::new();
+        reads.insert(
+            alpha_id.clone(),
+            crate::passport::ChainSeatBinding::Unverified,
+        );
+        reads.insert(bravo_id, crate::passport::ChainSeatBinding::Unverified);
+        crate::passport::set_match_end_chain(Some(reads));
+        state.book.matches[0].vault.as_mut().unwrap().round = crate::vault::MAX_ROUNDS;
+        state.book.matches[0].deadline_unix = NOW;
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches?now={NOW}&limit=5"),
+            "",
+            None,
+        );
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        assert_eq!(state.book.matches[0].status, "over");
+        assert_eq!(listed.1["matches"][0]["status"], "over");
+        let links = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap()
+            .seat_links
+            .clone();
+        assert!(links
+            .iter()
+            .all(|link| link.source == "unverified-at-match-end"));
+        assert!(links.iter().all(|link| link.token_id.is_empty()));
+        assert_eq!(state.book.passports[0].status, "active");
+        assert_eq!(
+            state.book.passports[0].token_id.as_deref(),
+            Some("disp_live")
+        );
+        crate::passport::credit_passports(&mut state.book.passports, &creditable(links));
+        assert!(state.book.passports[0].career.is_none());
+        let match_id = state.book.matches[0].match_id.clone();
+        let public = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches/{match_id}?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(public.0, 200, "{}", public.1);
+        assert_eq!(public.1["status"], "over");
+        assert!(public.1["vault"]["pot"].is_object());
     }
 
     #[test]

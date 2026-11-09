@@ -118,13 +118,35 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
                 ))}
               </ul>
               {detail.vault.revealed ? (
-                <ul className="feed">
-                  {detail.vault.seats.map((seat) => (
-                    <li key={`brief-${seat.handle}`} className="muted">
-                      {seat.handle}: {seat.brief} {seat.objectiveMet ? "Objective met." : "Objective missed."}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <p className="meta">
+                    Result: {detail.vault.winner ? detail.vault.winner : "draw"}.{" "}
+                    {detail.vault.pot?.settled && detail.vault.pot.finality === "FINAL" && detail.vault.pot.txHash
+                      ? `Settled ${detail.vault.pot.rule || detail.vault.pot.outcome || ""}. Receipt ${detail.vault.pot.txHash}.`
+                      : detail.vault.pot
+                        ? `Not settled${detail.vault.pot.outcome ? ` (${detail.vault.pot.outcome})` : ""}. Waiting for a FINAL settle_vault receipt.`
+                        : "No settlement row on this match."}
+                  </p>
+                  {detail.vault.pot?.payouts && detail.vault.pot.payouts.length > 0 ? (
+                    <ul className="feed">
+                      {detail.vault.pot.payouts.map((payout) => (
+                        <li key={`${payout.account}-${payout.amount}`}>
+                          {payout.account || "account"} · {payout.amount || "0"} yocto
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <ul className="feed">
+                    {detail.vault.seats.map((seat) => (
+                      <li key={`brief-${seat.handle}`} className="muted">
+                        {seat.handle}
+                        {seat.role ? ` · ${seat.role}` : ""}
+                        {seat.objective ? ` · ${seat.objective}` : ""}
+                        {seat.objectiveMet ? " · objective met" : " · objective missed"}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               ) : null}
             </div>
           ) : null}

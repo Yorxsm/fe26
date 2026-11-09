@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiBase } from "@/lib/protocol";
 
 type Settlement = {
   matchId: string;
@@ -22,7 +23,7 @@ export function VaultSettlements() {
   const [note, setNote] = useState("Receipt-verified Vault matches.");
 
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_FE2VI_API_URL || "https://api.fe2vi.space";
+    const base = apiBase();
     let stopped = false;
     fetch(`${base}/v1/vault/settlements`)
       .then((response) => (response.ok ? response.json() : null))
