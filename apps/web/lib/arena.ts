@@ -78,6 +78,17 @@ export type VaultPublic = {
     intent: string | null;
   }[];
   revealed: boolean;
+  winner?: string | null;
+  pot?: {
+    outcome?: string;
+    rule?: string;
+    settled?: boolean;
+    pays?: boolean;
+    finality?: string;
+    txHash?: string;
+    reason?: string;
+    payouts?: Array<{ account?: string; amount?: string }>;
+  } | null;
 };
 
 export type ArenaSeatScore = {

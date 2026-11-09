@@ -35,12 +35,12 @@ import {
   X,
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
-import { DISTRICTS, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { DISTRICTS, liveStands, markRoomTransition, type CityAgent, type District } from "@/lib/city";
 import { loadShownFloor, pendingLoadSteps, rememberLoadFloor } from "@/lib/loadProgress";
 import { fetchAgents } from "@/lib/agents";
+import { displayName } from "@/lib/avatar";
 import { apiBase } from "@/lib/protocol";
 import { defaultSkin } from "@/lib/skin";
-import { fixtureEvents } from "@/lib/fixtures";
 import {
   EMPTY_SAVE,
   QUEST_DEFS,
@@ -103,6 +103,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   const path = usePathname();
   const [phase, setPhase] = useState<Phase>("boot");
   const [visitors, setVisitors] = useState<CityAgent[]>([]);
+  const [activityLine, setActivityLine] = useState("Reading the arena.");
   const [matches, setMatches] = useState<RoomMatch[] | null>(null);
   const [queues, setQueues] = useState<Record<string, string[]>>({});
   const [claims, setClaims] = useState<WarClaimRow[]>([]);
@@ -217,49 +218,95 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   useEffect(() => {
     const base = apiBase();
     let dead = false;
+    let crewKey = "";
+    let matchKey = "";
+    let lineKey = "";
     const pull = () => {
-      fetch(`${base}/v1/matches?limit=20`, { cache: "no-store" })
+      const matchesPromise = fetch(`${base}/v1/matches?limit=20`, { cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
-        .then((body: { matches?: RoomMatch[]; queues?: Record<string, string[]>; claims?: WarClaimRow[] } | null) => {
-          if (dead || !body) return;
-          const next = Array.isArray(body.matches) ? body.matches : [];
-          setQueues(body.queues && typeof body.queues === "object" ? body.queues : {});
-          setClaims(Array.isArray(body.claims) ? body.claims : []);
+        .catch(() => null);
+      const namesPromise = fetchAgents();
+      const listingsPromise = fetch(`${base}/v1/market/listings`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
+      const settledPromise = fetch(`${base}/v1/vault/settlements`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
+      Promise.all([matchesPromise, namesPromise, listingsPromise, settledPromise]).then(([body, roster, listings, settled]) => {
+        if (dead) return;
+        const feed = body as { matches?: RoomMatch[]; queues?: Record<string, string[]>; claims?: WarClaimRow[] } | null;
+        const next = Array.isArray(feed?.matches) ? feed.matches : [];
+        const nextQueues = feed?.queues && typeof feed.queues === "object" ? feed.queues : {};
+        const nextClaims = Array.isArray(feed?.claims) ? feed.claims : [];
+        if (feed) {
           const live = next.find((match) => match.status === "live" && match.last);
           const token = live?.last ? `${live.matchId}:${live.last.handle}:${live.last.type}:${live.turn}` : "";
           if (token && token !== heard.current) {
             heard.current = token;
             audio.click();
           }
-          setMatches(next);
-        })
-        .catch(() => {
-          if (!dead) setMatches((current) => current ?? []);
-        });
+          const nextMatchKey = JSON.stringify([next, nextQueues, nextClaims]);
+          if (nextMatchKey !== matchKey) {
+            matchKey = nextMatchKey;
+            setQueues(nextQueues);
+            setClaims(nextClaims);
+            setMatches(next);
+          }
+        } else {
+          setMatches((current) => current ?? []);
+        }
+        const names = new Map<string, string>();
+        if (roster.source === "arena") {
+          for (const row of roster.agents) {
+            if (row.handle) names.set(row.handle, row.name || row.handle);
+          }
+        }
+        const placed: Array<{ handle: string; arenaId: string }> = [];
+        for (const match of next) {
+          if (match.status !== "live") continue;
+          for (const seat of match.seats) placed.push({ handle: seat, arenaId: match.arenaId });
+        }
+        for (const [arenaId, handles] of Object.entries(nextQueues)) {
+          for (const handle of handles) placed.push({ handle, arenaId });
+        }
+        for (const claim of nextClaims) placed.push({ handle: claim.handle, arenaId: "war" });
+        const finished = next.find((match) => match.status !== "live" && match.seats.length > 0);
+        if (finished) {
+          for (const seat of finished.seats) placed.push({ handle: seat, arenaId: finished.arenaId });
+        }
+        const stands = liveStands(placed);
+        const crew: CityAgent[] = [...stands.entries()].map(([handle, stand]) => ({
+          accountId: handle,
+          name: names.get(handle) || displayName(handle),
+          skin: defaultSkin(handle),
+          stand,
+        }));
+        const key = crew.map((agent) => `${agent.accountId}@${agent.stand?.room}:${agent.stand?.x.toFixed(2)}`).join("|");
+        if (key !== crewKey) {
+          crewKey = key;
+          setVisitors(crew);
+        }
+        const listed = listings && Array.isArray((listings as { listings?: unknown[] }).listings)
+          ? (listings as { listings: unknown[] }).listings.length
+          : null;
+        const receipts = settled && Array.isArray((settled as { matches?: unknown[] }).matches)
+          ? (settled as { matches: unknown[] }).matches.length
+          : null;
+        const market = listed === null ? "NFT market unread" : listed === 0 ? "NFT market: no listings" : `NFT market: ${listed} listed`;
+        const vault = receipts === null ? "Vault receipts unread" : receipts === 0 ? "No settled Vault receipt" : `${receipts} settled Vault receipt${receipts === 1 ? "" : "s"}`;
+        const presence = !feed ? "Arena unread" : crew.length === 0 ? "No live activity" : `${crew.length} live`;
+        const nextLine = `${presence}. ${market}. ${vault}.`;
+        if (nextLine !== lineKey) {
+          lineKey = nextLine;
+          setActivityLine(nextLine);
+        }
+      });
     };
     pull();
     const timer = window.setInterval(pull, 8000);
     return () => {
       dead = true;
       window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let dead = false;
-    fetchAgents().then((result) => {
-      if (dead || result.source !== "arena") return;
-      const next = result.agents
-        .filter((row) => (row.points ?? 0) > 0 && row.handle)
-        .map((row) => ({
-          accountId: row.handle as string,
-          name: row.name || (row.handle as string),
-          skin: defaultSkin(row.handle as string),
-        }));
-      setVisitors(next);
-    });
-    return () => {
-      dead = true;
     };
   }, []);
 
@@ -390,6 +437,13 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function selectRoom(id: string) {
+    const district = DISTRICTS.find((entry) => entry.id === id);
+    if (district?.status === "soon") {
+      setPhase("city");
+      setFocusId(null);
+      setNote(`${district.name} is coming soon. Nothing here is live yet.`);
+      return;
+    }
     setPhase("city");
     setFrameMode("in");
     setFocusId(id);
@@ -427,8 +481,12 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function pick(district: District) {
+    if (district.id === "nft-market") {
+      window.location.href = district.href;
+      return;
+    }
     if (district.status === "soon") {
-      setNote(`${district.name} is not open.`);
+      setNote(`${district.name} is coming soon. Nothing here is live yet.`);
       return;
     }
     selectRoom(district.id);
@@ -571,6 +629,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                           <span className="live-dot" aria-hidden="true" />
                           <Tick value={visitors.length} /> in the city
                         </p>
+                        <p className="hud-note">{activityLine}</p>
+                        {(poster || lineup || street || focusId) && matches !== null && visitors.length === 0 ? (
+                          <p className="hud-note">No live agents in this view.</p>
+                        ) : null}
                         <Minimap
                           spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
                           active={focusId}
@@ -621,13 +683,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                       )}
                       {save.tutorial === 2 && (
                         <>
-                          <ul className="feed">
-                            {fixtureEvents.map((event) => (
-                              <li className="line" key={event.id}>
-                                {event.summary} <span className="meta">{event.source}</span>
-                              </li>
-                            ))}
-                          </ul>
+                          <p>{activityLine}</p>
                           <button type="button" onClick={() => commit({ ...save, tutorial: 3 })}>
                             <ScrollText aria-hidden="true" strokeWidth={1.75} />
                             Feed read

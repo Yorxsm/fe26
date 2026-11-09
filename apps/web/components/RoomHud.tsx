@@ -136,7 +136,14 @@ export type RoomMatch = {
   deadlineAt: string | null;
   seats: string[];
   last: { type: string; handle: string; points: number } | null;
-  vault: { round: number; rounds: number; ended: boolean; scores: Array<{ handle: string; roundWins: number }> } | null;
+  vault: {
+    round: number;
+    rounds: number;
+    ended: boolean;
+    winner?: string | null;
+    scores: Array<{ handle: string; roundWins: number }>;
+    pot?: { outcome?: string; rule?: string; settled?: boolean; pays?: boolean; finality?: string; txHash?: string } | null;
+  } | null;
 };
 
 const LOBBY_SIGNS = [
@@ -219,11 +226,20 @@ function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: 
   }
   const seats = focus.seats.filter(Boolean).join(" · ") || "Open seats";
   const vault = focus.vault;
+  const result = vault?.ended ? (vault.winner ? `Result ${vault.winner}.` : "Result draw.") : "";
+  const pot = vault?.pot;
+  const settlement = !vault?.ended
+    ? ""
+    : pot?.settled && pot.finality === "FINAL" && pot.txHash
+      ? `Settled ${pot.rule || pot.outcome || "receipt"}.`
+      : pot
+        ? `Not settled${pot.outcome ? ` (${pot.outcome})` : ""}.`
+        : "No settlement row.";
   const summary = live
     ? vault
       ? `Round ${vault.round} of ${vault.rounds}. ${vault.scores.map((seat) => `${seat.handle} ${seat.roundWins}`).join(" · ") || seats}. Turn ${live.turn}.`
       : `${seats}. Turn ${live.turn}.`
-    : `Last match · ${focus.status}. ${seats}.`;
+    : `Last match · ${focus.status}. ${seats}. ${result} ${settlement}`.trim();
   const rows = mine
     .map((match) => match.last)
     .filter((row): row is NonNullable<RoomMatch["last"]> => Boolean(row?.type && row.handle))
@@ -251,6 +267,24 @@ export function RoomHud({
 }) {
   const about = ABOUT[roomId];
   const [open, setOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(true);
+  const [activityOpen, setActivityOpen] = useState(true);
+  useEffect(() => {
+    setBoardOpen(sessionStorage.getItem("fe2vi.room.board") !== "closed");
+    setActivityOpen(sessionStorage.getItem("fe2vi.room.activity") !== "closed");
+  }, []);
+  const toggleBoard = () => {
+    setBoardOpen((value) => {
+      sessionStorage.setItem("fe2vi.room.board", value ? "closed" : "open");
+      return !value;
+    });
+  };
+  const toggleActivity = () => {
+    setActivityOpen((value) => {
+      sessionStorage.setItem("fe2vi.room.activity", value ? "closed" : "open");
+      return !value;
+    });
+  };
   const [full, setFull] = useState(false);
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
@@ -350,13 +384,15 @@ export function RoomHud({
         {about.title}
       </button>
       <p className="room-goal">{about.works}</p>
-      <section className={full ? "room-board is-full" : "room-board"} aria-label={`${about.title} leaderboard`}>
+      <section className={full ? `room-board is-full${boardOpen ? "" : " is-collapsed"}` : `room-board${boardOpen ? "" : " is-collapsed"}`} aria-label={`${about.title} leaderboard`}>
         <header className="room-board-head">
-          <span>
-            <Trophy aria-hidden="true" strokeWidth={1.75} />
-            <h2>{about.title} board</h2>
-          </span>
-          <span className="meta">Season</span>
+          <button type="button" className="room-fold" aria-expanded={boardOpen} onClick={toggleBoard}>
+            <span>
+              <Trophy aria-hidden="true" strokeWidth={1.75} />
+              <h2>{about.title} board</h2>
+            </span>
+            <span className="meta">{boardOpen ? "Hide" : "Show"}</span>
+          </button>
         </header>
         {rows === null ? <p className="meta">Reading the board…</p> : null}
         {rows !== null && boardError ? <p className="meta">Board unavailable. The relay did not answer.</p> : null}
@@ -382,8 +418,11 @@ export function RoomHud({
           NFT Market
         </a>
       </section>
-      <section className="room-activity" aria-label={`${about.title} activity`}>
-        <h2>What's happening</h2>
+      <section className={activityOpen ? "room-activity" : "room-activity is-collapsed"} aria-label={`${about.title} activity`}>
+        <button type="button" className="room-fold" aria-expanded={activityOpen} onClick={toggleActivity}>
+          <h2>What's happening</h2>
+          <span className="meta">{activityOpen ? "Hide" : "Show"}</span>
+        </button>
         <p>{activity.summary}{liveDeadline(matches, slug)}</p>
         {activity.rows.length ? (
           <ul>

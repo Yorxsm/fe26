@@ -5,7 +5,7 @@ use fe2vi_core::{
     districts, follow as follow_edge, unfollow as unfollow_edge, PointRoom, PublicRow,
 };
 use fe2vi_intents::{
-    issue_session, live_gate, mock_act, policy_from_caps, redact_secrets, revoke_session,
+    issue_session, live_gate, policy_from_caps, redact_secrets, revoke_session,
     MOCK_USD_PER_NEAR_CENTS,
 };
 use serde::Deserialize;
@@ -569,6 +569,10 @@ pub fn revoke_grant(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome 
 struct ActIn {
     grant_id: String,
     amount_yocto: String,
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    signed_data: Option<serde_json::Value>,
 }
 
 pub fn intents_act(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
@@ -596,9 +600,34 @@ pub fn intents_act(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             )
         }
     };
+    if let Some(host) = body.host.as_deref() {
+        if let Err(message) = fe2vi_intents::intents_host_allowed(host) {
+            return http(403, "application/json", error_body(message), false, None);
+        }
+    }
+    let mode = if body.signed_data.is_some() {
+        "testnet-signed"
+    } else {
+        "policy-only"
+    };
     let now = query_now(incoming.path);
-    match mock_act(&mut state.grants, &body.grant_id, amount, &state.caps, now) {
-        Ok(value) => json(200, &value, true, None),
+    match fe2vi_intents::policy_act(
+        &mut state.grants,
+        &body.grant_id,
+        amount,
+        &state.caps,
+        now,
+        mode,
+    ) {
+        Ok(mut value) => {
+            if let Some(object) = value.as_object_mut() {
+                object.insert("broadcast".into(), serde_json::json!(false));
+                if let Some(host) = body.host {
+                    object.insert("host".into(), serde_json::json!(host));
+                }
+            }
+            json(200, &value, true, None)
+        }
         Err(err) => http(403, "application/json", error_body(err.code()), false, None),
     }
 }
@@ -682,8 +711,31 @@ mod tests {
             "/v1/intents/act?now=1000",
             &format!(r#"{{"grant_id":"{grant_id}","amount_yocto":"1"}}"#),
         ));
-        assert_eq!(acted["mode"], "mock");
+        assert_eq!(acted["mode"], "policy-only");
         assert_eq!(acted["broadcast"], false);
         assert!(state.events.iter().all(|event| !event.verified));
+        let mainnet = call(
+            &mut state,
+            "POST",
+            "/v1/intents/act?now=1000",
+            &format!(
+                r#"{{"grant_id":"{grant_id}","amount_yocto":"1","host":"https://api.agentsonintents.com"}}"#
+            ),
+        );
+        match mainnet {
+            Outcome::Http { status, .. } => assert_eq!(status, 403),
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+        let signed = body_of(call(
+            &mut state,
+            "POST",
+            "/v1/intents/act?now=1000",
+            &format!(
+                r#"{{"grant_id":"{grant_id}","amount_yocto":"1","host":"https://www.usetidepool.tech","signed_data":{{"standard":"nep413"}}}}"#
+            ),
+        ));
+        assert_eq!(signed["mode"], "testnet-signed");
+        assert_eq!(signed["broadcast"], false);
+        assert_eq!(signed["host"], "https://www.usetidepool.tech");
     }
 }

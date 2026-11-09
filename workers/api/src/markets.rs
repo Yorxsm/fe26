@@ -10,7 +10,7 @@ use fe2vi_market::{
 };
 use worker::*;
 
-const INFO_URL: &str = "https://api.hyperliquid.xyz/info";
+const INFO_URL: &str = "https://api.hyperliquid-testnet.xyz/info";
 
 pub async fn markets(_env: &Env, dex: &str) -> (String, bool) {
     match live_markets(dex).await {

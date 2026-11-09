@@ -105,6 +105,31 @@ pub struct PotAuthorization {
     /// Chain creator. Cancel refunds this account. A win or draw pays participants.
     #[serde(default)]
     pub creator: String,
+    /// Payees copied from the accepted FINAL receipt. Empty until that receipt matches.
+    #[serde(default)]
+    pub payouts: Vec<VaultPayout>,
+    /// Token bound to each seated agent when the match ended. Empty means no credit.
+    #[serde(default)]
+    pub seat_links: Vec<SeatTokenLink>,
+}
+
+/// The agent who held a seat, and the token the chain showed bound then.
+/// `source` is `seat-at-match-end`, `unbound-at-match-end`, or
+/// `unverified-at-match-end`. Only `seat-at-match-end` can receive credit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatTokenLink {
+    pub agent_id: String,
+    pub near_account: String,
+    pub token_id: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultPayout {
+    pub account: String,
+    pub amount: String,
 }
 
 fn awaiting_contract_view() -> String {
@@ -471,7 +496,7 @@ impl VaultMatch {
             .collect()
     }
 
-    fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
+    pub(crate) fn winner_handle(&self, handles: &HashMap<String, String>) -> serde_json::Value {
         if !self.ended || self.seats.is_empty() {
             return serde_json::Value::Null;
         }
@@ -667,6 +692,8 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         settled: false,
         tx_hash: String::new(),
         creator: String::new(),
+        payouts: Vec::new(),
+        seat_links: Vec::new(),
     }
 }
 
@@ -920,8 +947,109 @@ pub fn confirm_vault_receipt(
     next.settled = true;
     next.pays = true;
     next.tx_hash = tx_hash.to_string();
+    next.payouts = expected
+        .into_iter()
+        .map(|(account, amount)| VaultPayout {
+            account,
+            amount: amount.to_string(),
+        })
+        .collect();
     normalize_vault_pot(&mut next);
     Ok(next)
+}
+
+/// Fold one verified settlement into the token career. A repeat match id does nothing.
+/// Unsettled rows, empty hashes, and accounts that did not play are ignored.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn apply_receipt_to_career(
+    career: &mut serde_json::Value,
+    near: &str,
+    pot: &PotAuthorization,
+) -> bool {
+    let near = near.trim();
+    if near.is_empty()
+        || !pot.settled
+        || !pot.pays
+        || pot.finality != "FINAL"
+        || pot.tx_hash.trim().is_empty()
+        || pot.settlement_method != "settle_vault"
+        || !pot.participants.iter().any(|account| account == near)
+    {
+        return false;
+    }
+    let match_id = pot
+        .idempotency_key
+        .strip_prefix("pot:")
+        .unwrap_or("")
+        .to_string();
+    if match_id.is_empty() {
+        return false;
+    }
+    let (wins, draws, losses) = match pot.outcome.as_str() {
+        "win" if pot.winner == near => (1_u64, 0, 0),
+        "win" => (0, 0, 1),
+        "draw" => (0, 1, 0),
+        _ => return false,
+    };
+    if !career.is_object() {
+        *career = serde_json::json!({});
+    }
+    let root = career.as_object_mut().unwrap();
+    let record = root
+        .entry("vaultReceipts")
+        .or_insert_with(|| serde_json::json!({}));
+    if !record.is_object() {
+        *record = serde_json::json!({});
+    }
+    let record = record.as_object_mut().unwrap();
+    let mut ids: Vec<String> = record
+        .get("matchIds")
+        .and_then(|value| value.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if ids.iter().any(|id| id == &match_id) {
+        return false;
+    }
+    let payout = pot
+        .payouts
+        .iter()
+        .filter(|row| row.account == near)
+        .filter_map(|row| row.amount.parse::<u128>().ok())
+        .fold(0_u128, u128::saturating_add);
+    let prior = record
+        .get("payoutYocto")
+        .and_then(|value| value.as_str())
+        .and_then(|text| text.parse::<u128>().ok())
+        .unwrap_or(0);
+    let next_wins = count_field(record, "wins") + wins;
+    let next_draws = count_field(record, "draws") + draws;
+    let next_losses = count_field(record, "losses") + losses;
+    ids.push(match_id);
+    record.insert("wins".into(), serde_json::json!(next_wins));
+    record.insert("draws".into(), serde_json::json!(next_draws));
+    record.insert("losses".into(), serde_json::json!(next_losses));
+    record.insert(
+        "payoutYocto".into(),
+        serde_json::Value::String(prior.saturating_add(payout).to_string()),
+    );
+    record.insert("matchIds".into(), serde_json::json!(ids));
+    record.insert(
+        "source".into(),
+        serde_json::Value::String("settled-receipts".into()),
+    );
+    true
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn count_field(record: &serde_json::Map<String, serde_json::Value>, key: &str) -> u64 {
+    record
+        .get(key)
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -1626,8 +1754,9 @@ mod tests {
 
     #[test]
     fn read_only_final_tx_http_rejects_the_crossed_match() {
-        // HTTP read of the two existing FINAL transactions. This is not a
-        // production receipt-route call and it does not send a transaction.
+        // HTTP read of the two existing FINAL transactions. The non-archival
+        // testnet RPC no longer keeps them, so this read uses Fastnear's
+        // archival testnet endpoint. It does not send a transaction.
         let factory = "factory.fe2vidisp7a3c.testnet";
         let heist = "heist.fe2vidisp7a3c.testnet";
         let win_hash = "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61";
@@ -1699,7 +1828,7 @@ mod tests {
                 "40",
                 "-X",
                 "POST",
-                "https://rpc.testnet.fastnear.com",
+                "https://archival-rpc.testnet.fastnear.com",
                 "-H",
                 "content-type: application/json",
                 "--data",
@@ -1719,6 +1848,61 @@ mod tests {
                 hash
             )
         })
+    }
+
+    #[test]
+    fn a_verified_receipt_credits_the_token_once() {
+        let pot_yocto = 20_000_000_000_000_000_000_000_u128;
+        let hash = "E".repeat(44);
+        let mut win = stored_pot("mt_career");
+        win.outcome = "win".to_string();
+        win.winner = "ann.testnet".to_string();
+        win.participants = vec!["ann.testnet".into(), "bob.testnet".into()];
+        win.creator = "ann.testnet".to_string();
+        let tx = captured(
+            "mt_career",
+            "win",
+            r#"[{"account":"ann.testnet","amount":"20000000000000000000000"}]"#,
+        );
+        let settled = confirm_vault_receipt(&win, &hash, &tx, pot_yocto, "", "").unwrap();
+        assert_eq!(settled.payouts.len(), 1);
+        let mut career = serde_json::json!({});
+        assert!(apply_receipt_to_career(
+            &mut career,
+            "ann.testnet",
+            &settled
+        ));
+        assert_eq!(career["vaultReceipts"]["wins"], 1);
+        assert_eq!(career["vaultReceipts"]["losses"], 0);
+        assert_eq!(career["vaultReceipts"]["source"], "settled-receipts");
+        assert_eq!(
+            career["vaultReceipts"]["payoutYocto"],
+            "20000000000000000000000"
+        );
+        assert!(!apply_receipt_to_career(
+            &mut career,
+            "ann.testnet",
+            &settled
+        ));
+        assert_eq!(career["vaultReceipts"]["wins"], 1);
+        let restored: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&career).unwrap()).unwrap();
+        let mut restarted = restored;
+        assert!(!apply_receipt_to_career(
+            &mut restarted,
+            "ann.testnet",
+            &settled
+        ));
+        assert_eq!(restarted["vaultReceipts"]["wins"], 1);
+        let mut loser = serde_json::json!({});
+        assert!(apply_receipt_to_career(&mut loser, "bob.testnet", &settled));
+        assert_eq!(loser["vaultReceipts"]["losses"], 1);
+        assert_eq!(loser["vaultReceipts"]["payoutYocto"], "0");
+        let mut open = settled.clone();
+        open.settled = false;
+        let mut ignored = serde_json::json!({});
+        assert!(!apply_receipt_to_career(&mut ignored, "ann.testnet", &open));
+        assert!(ignored.get("vaultReceipts").is_none());
     }
 
     #[test]

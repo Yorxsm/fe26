@@ -17,6 +17,7 @@ export {
 
 export async function fetchMarketData(): Promise<{
   listings: MarketListing[];
+  passports: MarketListing[];
   sales: MarketSale[];
   stats: MarketStats;
   contract: string;

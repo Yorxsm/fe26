@@ -1,3 +1,12 @@
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Credits",
+  "Credits for the fe2VI city, original buildings, and CC0 props.",
+  "/about",
+);
+
 export default function AboutPage() {
   return (
     <main className="board">

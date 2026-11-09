@@ -55,7 +55,8 @@ pub use types::{
 pub use vault_pot::{vault_pot_shares, vault_result_call, VaultPotCall};
 pub use venue::{
     default_venue, refuse_testnet, venue_notes, MockVenue, Quote, Venue, VenueNote,
-    HYPERLIQUID_INFO, HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_INFO,
+    HYPERLIQUID_INFO, HYPERLIQUID_MAINNET_INFO, HYPERLIQUID_TESTNET_EXCHANGE,
+    HYPERLIQUID_TESTNET_INFO,
 };
 pub use village::{
     demo_tape, demo_tape_at, districts, follow, leaderboard, unfollow, District, Fill, FollowEdge,

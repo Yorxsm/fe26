@@ -25,6 +25,67 @@ impl PassportGate {
     }
 }
 
+/// What `agent_token` on the disposable testnet passport contract returned
+/// for one seated agent. `Token("")` means the chain shows no binding.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainSeatBinding {
+    Token(String),
+    /// The Fastnear read failed. This seat gets no credit.
+    Unverified,
+}
+
+thread_local! {
+    static MATCH_END_CHAIN: std::cell::RefCell<Option<std::collections::HashMap<String, ChainSeatBinding>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install the chain snapshot for this request. `None` means the read was not
+/// attempted, which match end treats as unverified.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn set_match_end_chain(reads: Option<std::collections::HashMap<String, ChainSeatBinding>>) {
+    MATCH_END_CHAIN.with(|slot| *slot.borrow_mut() = reads);
+}
+
+pub fn match_end_chain() -> Option<std::collections::HashMap<String, ChainSeatBinding>> {
+    MATCH_END_CHAIN.with(|slot| slot.borrow().clone())
+}
+
+/// Seated agents whose match can end on this request. A quiet read does not
+/// call the chain.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn seats_pending_chain_read(
+    state: &ArenaState,
+    now: u64,
+    method: &str,
+    path: &str,
+) -> Vec<String> {
+    let action_match = if method == "POST" {
+        path.strip_prefix("/v1/matches/")
+            .and_then(|rest| rest.strip_suffix("/actions"))
+            .filter(|id| !id.is_empty() && !id.contains('/'))
+    } else {
+        None
+    };
+    let mut ids = Vec::new();
+    for play in &state.book.matches {
+        if play.status != "live" || play.vault.is_none() {
+            continue;
+        }
+        let due = now >= play.deadline_unix;
+        let acted = action_match == Some(play.match_id.as_str());
+        if !due && !acted {
+            continue;
+        }
+        for seat in &play.seats {
+            if !ids.iter().any(|id| id == seat) {
+                ids.push(seat.clone());
+            }
+        }
+    }
+    ids
+}
+
 pub fn active_for_agent(state: &ArenaState, agent_id: &str) -> bool {
     state
         .book
@@ -64,6 +125,12 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outco
         ("POST", ["v1", "agents", "me", "passport", "bind"]) => Some(bind(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "passport", "unbind"]) => {
             Some(unbind(state, incoming, now))
+        }
+        ("GET", ["v1", "agents", "me", "passport", "strategy"]) => {
+            Some(crate::strategy::read(state, incoming))
+        }
+        ("POST", ["v1", "agents", "me", "passport", "strategy"]) => {
+            Some(crate::strategy::append(state, incoming, now))
         }
         ("POST", ["v1", "internal", "passport", "jobs", "claim"]) => {
             Some(claim(state, incoming, now))
@@ -651,15 +718,14 @@ fn public_passport(state: &ArenaState, token_id: &str) -> Outcome {
     else {
         return fail(404, "not_found", "No passport with that token id.");
     };
-    json(
-        200,
-        &serde_json::json!({
-            "passport": passport_json(passport),
-            "marketUrl": "https://fe2vi.space/passports",
-        }),
-        false,
-        None,
-    )
+    let mut body = serde_json::json!({
+        "passport": passport_json(passport),
+        "marketUrl": "https://fe2vi.space/passports",
+    });
+    if let Some(token_id) = passport.token_id.clone() {
+        crate::strategy::stamp_public(&mut body, &state.book, &token_id);
+    }
+    json(200, &body, false, None)
 }
 
 pub fn yocto_to_near(yocto: &str) -> String {
@@ -721,9 +787,48 @@ pub fn listed_passport(
         "name": title,
         "seller": seller,
         "owner": owner,
+        "listed": true,
         "priceNear": yocto_to_near(price),
         "priceYocto": price,
         "approvalId": listing.get("approval_id").cloned().unwrap_or(serde_json::Value::Null),
+        "description": description,
+    }))
+}
+
+/// A passport the contract returned. `listed` is true only when the market
+/// stores an ask. An unlisted token is still shown so the page is not blank.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn market_passport(
+    token: &serde_json::Value,
+    listing: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let token_id = token
+        .get("token_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    let title = token
+        .pointer("/metadata/title")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(token_id);
+    let description = token
+        .pointer("/metadata/description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Passport on the configured contract.");
+    let owner = token
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let ask = listed_passport(token, listing);
+    Some(serde_json::json!({
+        "tokenId": token_id,
+        "name": title,
+        "owner": owner,
+        "seller": ask.as_ref().and_then(|row| row.get("seller").cloned()).unwrap_or(serde_json::Value::Null),
+        "listed": ask.is_some(),
+        "priceNear": ask.as_ref().and_then(|row| row.get("priceNear").cloned()).unwrap_or(serde_json::Value::Null),
+        "priceYocto": ask.as_ref().and_then(|row| row.get("priceYocto").cloned()).unwrap_or(serde_json::Value::Null),
+        "approvalId": ask.as_ref().and_then(|row| row.get("approvalId").cloned()).unwrap_or(serde_json::Value::Null),
         "description": description,
     }))
 }
@@ -755,6 +860,7 @@ pub fn market_from_chain(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("0");
             Some(serde_json::json!({
+                "tokenId": value.get("token_id").cloned().or_else(|| value.get("tokenId").cloned()).unwrap_or(serde_json::Value::Null),
                 "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
                 "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
                 "priceNear": yocto_to_near(price),
@@ -764,6 +870,19 @@ pub fn market_from_chain(
         }
         _ => None,
     };
+    let sales: Vec<serde_json::Value> = last_settlement
+        .as_ref()
+        .map(|value| {
+            vec![serde_json::json!({
+                "id": "last-settlement",
+                "tokenId": value.get("tokenId").cloned().unwrap_or(serde_json::Value::Null),
+                "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
+                "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
+                "priceNear": value.get("priceNear").cloned().unwrap_or(serde_json::Value::Null),
+                "note": value.get("note").cloned().unwrap_or(serde_json::Value::Null),
+            })]
+        })
+        .unwrap_or_default();
     let blockers = if network == "testnet" {
         vec!["Vault, War, Cup, and Village season points stay in the arena API. An on-chain pot opens only when the factory owner calls open_game with a deposit equal to the pot."]
     } else {
@@ -776,7 +895,7 @@ pub fn market_from_chain(
     };
     serde_json::json!({
         "listings": listings,
-        "sales": [],
+        "sales": sales,
         "lastSettlement": last_settlement,
         "stats": {
             "floorPriceNear": floor_near,
@@ -791,6 +910,125 @@ pub fn market_from_chain(
         "source": source,
         "blockers": blockers,
     })
+}
+
+/// Token bound to a seated agent when the match ended, taken only from the
+/// chain snapshot. A missing read is unverified and gives no credit. The API
+/// passport book is not a source for this snapshot.
+pub fn seat_links_from_chain(
+    seats: &[String],
+    near: &std::collections::HashMap<String, String>,
+    reads: Option<&std::collections::HashMap<String, ChainSeatBinding>>,
+) -> Vec<crate::vault::SeatTokenLink> {
+    seats
+        .iter()
+        .map(|agent_id| {
+            let near_account = near.get(agent_id).cloned().unwrap_or_default();
+            let (token_id, source) = match reads.and_then(|map| map.get(agent_id)) {
+                Some(ChainSeatBinding::Token(token)) if !token.is_empty() => {
+                    (token.clone(), "seat-at-match-end")
+                }
+                Some(ChainSeatBinding::Token(_)) => (String::new(), "unbound-at-match-end"),
+                Some(ChainSeatBinding::Unverified) | None => {
+                    (String::new(), "unverified-at-match-end")
+                }
+            };
+            crate::vault::SeatTokenLink {
+                agent_id: agent_id.clone(),
+                near_account,
+                token_id,
+                source: source.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// Token bound to a seated agent when the match ended. An empty `token_id`
+/// means the seat had no bound token, so the later receipt gives no credit.
+#[cfg(test)]
+pub fn seat_token_links(
+    seats: &[String],
+    near: &std::collections::HashMap<String, String>,
+    passports: &[Passport],
+) -> Vec<crate::vault::SeatTokenLink> {
+    seats
+        .iter()
+        .map(|agent_id| {
+            let near_account = near.get(agent_id).cloned().unwrap_or_default();
+            let token_id = passports.iter().find_map(|passport| {
+                if passport.status == "active" && passport.agent_id == *agent_id {
+                    passport
+                        .token_id
+                        .as_ref()
+                        .filter(|token| !token.is_empty())
+                        .cloned()
+                } else {
+                    None
+                }
+            });
+            let bound = token_id.is_some();
+            crate::vault::SeatTokenLink {
+                agent_id: agent_id.clone(),
+                near_account,
+                token_id: token_id.unwrap_or_default(),
+                source: if bound {
+                    "seat-at-match-end".to_string()
+                } else {
+                    "unbound-at-match-end".to_string()
+                },
+            }
+        })
+        .collect()
+}
+
+/// Credit the token that was bound to the seated agent when the match ended.
+/// A wallet label on an agent who did not sit does not qualify. A token that
+/// was unbound then stays at zero even if someone binds it before the receipt.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn credit_passports(passports: &mut [Passport], pot: &crate::vault::PotAuthorization) {
+    for link in &pot.seat_links {
+        if link.source != "seat-at-match-end" || link.token_id.is_empty() {
+            continue;
+        }
+        let Some(passport) = passports
+            .iter_mut()
+            .find(|passport| passport.token_id.as_deref() == Some(link.token_id.as_str()))
+        else {
+            continue;
+        };
+        let mut career = passport
+            .career
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if crate::vault::apply_receipt_to_career(&mut career, &link.near_account, pot) {
+            passport.career = Some(career);
+        }
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub fn overlay_vault_careers(body: &mut serde_json::Value, passports: &[Passport]) {
+    let Some(listings) = body
+        .get_mut("listings")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return;
+    };
+    for listing in listings {
+        let Some(token_id) = listing.get("tokenId").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(record) = passports.iter().find_map(|passport| {
+            if passport.token_id.as_deref() != Some(token_id) {
+                return None;
+            }
+            passport.career.as_ref()?.get("vaultReceipts").cloned()
+        }) else {
+            continue;
+        };
+        listing["vaultReceipts"] = record;
+        listing["vaultReceiptsSource"] = serde_json::json!("settled-receipts");
+    }
 }
 
 pub fn market_listings(state: &ArenaState) -> Outcome {
@@ -856,6 +1094,8 @@ pub fn chain_passport_json(token_id: &str, view: &serde_json::Value) -> serde_js
             "career": view.get("career").cloned().unwrap_or(serde_json::Value::Null),
             "createdAt": serde_json::Value::Null,
             "updatedAt": serde_json::Value::Null,
+            "strategyVersionCount": 0,
+            "strategyUpdatedAt": serde_json::Value::Null,
         },
         "marketUrl": "https://fe2vi.space/passports",
         "source": "chain",
@@ -989,8 +1229,19 @@ pub fn reconcile_passport(
                 changed = true;
             }
             if let Some(career) = view.get("career").filter(|value| !value.is_null()) {
-                if passport.career.as_ref() != Some(career) {
-                    passport.career = Some(career.clone());
+                let mut next = career.clone();
+                if let Some(kept) = passport
+                    .career
+                    .as_ref()
+                    .and_then(|row| row.get("vaultReceipts"))
+                    .cloned()
+                {
+                    if let Some(object) = next.as_object_mut() {
+                        object.insert("vaultReceipts".into(), kept);
+                    }
+                }
+                if passport.career.as_ref() != Some(&next) {
+                    passport.career = Some(next);
                     changed = true;
                 }
             }
@@ -1386,6 +1637,28 @@ mod tests {
         assert!(row.agent_id.is_empty());
         assert_eq!(row.owner_near, "buyer.testnet");
         assert_eq!(row.career.as_ref().unwrap()["xp"], 2);
+        row.career.as_mut().unwrap()["vaultReceipts"] = serde_json::json!({
+            "wins": 1,
+            "draws": 0,
+            "losses": 0,
+            "payoutYocto": "10",
+            "matchIds": ["mt_one"],
+            "source": "settled-receipts"
+        });
+        let chain = serde_json::json!({
+            "owner_id": "buyer.testnet",
+            "bound_agent": null,
+            "last_sync_seq": 1,
+            "career": {"xp": 2, "wins": 1}
+        });
+        let _ = reconcile_passport(row, &chain, NOW + 11, u64::MAX, &mut []);
+        assert_eq!(row.status, "unbound");
+        assert!(row.agent_id.is_empty());
+        assert_eq!(row.career.as_ref().unwrap()["vaultReceipts"]["wins"], 1);
+        assert_eq!(
+            row.career.as_ref().unwrap()["vaultReceipts"]["payoutYocto"],
+            "10"
+        );
         let (status, me) = call(
             &mut state,
             "GET",
@@ -1879,6 +2152,229 @@ mod tests {
     }
 
     #[test]
+    fn a_bound_token_keeps_a_receipt_career_on_a_listing() {
+        use crate::vault::PotAuthorization;
+        let mut passport = Passport {
+            passport_id: "pass".into(),
+            token_id: Some("disp_001".into()),
+            agent_id: "agt".into(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 1,
+            updated_unix: 1,
+            last_sync_seq: 0,
+            career: None,
+        };
+        let pot = PotAuthorization {
+            idempotency_key: "pot:mt_one".into(),
+            pays: true,
+            contract_would_accept_resolve: false,
+            outcome: "draw".into(),
+            reason: "test".into(),
+            rule: "equal-split".into(),
+            pay_rule: "equal-split".into(),
+            settlement_method: "settle_vault".into(),
+            finality: "FINAL".into(),
+            winner: String::new(),
+            participants: vec!["ann.testnet".into()],
+            settled: true,
+            tx_hash: "A".repeat(44),
+            creator: "ann.testnet".into(),
+            payouts: vec![crate::vault::VaultPayout {
+                account: "ann.testnet".into(),
+                amount: "5".into(),
+            }],
+            seat_links: seat_token_links(
+                &["agt".into()],
+                &[("agt".into(), "ann.testnet".into())].into_iter().collect(),
+                std::slice::from_ref(&passport),
+            ),
+        };
+        let stranger = Passport {
+            passport_id: "other".into(),
+            token_id: Some("disp_other".into()),
+            agent_id: "stranger".into(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 1,
+            updated_unix: 1,
+            last_sync_seq: 0,
+            career: None,
+        };
+        let mut book = vec![passport, stranger];
+        credit_passports(&mut book, &pot);
+        passport = book.remove(0);
+        let stranger = book.remove(0);
+        assert!(stranger.career.is_none());
+        assert_eq!(
+            passport.career.as_ref().unwrap()["vaultReceipts"]["draws"],
+            1
+        );
+        passport.status = "unbound".into();
+        passport.agent_id.clear();
+        assert_eq!(
+            passport.career.as_ref().unwrap()["vaultReceipts"]["payoutYocto"],
+            "5"
+        );
+        let mut body = serde_json::json!({"listings": [{"tokenId": "disp_001"}]});
+        overlay_vault_careers(&mut body, std::slice::from_ref(&passport));
+        assert_eq!(
+            body["listings"][0]["vaultReceipts"]["source"],
+            "settled-receipts"
+        );
+    }
+
+    #[test]
+    fn credit_uses_the_token_bound_at_match_time() {
+        use crate::vault::PotAuthorization;
+        let seated = Passport {
+            passport_id: "seated".into(),
+            token_id: Some("disp_seat".into()),
+            agent_id: "agt".into(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 1,
+            updated_unix: 1,
+            last_sync_seq: 0,
+            career: None,
+        };
+        let links = seat_token_links(
+            &["agt".into()],
+            &[("agt".into(), "ann.testnet".into())].into_iter().collect(),
+            std::slice::from_ref(&seated),
+        );
+        assert_eq!(links[0].source, "seat-at-match-end");
+        assert_eq!(links[0].token_id, "disp_seat");
+        let mut moved = seated.clone();
+        moved.status = "unbound".into();
+        moved.agent_id.clear();
+        let rebound = Passport {
+            passport_id: "later".into(),
+            token_id: Some("disp_later".into()),
+            agent_id: "agt".into(),
+            owner_near: "buyer.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 2,
+            updated_unix: 2,
+            last_sync_seq: 0,
+            career: None,
+        };
+        let pot = PotAuthorization {
+            idempotency_key: "pot:mt_before".into(),
+            pays: true,
+            contract_would_accept_resolve: false,
+            outcome: "win".into(),
+            reason: "test".into(),
+            rule: "winner-takes-all".into(),
+            pay_rule: "winner-takes-all".into(),
+            settlement_method: "settle_vault".into(),
+            finality: "FINAL".into(),
+            winner: "ann.testnet".into(),
+            participants: vec!["ann.testnet".into(), "bob.testnet".into()],
+            settled: true,
+            tx_hash: "B".repeat(44),
+            creator: "ann.testnet".into(),
+            payouts: vec![crate::vault::VaultPayout {
+                account: "ann.testnet".into(),
+                amount: "9".into(),
+            }],
+            seat_links: links,
+        };
+        let mut book = vec![moved, rebound];
+        credit_passports(&mut book, &pot);
+        assert_eq!(book[0].token_id.as_deref(), Some("disp_seat"));
+        assert_eq!(book[0].career.as_ref().unwrap()["vaultReceipts"]["wins"], 1);
+        assert!(book[1].career.is_none());
+        let unbound_links = seat_token_links(
+            &["agt".into()],
+            &[("agt".into(), "ann.testnet".into())].into_iter().collect(),
+            &[],
+        );
+        assert_eq!(unbound_links[0].source, "unbound-at-match-end");
+        let mut later = pot.clone();
+        later.idempotency_key = "pot:mt_unbound".into();
+        later.seat_links = unbound_links;
+        let mut newly = Passport {
+            passport_id: "late".into(),
+            token_id: Some("disp_late".into()),
+            agent_id: "agt".into(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: 3,
+            updated_unix: 3,
+            last_sync_seq: 0,
+            career: None,
+        };
+        credit_passports(std::slice::from_mut(&mut newly), &later);
+        assert!(newly.career.is_none());
+    }
+
+    #[test]
+    fn chain_snapshot_ignores_a_stale_book_and_fails_closed() {
+        use std::collections::HashMap;
+        let seats = vec!["agt".into()];
+        let near = HashMap::from([("agt".into(), "ann.testnet".into())]);
+        let unbound = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Token(String::new()),
+            )])),
+        );
+        assert_eq!(unbound[0].source, "unbound-at-match-end");
+        assert!(unbound[0].token_id.is_empty());
+        let failed = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Unverified,
+            )])),
+        );
+        assert_eq!(failed[0].source, "unverified-at-match-end");
+        assert!(failed[0].token_id.is_empty());
+        let missing = seat_links_from_chain(&seats, &near, None);
+        assert_eq!(missing[0].source, "unverified-at-match-end");
+        let bound = seat_links_from_chain(
+            &seats,
+            &near,
+            Some(&HashMap::from([(
+                "agt".into(),
+                ChainSeatBinding::Token("disp_ok".into()),
+            )])),
+        );
+        assert_eq!(bound[0].source, "seat-at-match-end");
+        assert_eq!(bound[0].token_id, "disp_ok");
+        let mut state = ArenaState::default();
+        state.book.matches.push(crate::agents::PlayMatch {
+            match_id: "mt_1".into(),
+            arena_id: "vault".into(),
+            status: "live".into(),
+            turn: 1,
+            deadline_unix: 50,
+            seats: vec!["a".into(), "b".into()],
+            actions: Vec::new(),
+            created_unix: 1,
+            vault: Some(crate::vault::VaultMatch::start(&["a".into(), "b".into()])),
+        });
+        assert!(seats_pending_chain_read(&state, 10, "GET", "/v1/matches").is_empty());
+        assert_eq!(
+            seats_pending_chain_read(&state, 50, "GET", "/v1/matches"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            seats_pending_chain_read(&state, 10, "POST", "/v1/matches/mt_1/actions").len(),
+            2
+        );
+    }
+
+    #[test]
     fn empty_market_does_not_invent_listings() {
         let mut state = ArenaState {
             chain_network: "testnet".into(),
@@ -1927,5 +2423,27 @@ mod tests {
         assert!(body["lastSettlement"].is_null());
         assert!(body["stats"]["totalSalesCount"].is_null());
         assert!(body["blockers"].as_array().unwrap().len() == 1);
+        let held = market_passport(&token, &serde_json::Value::Null).unwrap();
+        assert_eq!(held["tokenId"], "fdr_001");
+        assert_eq!(held["listed"], false);
+        assert!(held["priceNear"].is_null());
+        let settlement = serde_json::json!({
+            "token_id": "disp_001",
+            "buyer": "fe2vibuyer7a3c.testnet",
+            "seller": "fe2vidisp7a3c.testnet",
+            "price": "1000000000000000000000000"
+        });
+        let sold = market_from_chain(
+            "market.fe2vidisp7a3c.testnet",
+            "testnet",
+            &[],
+            Some(&settlement),
+            "chain",
+        );
+        assert_eq!(sold["sales"].as_array().unwrap().len(), 1);
+        assert_eq!(sold["sales"][0]["tokenId"], "disp_001");
+        assert_eq!(sold["sales"][0]["priceNear"], "1");
+        assert_eq!(sold["lastSettlement"]["seller"], "fe2vidisp7a3c.testnet");
+        assert_eq!(sold["listings"].as_array().unwrap().len(), 0);
     }
 }

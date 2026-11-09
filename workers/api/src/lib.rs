@@ -11,6 +11,7 @@ mod logic;
 mod markets;
 mod passport;
 mod skins;
+mod strategy;
 mod surface;
 mod vault;
 
@@ -430,8 +431,10 @@ mod edge {
                                         "application/json",
                                     );
                                 };
-                                let body = crate::passport::chain_passport_json(token_id, &view)
-                                    .to_string();
+                                let mut body =
+                                    crate::passport::chain_passport_json(token_id, &view);
+                                crate::strategy::stamp_public(&mut body, &arena.book, token_id);
+                                let body = body.to_string();
                                 return with_cors(
                                     Response::ok(body)?.with_status(200),
                                     "application/json",
@@ -457,6 +460,39 @@ mod edge {
                 }
             }
             crate::logic::set_request_war_secret(war_secret);
+            let chain_now = worker::Date::now().as_millis() / 1000;
+            let ending =
+                crate::passport::seats_pending_chain_read(&arena, chain_now, method, route_path);
+            let chain_reads = if ending.is_empty() {
+                None
+            } else {
+                Some(read_match_end_bindings(&self.env, &ending).await)
+            };
+            crate::passport::set_match_end_chain(chain_reads);
+            crate::strategy::set_strategy_key(None);
+            crate::strategy::clear_chain_owners();
+            if arena.chain_network == "testnet" && strategy_request(method, route_path) {
+                let secret = self
+                    .env
+                    .secret("FE2VI_STRATEGY_KEY")
+                    .ok()
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+                crate::strategy::set_strategy_key(crate::strategy::key_from_secret(&secret));
+                if let Some(agent_id) = crate::agents::authed_id(
+                    &arena,
+                    &Incoming {
+                        method,
+                        path: &route,
+                        body: &body,
+                        authorization: authorization.as_deref(),
+                        ingest_token: ingest_token.as_deref(),
+                        policy_check: None,
+                    },
+                ) {
+                    pin_strategy_owner(&self.env, &mut arena, &agent_id, chain_now).await;
+                }
+            }
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -468,6 +504,9 @@ mod edge {
                     policy_check: policy_check.as_ref(),
                 },
             );
+            crate::passport::set_match_end_chain(None);
+            crate::strategy::set_strategy_key(None);
+            crate::strategy::clear_chain_owners();
             crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
@@ -619,6 +658,16 @@ mod edge {
                     with_cors(response, content_type)
                 }
                 Outcome::Websocket { game_id, history } => {
+                    let upgrade = req.headers().get("upgrade")?;
+                    if !crate::agents::is_websocket_upgrade(upgrade.as_deref()) {
+                        let mut response = Response::ok(
+                            r#"{"error":"upgrade_required","message":"Open this path with a WebSocket."}"#,
+                        )?
+                        .with_status(426);
+                        response.headers_mut().set("upgrade", "websocket")?;
+                        response.headers_mut().set("connection", "Upgrade")?;
+                        return with_cors(response, "application/json");
+                    }
                     let pair = WebSocketPair::new()?;
                     let tag = socket_tag(&game_id);
                     self.state
@@ -763,6 +812,7 @@ mod edge {
             "CREATE TABLE IF NOT EXISTS player_reactions (target_type TEXT NOT NULL, target_id TEXT NOT NULL, viewer_id TEXT NOT NULL, reaction TEXT NOT NULL, unix INTEGER NOT NULL, PRIMARY KEY (target_type, target_id, viewer_id))",
             "CREATE TABLE IF NOT EXISTS player_passports (passport_id TEXT PRIMARY KEY, token_id TEXT UNIQUE, agent_id TEXT NOT NULL, owner_near TEXT NOT NULL, creator_near TEXT NOT NULL, status TEXT NOT NULL, created_unix INTEGER NOT NULL, updated_unix INTEGER NOT NULL, last_sync_seq INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS player_passport_jobs (job_id TEXT PRIMARY KEY, kind TEXT NOT NULL, passport_id TEXT NOT NULL, agent_id TEXT NOT NULL, owner_near TEXT NOT NULL, agent_near TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_unix INTEGER NOT NULL, updated_unix INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS player_strategy_versions (token_id TEXT NOT NULL, version INTEGER NOT NULL, created_unix INTEGER NOT NULL, agent_id TEXT NOT NULL, game TEXT NOT NULL, nonce_hex TEXT NOT NULL, ciphertext_b64 TEXT NOT NULL, PRIMARY KEY (token_id, version))",
         ] {
             sql.exec(statement, None::<Vec<worker::SqlStorageValue>>)?;
         }
@@ -1044,6 +1094,22 @@ mod edge {
                 None::<Vec<worker::SqlStorageValue>>,
             )?
             .to_array::<PassportJobRow>()?;
+        #[derive(serde::Deserialize)]
+        struct StrategyRow {
+            token_id: String,
+            version: i64,
+            created_unix: i64,
+            agent_id: String,
+            game: String,
+            nonce_hex: String,
+            ciphertext_b64: String,
+        }
+        let strategies = sql
+            .exec(
+                "SELECT token_id, version, created_unix, agent_id, game, nonce_hex, ciphertext_b64 FROM player_strategy_versions",
+                None::<Vec<worker::SqlStorageValue>>,
+            )?
+            .to_array::<StrategyRow>()?;
         Ok(Some(crate::agents::PlayerBook {
             players: players
                 .into_iter()
@@ -1180,6 +1246,18 @@ mod edge {
                     tx_block_height: row.tx_block_height.max(0) as u64,
                 })
                 .collect(),
+            strategies: strategies
+                .into_iter()
+                .map(|row| crate::strategy::StrategyVersion {
+                    token_id: row.token_id,
+                    version: row.version.max(0) as u64,
+                    created_unix: row.created_unix.max(0) as u64,
+                    agent_id: row.agent_id,
+                    game: row.game,
+                    nonce_hex: row.nonce_hex,
+                    ciphertext_b64: row.ciphertext_b64,
+                })
+                .collect(),
         }))
     }
 
@@ -1248,6 +1326,12 @@ mod edge {
             sql.exec(
                 "DELETE FROM player_passport_jobs WHERE job_id = ?",
                 Some(vec![job_id.clone().into()]),
+            )?;
+        }
+        for (token_id, version) in &plan.delete_strategies {
+            sql.exec(
+                "DELETE FROM player_strategy_versions WHERE token_id = ? AND version = ?",
+                Some(vec![token_id.clone().into(), (*version as i64).into()]),
             )?;
         }
         for agent_id in &plan.delete_player_ids {
@@ -1430,6 +1514,20 @@ mod edge {
                 ]),
             )?;
         }
+        for row in &plan.upsert_strategies {
+            sql.exec(
+                "INSERT INTO player_strategy_versions (token_id, version, created_unix, agent_id, game, nonce_hex, ciphertext_b64) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(token_id, version) DO UPDATE SET created_unix = excluded.created_unix, agent_id = excluded.agent_id, game = excluded.game, nonce_hex = excluded.nonce_hex, ciphertext_b64 = excluded.ciphertext_b64",
+                Some(vec![
+                    row.token_id.clone().into(),
+                    (row.version as i64).into(),
+                    (row.created_unix as i64).into(),
+                    row.agent_id.clone().into(),
+                    row.game.clone().into(),
+                    row.nonce_hex.clone().into(),
+                    row.ciphertext_b64.clone().into(),
+                ]),
+            )?;
+        }
         Ok(())
     }
 
@@ -1607,6 +1705,7 @@ mod edge {
                 if let Some(vault) = arena.book.matches[index].vault.as_mut() {
                     vault.pot = Some(next.clone());
                 }
+                crate::passport::credit_passports(&mut arena.book.passports, &next);
                 Ok((
                     200,
                     serde_json::to_string(&next).unwrap_or_else(|_| "{}".into()),
@@ -1745,6 +1844,51 @@ mod edge {
         crate::vault::contract_pot(match_id, &view, now_ns)
     }
 
+    async fn read_match_end_bindings(
+        env: &Env,
+        agent_ids: &[String],
+    ) -> std::collections::HashMap<String, crate::passport::ChainSeatBinding> {
+        let mut out = std::collections::HashMap::new();
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        let passport = env_string(env, "FE2VI_PASSPORT_ID");
+        let blocked = passport.is_empty()
+            || rpc.is_empty()
+            || indexer::allow_chain_rpc(&network, &rpc).is_err();
+        for agent_id in agent_ids {
+            if blocked {
+                out.insert(
+                    agent_id.clone(),
+                    crate::passport::ChainSeatBinding::Unverified,
+                );
+                continue;
+            }
+            match rpc_view(
+                &rpc,
+                &passport,
+                "agent_token",
+                serde_json::json!({ "agent_id": agent_id }),
+            )
+            .await
+            {
+                Ok(value) => {
+                    let token = value.as_str().map(str::trim).unwrap_or("").to_string();
+                    out.insert(
+                        agent_id.clone(),
+                        crate::passport::ChainSeatBinding::Token(token),
+                    );
+                }
+                Err(_) => {
+                    out.insert(
+                        agent_id.clone(),
+                        crate::passport::ChainSeatBinding::Unverified,
+                    );
+                }
+            }
+        }
+        out
+    }
+
     async fn rpc_view(
         url: &str,
         account_id: &str,
@@ -1804,6 +1948,75 @@ mod edge {
             return Err(Error::RustError(format!("http {status}")));
         }
         serde_json::from_str(&text).map_err(|_| Error::RustError("decode".into()))
+    }
+
+    fn strategy_request(method: &str, path: &str) -> bool {
+        if path == "/v1/agents/me/passport/strategy" && (method == "GET" || method == "POST") {
+            return true;
+        }
+        method == "POST"
+            && path
+                .strip_prefix("/v1/matches/")
+                .and_then(|rest| rest.strip_suffix("/actions"))
+                .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+    }
+
+    async fn pin_strategy_owner(env: &Env, arena: &mut ArenaState, agent_id: &str, now: u64) {
+        let Some(token_id) = arena
+            .book
+            .passports
+            .iter()
+            .find(|passport| {
+                passport.agent_id == agent_id
+                    && passport.status != "unbound"
+                    && passport
+                        .token_id
+                        .as_deref()
+                        .is_some_and(|token| !token.is_empty())
+            })
+            .and_then(|passport| passport.token_id.clone())
+        else {
+            return;
+        };
+        let _ = reconcile_token(env, arena, &token_id, now).await;
+        let Ok(Some(owner)) = nft_owner(env, &token_id).await else {
+            return;
+        };
+        crate::strategy::set_chain_owner(&token_id, &owner);
+    }
+
+    async fn nft_owner(env: &Env, token_id: &str) -> Result<Option<String>> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        indexer::allow_chain_rpc(&network, &rpc)
+            .map_err(|message| Error::RustError(message.to_string()))?;
+        let account_id = env_string(env, "FE2VI_PASSPORT_ID");
+        if account_id.is_empty() {
+            return Err(Error::RustError(
+                "passport contract is not configured".into(),
+            ));
+        }
+        let value = rpc_view(
+            &rpc,
+            &account_id,
+            "nft_token",
+            serde_json::json!({ "token_id": token_id }),
+        )
+        .await?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        let owner = value
+            .get("owner_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if owner.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(owner))
+        }
     }
 
     async fn reconcile_token(
@@ -2023,6 +2236,7 @@ mod edge {
                 );
             };
             let mut listed = Vec::new();
+            let mut passports = Vec::new();
             for token in tokens {
                 let Some(token_id) = token.get("token_id").and_then(serde_json::Value::as_str)
                 else {
@@ -2040,6 +2254,9 @@ mod edge {
                         if let Some(row) = crate::passport::listed_passport(token, &listing) {
                             listed.push(row);
                         }
+                        if let Some(card) = crate::passport::market_passport(token, &listing) {
+                            passports.push(card);
+                        }
                     }
                     Err(error) => {
                         return market_error(
@@ -2050,7 +2267,7 @@ mod edge {
                     }
                 }
             }
-            let settlement =
+            let mut settlement =
                 match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
                     Ok(value) if value.is_null() => None,
                     Ok(value) => Some(value),
@@ -2062,13 +2279,29 @@ mod edge {
                         )
                     }
                 };
-            let body = crate::passport::market_from_chain(
+            if passports.len() == 1 {
+                if let Some(value) = settlement.as_mut() {
+                    if let Some(token_id) = passports[0].get("tokenId").cloned() {
+                        value["token_id"] = token_id;
+                    }
+                }
+            }
+            let mut body = crate::passport::market_from_chain(
                 &market,
                 &network,
                 &listed,
                 settlement.as_ref(),
                 "chain",
             );
+            let storage = self.state.storage();
+            if let Ok(stored) = storage.get::<crate::logic::ArenaState>("arena").await {
+                let mut arena = stored.unwrap_or_default();
+                let sql = storage.sql();
+                if attach_player_book(&sql, &mut arena).is_ok() {
+                    crate::passport::overlay_vault_careers(&mut body, &arena.book.passports);
+                }
+            }
+            body["passports"] = serde_json::Value::Array(passports);
             let payload = if path.ends_with("/sales") {
                 serde_json::json!({
                     "sales": body["sales"],

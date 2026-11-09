@@ -32,8 +32,8 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "cup-stadium",
     name: "Cup Stadium",
-    summary: "Trading Cup. A short public tape.",
-    status: "live",
+    summary: "Coming soon. Cup seats are not live in this build.",
+    status: "soon",
     href: "/games/trading-cup",
     station: "Trading Cup Stadium",
     color: "#8f7a4a",
@@ -41,11 +41,20 @@ const LAYOUT: Array<Omit<District, "x" | "z" | "footprint">> = [
   {
     id: "trading-village",
     name: "Trading Village",
-    summary: "Live Hyperliquid perps. Funding, P&L, and a leaderboard wall.",
-    status: "live",
+    summary: "Coming soon. The trading floor is not live in this build.",
+    status: "soon",
     href: "/village",
     station: "Trading Floor",
     color: "#2f8a56",
+  },
+  {
+    id: "nft-market",
+    name: "NFT Market",
+    summary: "Passport asks and the one stored settlement on the testnet market.",
+    status: "live",
+    href: "/market",
+    station: "NFT Market",
+    color: "#c4a36c",
   },
   {
     id: "war-room",
@@ -84,6 +93,7 @@ export const ROOM_XZ: Record<string, [number, number]> = {
   "war-room": [12, 40],
   "skin-forge": [-38, -24],
   "oracle-plaza": [20, -10],
+  "nft-market": [52, -24],
 };
 
 /**
@@ -97,6 +107,7 @@ export const DISTRICT_FOOTPRINT: Record<string, DistrictFootprint> = {
   "war-room": { hx: 8.8, hz: 8.0, height: 13.5 },
   "skin-forge": { hx: 9.0, hz: 8.2, height: 12.5 },
   "oracle-plaza": { hx: 9.0, hz: 8.2, height: 12.5 },
+  "nft-market": { hx: 8.4, hz: 7.4, height: 11.5 },
 };
 
 /** South face of each building. Agents use this when a room opens or closes. */
@@ -107,6 +118,7 @@ export const BUILDING_DOOR: Record<string, [number, number]> = {
   "war-room": [12, 43.4],
   "skin-forge": [-38, -20.6],
   "oracle-plaza": [20, -6.6],
+  "nft-market": [52, -20.2],
 };
 
 const ROOF_NAME: Record<string, string> = {
@@ -116,10 +128,52 @@ const ROOF_NAME: Record<string, string> = {
   "war-room": "WAR ROOM",
   "skin-forge": "LOBBY",
   "oracle-plaza": "HALL",
+  "nft-market": "NFT MARKET",
 };
 
+const SOON_ROOF = new Set(["cup-stadium", "trading-village"]);
+
 export function roofLabel(id: string) {
-  return ROOF_NAME[id] ?? "";
+  const name = ROOF_NAME[id] ?? "";
+  return SOON_ROOF.has(id) && name ? `${name} · SOON` : name;
+}
+
+const ARENA_ROOM: Record<string, string> = {
+  vault: "vault-quarter",
+  cup: "cup-stadium",
+  village: "trading-village",
+  war: "war-room",
+};
+
+export type AgentStand = { x: number; z: number; rot: number; room: string };
+
+/** Stand still at the door of the room the API says this agent is in. */
+export function standFor(roomId: string, slot: number): AgentStand | null {
+  const door = BUILDING_DOOR[roomId];
+  if (!door) return null;
+  const column = slot % 4;
+  const row = Math.floor(slot / 4);
+  return {
+    x: door[0] + (column - 1.5) * 1.15,
+    z: door[1] + 1.7 + row * 1.15,
+    rot: Math.PI,
+    room: roomId,
+  };
+}
+
+export function liveStands(rows: Array<{ handle: string; arenaId: string }>): Map<string, AgentStand> {
+  const counts: Record<string, number> = {};
+  const out = new Map<string, AgentStand>();
+  for (const row of rows) {
+    const handle = row.handle.trim();
+    const room = ARENA_ROOM[row.arenaId];
+    if (!handle || !room || out.has(handle)) continue;
+    const slot = counts[room] ?? 0;
+    counts[room] = slot + 1;
+    const stand = standFor(room, slot);
+    if (stand) out.set(handle, stand);
+  }
+  return out;
 }
 
 let transitionMs = 0;
@@ -196,6 +250,7 @@ export const INTERIOR_SHOTS: Record<string, CameraShot> = {
   "cup-stadium": { eye: [-8, 2.1, -39.4], aim: [-8, 1.7, -44.6], fov: 50 },
   // Same forge shell as the lobby, so the eye uses that shell's doorway, not the generic room shot.
   "oracle-plaza": { eye: [20, 1.85, -7.6], aim: [20, 1.7, -13.4], fov: 48 },
+  "nft-market": { eye: [52, 3.4, -16.2], aim: [52, 2.2, -24], fov: 46 },
 };
 
 /** Where an agent stands while a room camera is active, clear of that corner. */
@@ -216,6 +271,7 @@ export const EXTERIOR_SHOTS: Record<string, CameraShot> = {
   "skin-forge": { eye: [-38, 6, -8], aim: [-38, 2.8, -22], fov: 42 },
   "cup-stadium": { eye: [-8, 7, -26], aim: [-8, 3, -40], fov: 40 },
   "oracle-plaza": { eye: [20, 6.5, 8], aim: [20, 3.2, -8], fov: 42 },
+  "nft-market": { eye: [52, 7.2, -4], aim: [52, 3.1, -24], fov: 42 },
 };
 
 /** Authored path for the opening. The first shot stays on the road, outside every shell. */
@@ -363,6 +419,8 @@ export type CityAgent = {
   accountId: string;
   name: string;
   skin: SkinTraits;
+  /** Set only from a real match, queue, claim, or finished seat. */
+  stand?: AgentStand;
 };
 
 export const CITY_AGENTS: CityAgent[] = [

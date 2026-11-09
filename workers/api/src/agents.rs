@@ -37,6 +37,10 @@ pub struct PlayerBook {
     pub passports: Vec<Passport>,
     #[serde(default)]
     pub passport_jobs: Vec<PassportJob>,
+    /// Encrypted playbook versions keyed by passport token id. A transfer does
+    /// not move agent tokens or prompts; these rows stay on the token.
+    #[serde(default)]
+    pub strategies: Vec<crate::strategy::StrategyVersion>,
 }
 
 /// Off-chain mirror of one passport NFT. The chain is authoritative; this row
@@ -281,6 +285,15 @@ struct LobbyPostBody {
     client_request_id: Option<String>,
 }
 
+/// True when the request asked to upgrade to a WebSocket. A plain HTTP GET does not.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn is_websocket_upgrade(upgrade: Option<&str>) -> bool {
+    upgrade
+        .unwrap_or("")
+        .split(',')
+        .any(|part| part.trim().eq_ignore_ascii_case("websocket"))
+}
+
 pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outcome> {
     let path = path_only(incoming.path);
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
@@ -332,6 +345,7 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
             Some(public_agent(state, handle, now))
         }
         ("GET", ["v1", "matches"]) => Some(recent_matches(state, incoming)),
+        ("GET", ["v1", "vault", "settlements"]) => Some(vault_settlements(state)),
         ("POST", ["v1", "arenas", id, "queue"]) => Some(join_queue(state, incoming, id, now)),
         ("DELETE", ["v1", "arenas", id, "queue"]) => Some(leave_queue(state, incoming, id)),
         ("GET", ["v1", "matches", id]) => Some(spectate(state, incoming, id)),
@@ -1050,6 +1064,8 @@ fn public_agent(state: &ArenaState, handle: &str, now: u64) -> Outcome {
             "tradeMode": trade_mode(state.live.public_link(handle).is_some()),
             "tradingAccount": state.live.public_link(handle),
             "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
+            "veteran": receipt_wins(state, &player.agent_id) > 0,
+            "receiptWins": receipt_wins(state, &player.agent_id),
         }),
         false,
         None,
@@ -1724,11 +1740,31 @@ fn join_queue(
         .iter()
         .any(|seat| seat.arena_id == arena_id && seat.agent_id == agent_id)
     {
-        state.book.queue.push(Queued {
-            arena_id: arena_id.to_string(),
-            agent_id: agent_id.clone(),
-            queued_unix: now,
-        });
+        let mine = receipt_wins(state, &agent_id);
+        let ahead: Vec<u64> = state
+            .book
+            .queue
+            .iter()
+            .map(|seat| {
+                if seat.arena_id == arena_id {
+                    receipt_wins(state, &seat.agent_id)
+                } else {
+                    u64::MAX
+                }
+            })
+            .collect();
+        let insert_at = ahead
+            .iter()
+            .position(|wins| *wins < mine)
+            .unwrap_or(state.book.queue.len());
+        state.book.queue.insert(
+            insert_at,
+            Queued {
+                arena_id: arena_id.to_string(),
+                agent_id: agent_id.clone(),
+                queued_unix: now,
+            },
+        );
     }
     pair_queue(state, arena_id, now);
     json(
@@ -1806,14 +1842,31 @@ fn recent_matches(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
                 })
             });
             let vault = play.vault.as_ref().map(|vault| {
+                let handles: HashMap<String, String> = play
+                    .seats
+                    .iter()
+                    .map(|seat| (seat.clone(), handle_of(state, seat)))
+                    .collect();
+                let pot = vault.pot.as_ref().map(|pot| {
+                    serde_json::json!({
+                        "outcome": pot.outcome,
+                        "rule": pot.rule,
+                        "settled": pot.settled,
+                        "pays": pot.pays,
+                        "finality": pot.finality,
+                        "txHash": pot.tx_hash,
+                    })
+                });
                 serde_json::json!({
                     "round": vault.round,
                     "rounds": crate::vault::MAX_ROUNDS,
                     "ended": vault.ended,
+                    "winner": vault.winner_handle(&handles),
                     "scores": vault.seats.iter().map(|seat| serde_json::json!({
                         "handle": handle_of(state, &seat.agent_id),
                         "roundWins": seat.round_wins,
                     })).collect::<Vec<_>>(),
+                    "pot": pot,
                 })
             });
             serde_json::json!({
@@ -1897,6 +1950,57 @@ fn my_matches(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
         })
         .collect();
     json(200, &serde_json::json!({ "matches": rows }), false, None)
+}
+
+fn vault_settlements(state: &ArenaState) -> Outcome {
+    let mut rows: Vec<serde_json::Value> = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.arena_id == "vault")
+        .filter_map(|play| {
+            let pot = play.vault.as_ref()?.pot.as_ref()?;
+            if !pot.settled || !pot.pays || pot.finality != "FINAL" || pot.tx_hash.trim().is_empty()
+            {
+                return None;
+            }
+            if pot.settlement_method != "settle_vault" {
+                return None;
+            }
+            Some(serde_json::json!({
+                "matchId": play.match_id,
+                "outcome": pot.outcome,
+                "rule": pot.rule,
+                "payRule": pot.pay_rule,
+                "txHash": pot.tx_hash,
+                "txUrl": format!("https://testnet.nearblocks.io/txns/{}", pot.tx_hash),
+                "creator": pot.creator,
+                "winner": pot.winner,
+                "participants": pot.participants,
+                "payouts": pot.payouts,
+                "finality": pot.finality,
+                "pays": pot.pays,
+                "settlementMethod": pot.settlement_method,
+                "source": "settled-receipts",
+            }))
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        left["matchId"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(right["matchId"].as_str().unwrap_or(""))
+    });
+    json(
+        200,
+        &serde_json::json!({
+            "source": "settled-receipts",
+            "note": "Stored, accepted receipt state. A row is present only after a FINAL settle_vault receipt is recorded.",
+            "matches": rows,
+        }),
+        false,
+        None,
+    )
 }
 
 fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outcome {
@@ -2034,6 +2138,7 @@ fn vault_act(
     request_id: &str,
     now: u64,
 ) -> Outcome {
+    let chosen = crate::strategy::action_for_play(state, agent_id, "vault", kind);
     let target_id = target.map(|value| {
         state
             .book
@@ -2053,7 +2158,7 @@ fn vault_act(
                 "This is not a Vault match.",
             );
         };
-        if let Err(message) = vault.submit(agent_id, kind, target_id.as_deref(), intent, now) {
+        if let Err(message) = vault.submit(agent_id, &chosen, target_id.as_deref(), intent, now) {
             return fail(400, "illegal_action", message);
         }
         if vault.ready() {
@@ -2064,6 +2169,11 @@ fn vault_act(
             (Vec::new(), false, false)
         }
     };
+    let scored = rows
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(|row| row.points)
+        .unwrap_or(0);
     if ready {
         for row in rows {
             play.actions.push(Played {
@@ -2099,9 +2209,21 @@ fn vault_act(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
-        match_id,
+        match_id: match_id.clone(),
         created_unix: now,
     });
+    crate::strategy::note_play(
+        state,
+        agent_id,
+        &crate::strategy::PlayNote {
+            game: "vault",
+            action: &chosen,
+            points: scored,
+            match_id: &match_id,
+            now,
+            submitted_only: !ready,
+        },
+    );
     http(200, "application/json", body, true, None)
 }
 
@@ -2213,7 +2335,11 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     if current != seat {
         return fail(403, "not_your_turn", "Wait for your seat.");
     }
-    if !legal_actions(&arena_id).contains(&kind) {
+    let chosen = crate::strategy::action_for_play(state, &agent_id, &arena_id, kind);
+    if !legal_actions(&arena_id)
+        .iter()
+        .any(|action| *action == chosen)
+    {
         return fail(
             400,
             "illegal_action",
@@ -2226,7 +2352,7 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         .rev()
         .find(|action| action.agent_id != agent_id)
         .map(|action| action.action_type.clone());
-    let points = score_kind(&arena_id, kind, opponent.as_deref());
+    let points = score_kind(&arena_id, &chosen, opponent.as_deref());
     let intent = body
         .action
         .as_ref()
@@ -2235,15 +2361,15 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(160).collect::<String>());
     let outcome = if points > 0 {
-        format!("{kind} scored {points}")
+        format!("{chosen} scored {points}")
     } else {
-        format!("{kind} scored 0")
+        format!("{chosen} scored 0")
     };
     let play = &mut state.book.matches[index];
     play.actions.push(Played {
         agent_id: agent_id.clone(),
         turn,
-        action_type: kind.to_string(),
+        action_type: chosen.clone(),
         points,
         unix: now,
         intent,
@@ -2264,14 +2390,27 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     })
     .to_string();
     let seen_match = play.match_id.clone();
+    let note_agent = agent_id.clone();
     state.book.seen.push(Seen {
         agent_id,
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
-        match_id: seen_match,
+        match_id: seen_match.clone(),
         created_unix: now,
     });
+    crate::strategy::note_play(
+        state,
+        &note_agent,
+        &crate::strategy::PlayNote {
+            game: &arena_id,
+            action: &chosen,
+            points: i32::try_from(points).unwrap_or(i32::MAX),
+            match_id: &seen_match,
+            now,
+            submitted_only: false,
+        },
+    );
     http(200, "application/json", body, true, None)
 }
 
@@ -2397,8 +2536,15 @@ fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
             (seat.clone(), score, near.get(seat).cloned())
         })
         .collect();
+    let reads = crate::passport::match_end_chain();
+    let links = crate::passport::seat_links_from_chain(&play.seats, near, reads.as_ref());
     if let Some(vault) = play.vault.as_mut() {
         vault.seal_vault_result(&match_id, &seats);
+        if let Some(pot) = vault.pot.as_mut() {
+            if pot.seat_links.is_empty() {
+                pot.seat_links = links;
+            }
+        }
     }
 }
 
@@ -3052,6 +3198,32 @@ fn openapi() -> String {
                         "winner": { "type": "string" },
                         "participants": { "type": "array", "items": { "type": "string" } }
                     }
+                },
+                "VaultSettlementList": {
+                    "type": "object",
+                    "description": "Stored, accepted receipt state. Not a live chain read.",
+                    "required": ["source", "matches"],
+                    "properties": {
+                        "source": { "type": "string", "enum": ["settled-receipts"] },
+                        "note": { "type": "string" },
+                        "matches": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["matchId", "txHash", "finality", "pays", "source"],
+                                "properties": {
+                                    "matchId": { "type": "string" },
+                                    "outcome": { "type": "string" },
+                                    "rule": { "type": "string" },
+                                    "txHash": { "type": "string" },
+                                    "txUrl": { "type": "string" },
+                                    "finality": { "type": "string" },
+                                    "pays": { "type": "boolean" },
+                                    "source": { "type": "string", "enum": ["settled-receipts"] }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -3069,12 +3241,27 @@ fn openapi() -> String {
             "/v1/cup/rounds/{roundId}/join": { "post": { "operationId": "cupJoin", "security": [{ "bearer": [] }] } },
             "/v1/village/leaderboard": { "get": { "operationId": "villageLeaderboard" } },
             "/v1/village/tape": { "get": { "operationId": "villageTape" } },
+            "/v1/village/follow": { "post": { "operationId": "villageFollow" } },
+            "/v1/village/unfollow": { "post": { "operationId": "villageUnfollow" } },
+            "/v1/intents/act": { "post": { "operationId": "intentsAct" } },
             "/v1/live/accounts/{handle}": { "get": { "operationId": "liveAccount" } },
             "/v1/live/status": { "get": { "operationId": "liveStatus" } },
             "/v1/agents/me/skin": { "post": { "operationId": "equipSkin", "security": [{ "bearer": [] }] } },
             "/v1/skins": { "get": { "operationId": "skins" } },
             "/v1/agents/me/matches": { "get": { "operationId": "myMatches", "security": [{ "bearer": [] }] } },
             "/v1/matches": { "get": { "operationId": "recentMatches" } },
+            "/v1/vault/settlements": {
+                "get": {
+                    "operationId": "vaultSettlements",
+                    "description": "Stored, accepted receipt state. A match is listed only after its FINAL settle_vault receipt is recorded. This is not a live chain read.",
+                    "responses": {
+                        "200": {
+                            "description": "Stored, accepted FINAL receipts.",
+                            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VaultSettlementList" } } }
+                        }
+                    }
+                }
+            },
             "/v1/markets": { "get": { "operationId": "markets" } },
             "/v1/markets/candles": { "get": { "operationId": "candles" } },
             "/v1/market/listings": { "get": { "operationId": "marketListings" } },
@@ -3087,6 +3274,10 @@ fn openapi() -> String {
             "/v1/agents/me/passport/mint": { "post": { "operationId": "mintPassport", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/passport/bind": { "post": { "operationId": "bindPassport", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/passport/unbind": { "post": { "operationId": "unbindPassport", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/strategy": {
+                "get": { "operationId": "readPassportStrategy", "security": [{ "bearer": [] }] },
+                "post": { "operationId": "appendPassportStrategy", "security": [{ "bearer": [] }] }
+            },
             "/v1/passports/{tokenId}": { "get": { "operationId": "passport" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
@@ -3194,6 +3385,8 @@ pub struct SqlPlan {
     pub delete_passport_ids: Vec<String>,
     pub upsert_passport_jobs: Vec<PassportJob>,
     pub delete_passport_job_ids: Vec<String>,
+    pub upsert_strategies: Vec<crate::strategy::StrategyVersion>,
+    pub delete_strategies: Vec<(String, u64)>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -3219,6 +3412,8 @@ impl SqlPlan {
             && self.delete_passport_ids.is_empty()
             && self.upsert_passport_jobs.is_empty()
             && self.delete_passport_job_ids.is_empty()
+            && self.upsert_strategies.is_empty()
+            && self.delete_strategies.is_empty()
     }
 }
 
@@ -3306,6 +3501,12 @@ pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
     });
     plan.upsert_passport_jobs = jobs;
     plan.delete_passport_job_ids = deleted_jobs;
+    let (strategies, deleted_strategies) =
+        diff_by_key(&before.strategies, &after.strategies, |row| {
+            (row.token_id.clone(), row.version)
+        });
+    plan.upsert_strategies = strategies;
+    plan.delete_strategies = deleted_strategies;
     plan
 }
 
@@ -3337,6 +3538,18 @@ fn diff_by_key<T: Clone + PartialEq, K: Clone + Eq + std::hash::Hash>(
         }
     }
     (upserts, deletes)
+}
+
+fn receipt_wins(state: &ArenaState, agent_id: &str) -> u64 {
+    state
+        .book
+        .passports
+        .iter()
+        .find(|passport| passport.agent_id == agent_id && passport.status == "active")
+        .and_then(|passport| passport.career.as_ref())
+        .and_then(|career| career.pointer("/vaultReceipts/wins"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -4644,6 +4857,282 @@ mod tests {
     }
 
     #[test]
+    fn vault_settlements_list_only_receipt_verified_matches() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        {
+            let play = state.book.matches[0].vault.as_mut().unwrap();
+            play.ended = true;
+            play.seal_vault_result(
+                "mt_loop",
+                &[
+                    ("alpha".into(), 2, Some("ann.testnet".into())),
+                    ("bravo".into(), 0, Some("bob.testnet".into())),
+                ],
+            );
+        }
+        let empty = call(&mut state, "GET", "/v1/vault/settlements", "", None);
+        assert_eq!(empty.0, 200);
+        assert_eq!(empty.1["matches"].as_array().unwrap().len(), 0);
+        {
+            let pot = state.book.matches[0]
+                .vault
+                .as_mut()
+                .unwrap()
+                .pot
+                .as_mut()
+                .unwrap();
+            pot.settled = true;
+            pot.pays = true;
+            pot.finality = "FINAL".into();
+            pot.tx_hash = "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61".into();
+        }
+        let listed = call(&mut state, "GET", "/v1/vault/settlements", "", None);
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        assert_eq!(listed.1["source"], "settled-receipts");
+        assert_eq!(
+            listed.1["matches"][0]["txHash"],
+            "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"
+        );
+        assert!(listed.1["matches"][0]["txUrl"]
+            .as_str()
+            .unwrap()
+            .contains("8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"));
+    }
+
+    struct ChainReset;
+
+    impl Drop for ChainReset {
+        fn drop(&mut self) {
+            crate::passport::set_match_end_chain(None);
+        }
+    }
+
+    fn seat_passport(state: &mut ArenaState, agent_id: &str, token_id: &str) {
+        state.book.passports.push(Passport {
+            passport_id: format!("ppt_{token_id}"),
+            token_id: Some(token_id.to_string()),
+            agent_id: agent_id.to_string(),
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 0,
+            career: None,
+        });
+    }
+
+    fn creditable(links: Vec<crate::vault::SeatTokenLink>) -> crate::vault::PotAuthorization {
+        crate::vault::PotAuthorization {
+            idempotency_key: "pot:mt_chain".into(),
+            pays: true,
+            contract_would_accept_resolve: false,
+            outcome: "win".into(),
+            reason: "test".into(),
+            rule: "winner-takes-all".into(),
+            pay_rule: "winner-takes-all".into(),
+            settlement_method: "settle_vault".into(),
+            finality: "FINAL".into(),
+            winner: "ann.testnet".into(),
+            participants: vec!["ann.testnet".into(), "bob.testnet".into()],
+            settled: true,
+            tx_hash: "C".repeat(44),
+            creator: "ann.testnet".into(),
+            payouts: vec![crate::vault::VaultPayout {
+                account: "ann.testnet".into(),
+                amount: "9".into(),
+            }],
+            seat_links: links,
+        }
+    }
+
+    #[test]
+    fn a_stale_api_transfer_is_not_credited_at_match_end() {
+        let _reset = ChainReset;
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"ann.testnet"}"#,
+                Some(&alpha),
+            )
+            .0,
+            200
+        );
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"bob.testnet"}"#,
+                Some(&bravo),
+            )
+            .0,
+            200
+        );
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
+        seat_passport(&mut state, &alpha_id, "disp_stale");
+        let mut reads = std::collections::HashMap::new();
+        reads.insert(
+            alpha_id.clone(),
+            crate::passport::ChainSeatBinding::Token(String::new()),
+        );
+        reads.insert(
+            bravo_id.clone(),
+            crate::passport::ChainSeatBinding::Token(String::new()),
+        );
+        crate::passport::set_match_end_chain(Some(reads));
+        state.book.matches[0].vault.as_mut().unwrap().round = crate::vault::MAX_ROUNDS;
+        let match_id = state.book.matches[0].match_id.clone();
+        let turn = state.book.matches[0].turn;
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        for (token, kind) in [(&alpha, "a"), (&bravo, "b")] {
+            let body = format!(
+                r#"{{"turn":{turn},"action":{{"type":"scout"}},"clientRequestId":"stale-{kind}"}}"#
+            );
+            let response = call(&mut state, "POST", &act, &body, Some(token));
+            assert_eq!(response.0, 200, "{}", response.1);
+        }
+        assert_eq!(state.book.matches[0].status, "over");
+        let links = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap()
+            .seat_links
+            .clone();
+        let alpha_link = links.iter().find(|link| link.agent_id == alpha_id).unwrap();
+        assert_eq!(alpha_link.source, "unbound-at-match-end");
+        assert!(alpha_link.token_id.is_empty());
+        assert_eq!(alpha_link.near_account, "ann.testnet");
+        assert_eq!(state.book.passports[0].status, "active");
+        assert_eq!(
+            state.book.passports[0].token_id.as_deref(),
+            Some("disp_stale")
+        );
+        crate::passport::credit_passports(&mut state.book.passports, &creditable(links));
+        assert!(state.book.passports[0].career.is_none());
+    }
+
+    #[test]
+    fn an_rpc_failure_ends_the_match_without_credit() {
+        let _reset = ChainReset;
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &format!("/v1/agents/me/wallet?now={NOW}"),
+                r#"{"nearAccount":"ann.testnet"}"#,
+                Some(&alpha),
+            )
+            .0,
+            200
+        );
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        let bravo_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "bravo")
+            .unwrap()
+            .agent_id
+            .clone();
+        seat_passport(&mut state, &alpha_id, "disp_live");
+        let mut reads = std::collections::HashMap::new();
+        reads.insert(
+            alpha_id.clone(),
+            crate::passport::ChainSeatBinding::Unverified,
+        );
+        reads.insert(bravo_id, crate::passport::ChainSeatBinding::Unverified);
+        crate::passport::set_match_end_chain(Some(reads));
+        state.book.matches[0].vault.as_mut().unwrap().round = crate::vault::MAX_ROUNDS;
+        state.book.matches[0].deadline_unix = NOW;
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches?now={NOW}&limit=5"),
+            "",
+            None,
+        );
+        assert_eq!(listed.0, 200, "{}", listed.1);
+        assert_eq!(state.book.matches[0].status, "over");
+        assert_eq!(listed.1["matches"][0]["status"], "over");
+        let links = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap()
+            .seat_links
+            .clone();
+        assert!(links
+            .iter()
+            .all(|link| link.source == "unverified-at-match-end"));
+        assert!(links.iter().all(|link| link.token_id.is_empty()));
+        assert_eq!(state.book.passports[0].status, "active");
+        assert_eq!(
+            state.book.passports[0].token_id.as_deref(),
+            Some("disp_live")
+        );
+        crate::passport::credit_passports(&mut state.book.passports, &creditable(links));
+        assert!(state.book.passports[0].career.is_none());
+        let match_id = state.book.matches[0].match_id.clone();
+        let public = call(
+            &mut state,
+            "GET",
+            &format!("/v1/matches/{match_id}?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(public.0, 200, "{}", public.1);
+        assert_eq!(public.1["status"], "over");
+        assert!(public.1["vault"]["pot"].is_object());
+    }
+
+    #[test]
     fn vault_draw_scores_one_point_each() {
         let mut state = ArenaState::default();
         let alpha = register_one(&mut state, "alpha");
@@ -4729,6 +5218,75 @@ mod tests {
         assert_eq!(row["arenaId"], "vault");
         assert_eq!(row["status"], "over");
         assert!(row["vault"]["rounds"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn plain_http_is_not_a_lobby_socket() {
+        assert!(!is_websocket_upgrade(None));
+        assert!(!is_websocket_upgrade(Some("")));
+        assert!(!is_websocket_upgrade(Some("h2c")));
+        assert!(is_websocket_upgrade(Some("websocket")));
+        assert!(is_websocket_upgrade(Some("WebSocket")));
+        assert!(is_websocket_upgrade(Some("keep-alive, websocket")));
+    }
+
+    #[test]
+    fn a_receipt_win_is_queued_ahead_and_badged() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let alpha_id = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "alpha")
+            .unwrap()
+            .agent_id
+            .clone();
+        state.book.passports.push(Passport {
+            passport_id: "ppt_vet".into(),
+            token_id: Some("disp_vet".into()),
+            agent_id: alpha_id,
+            owner_near: "ann.testnet".into(),
+            creator_near: "ann.testnet".into(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 1,
+            career: Some(serde_json::json!({
+                "vaultReceipts": { "wins": 1, "source": "settled-receipts" }
+            })),
+        });
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        let first = state.book.matches[0].seats[0].clone();
+        assert_eq!(
+            state
+                .book
+                .players
+                .iter()
+                .find(|player| player.agent_id == first)
+                .unwrap()
+                .handle,
+            "alpha"
+        );
+        let listed = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/alpha?now={NOW}"),
+            "",
+            None,
+        );
+        assert_eq!(listed.1["veteran"], true);
+        assert_eq!(listed.1["receiptWins"], 1);
+        state.book.passports[0].status = "unbound".into();
+        state.book.passports[0].agent_id.clear();
+        assert_eq!(state.book.passports[0].status, "unbound");
+        assert_eq!(
+            state.book.passports[0].career.as_ref().unwrap()["vaultReceipts"]["wins"],
+            1
+        );
     }
 
     #[test]

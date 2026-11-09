@@ -165,7 +165,7 @@ export function QuoteBoard() {
         ))}
       </ul>
       <p className="muted">
-        {source === "hyperliquid" ? "live · hyperliquid" : "fixture"} · Read-only. No order is sent. No key is used.
+        {source === "hyperliquid" ? "live · hyperliquid" : "quotes unavailable"} · Read-only. No order is sent. No key is used.
       </p>
     </section>
   );

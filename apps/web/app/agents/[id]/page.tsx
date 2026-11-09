@@ -1,5 +1,12 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { pageMetadata } from "@/lib/seo";
 import { AgentScreen } from "./AgentScreen";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  return pageMetadata(id, `Public arena profile for ${id}. Points and matches come from the API.`, `/agents/${encodeURIComponent(id)}`);
+}
 
 export const dynamic = "force-dynamic";
 

@@ -14,8 +14,9 @@ export type MarketListing = {
   tokenId: string;
   name: string;
   seller: string;
-  priceNear: string;
-  priceYocto: string;
+  priceNear: string | null;
+  priceYocto: string | null;
+  listed?: boolean;
   rarity?: "Common" | "Rare" | "Mythic";
   description: string;
   traits?: SkinTraits;
@@ -33,17 +34,32 @@ export type MarketListing = {
     matches: number;
     rank: number;
     bestRank: number;
+    vaultReceipts?: {
+      wins: number;
+      draws: number;
+      losses: number;
+      payoutYocto: string;
+      source: string;
+    };
+  };
+  vaultReceipts?: {
+    wins: number;
+    draws: number;
+    losses: number;
+    payoutYocto: string;
+    source: string;
   };
 };
 
 export type MarketSale = {
   id: string;
-  tokenId: string;
+  tokenId?: string | null;
   buyer: string;
   seller: string;
   priceNear: string;
-  timestamp: string;
-  rarity: "Common" | "Rare" | "Mythic";
+  timestamp?: string;
+  note?: string;
+  rarity?: "Common" | "Rare" | "Mythic";
 };
 
 export type MarketStats = {
@@ -56,6 +72,7 @@ export type MarketStats = {
 
 export type MarketPayload = {
   listings?: MarketListing[];
+  passports?: MarketListing[];
   sales?: MarketSale[];
   stats?: MarketStats;
   contract?: string;
@@ -81,17 +98,19 @@ const EMPTY_STATS: MarketStats = {
 /** A successful body is shown as returned. A failed read stays empty and is not replaced with samples. */
 export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
   listings: MarketListing[];
+  passports: MarketListing[];
   sales: MarketSale[];
   stats: MarketStats;
   contract: string;
   network: string;
   blockers: string[];
-  lastSettlement: { buyer?: string; seller?: string; priceNear?: string; note?: string } | null;
+  lastSettlement: { buyer?: string; seller?: string; priceNear?: string; note?: string; tokenId?: string | null } | null;
   source: "chain" | "not-read" | "unavailable";
 } {
   if (!ok || !body) {
     return {
       listings: [],
+      passports: [],
       sales: [],
       stats: EMPTY_STATS,
       contract: "",
@@ -102,10 +121,12 @@ export function marketFromResponse(ok: boolean, body: MarketPayload | null): {
     };
   }
   const listings = Array.isArray(body.listings) ? body.listings : [];
+  const passports = Array.isArray(body.passports) ? body.passports : [];
   const sales = Array.isArray(body.sales) ? body.sales : [];
   const source = body.source === "not-read" ? "not-read" : "chain";
   return {
     listings,
+    passports,
     sales,
     stats: body.stats ?? { ...EMPTY_STATS, listedCount: listings.length },
     contract: typeof body.contract === "string" ? body.contract : "",

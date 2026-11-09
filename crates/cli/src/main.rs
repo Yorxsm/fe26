@@ -2,6 +2,8 @@
 //! repository. With no key, every command prints the transaction it would
 //! submit and does not broadcast.
 
+mod hl;
+mod nep413;
 mod tx;
 
 use std::thread;
@@ -9,8 +11,11 @@ use std::time::Duration;
 
 use base64::Engine;
 use clap::{Parser, Subcommand};
+use ed25519_dalek::Signer;
 use fe2vi_core::{default_platform_caps, MIN_AGENT_DEPOSIT_YOCTO, ONE_NEAR};
-use fe2vi_intents::{issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS};
+use fe2vi_intents::{
+    intents_host_allowed, issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS,
+};
 
 use crate::tx::SignedCall;
 
@@ -33,6 +38,12 @@ struct Cli {
 enum IntentsCommand {
     /// Print the platform-cap policy. Broadcast stays off.
     Policy,
+    /// Sign a NEP-413 owner intent and submit it to a testnet sandbox.
+    Submit {
+        /// Testnet base URL. Mainnet hosts are refused.
+        #[arg(long, default_value = "https://www.usetidepool.tech")]
+        host: String,
+    },
     /// Issue a mock session grant. The token is discarded.
     Grant {
         #[arg(long)]
@@ -127,6 +138,31 @@ enum PassportCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum HlCommand {
+    /// List testnet perp dex names. No key.
+    Dexes,
+    /// Place a post-only testnet order from the agent key.
+    Order {
+        /// `BTC` or `xyz:TSLA`.
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        buy: bool,
+        #[arg(long)]
+        price: String,
+        #[arg(long)]
+        size: String,
+    },
+    /// Cancel one testnet order id.
+    Cancel {
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        oid: u64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum Command {
     /// Create an agent subaccount whose only key can call act, bid, and transfer_item.
     RegisterAgent {
@@ -163,6 +199,19 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Play several Vault matches back to back, then settle each with the restricted settler.
+    /// Agent tokens and the settler secret stay in the environment and are not printed.
+    VaultLoop {
+        #[arg(long, default_value_t = 2)]
+        matches: u32,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Sign and place or cancel a Hyperliquid testnet order. The agent key never leaves this process.
+    Hl {
+        #[command(subcommand)]
+        action: HlCommand,
+    },
     /// Poll the spectator API, or a heist view if no API is configured.
     Watch {
         #[arg(long)]
@@ -193,6 +242,11 @@ fn redact_line(text: &str) -> String {
         "FE2VI_PASSPORT_RELAY_KEY",
         "FE2VI_SETTLER_SECRET_KEY",
         "FE2VI_SETTLER_KEY",
+        "FE2VI_LOOP_TOKEN_A",
+        "FE2VI_LOOP_TOKEN_B",
+        "FE2VI_HL_AGENT_KEY",
+        "FE2VI_INTENTS_OWNER_SEED",
+        "NEAR_INTENTS_AGENT_API_KEY",
     ] {
         if let Ok(value) = std::env::var(name) {
             if value.len() >= 8 {
@@ -254,6 +308,198 @@ fn config_from_env() -> Config {
     }
 }
 
+fn hl_command(action: HlCommand) -> Result<String, String> {
+    match action {
+        HlCommand::Dexes => {
+            let body = hl::post_info(&serde_json::json!({ "type": "perpDexs" }))?;
+            let names: Vec<String> = body
+                .as_array()
+                .unwrap_or(&Vec::new())
+                .iter()
+                .enumerate()
+                .filter_map(|(index, row)| {
+                    row.get("name")
+                        .and_then(|value| value.as_str())
+                        .map(|name| format!("{index}:{name}"))
+                })
+                .collect();
+            let xyz = names.iter().any(|name| name.ends_with(":xyz"));
+            Ok(serde_json::json!({
+                "network": "testnet",
+                "exchange": hl::TESTNET_EXCHANGE,
+                "xyzListed": xyz,
+                "dexes": names,
+            })
+            .to_string())
+        }
+        HlCommand::Order {
+            coin,
+            buy,
+            price,
+            size,
+        } => {
+            let secret = hl_secret()?;
+            let (asset, name) = hl::resolve_asset(&coin)?;
+            let action = hl::order_action(asset, buy, &price, &size, "Alo");
+            let nonce = hl::now_ms();
+            let signature = hl::sign_l1(&secret, &action, nonce)?;
+            let body = hl::exchange_body(action, nonce, signature);
+            let response = hl::submit_exchange(hl::TESTNET_EXCHANGE, &body)?;
+            Ok(serde_json::json!({
+                "network": "testnet",
+                "address": hl::address_of(&secret)?,
+                "coin": name,
+                "asset": asset,
+                "response": response,
+            })
+            .to_string())
+        }
+        HlCommand::Cancel { coin, oid } => {
+            let secret = hl_secret()?;
+            let (asset, name) = hl::resolve_asset(&coin)?;
+            let action = hl::cancel_action(asset, oid);
+            let nonce = hl::now_ms();
+            let signature = hl::sign_l1(&secret, &action, nonce)?;
+            let body = hl::exchange_body(action, nonce, signature);
+            let response = hl::submit_exchange(hl::TESTNET_EXCHANGE, &body)?;
+            Ok(serde_json::json!({
+                "network": "testnet",
+                "coin": name,
+                "oid": oid,
+                "response": response,
+            })
+            .to_string())
+        }
+    }
+}
+
+fn hl_secret() -> Result<String, String> {
+    if let Ok(value) = std::env::var("FE2VI_HL_AGENT_KEY") {
+        if !value.trim().is_empty() {
+            return Ok(value);
+        }
+    }
+    if let Ok(path) = std::env::var("FE2VI_HL_AGENT_KEY_FILE") {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|_| "could not read the agent key file".to_string())?;
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    Err(
+        "Set FE2VI_HL_AGENT_KEY or FE2VI_HL_AGENT_KEY_FILE. The arena does not hold this key."
+            .into(),
+    )
+}
+
+fn intents_submit(host: &str) -> Result<String, String> {
+    intents_host_allowed(host).map_err(|err| err.to_string())?;
+    let seed_path = std::env::var("FE2VI_INTENTS_OWNER_SEED_FILE").unwrap_or_default();
+    let api_key = std::env::var("NEAR_INTENTS_AGENT_API_KEY").unwrap_or_default();
+    if seed_path.trim().is_empty() || api_key.trim().is_empty() {
+        return Ok(serde_json::json!({
+            "broadcast": false,
+            "host": host,
+            "mainnet": "disabled",
+            "reason": "Set FE2VI_INTENTS_OWNER_SEED_FILE and NEAR_INTENTS_AGENT_API_KEY to submit. The arena does not hold the owner seed.",
+        })
+        .to_string());
+    }
+    let seed =
+        std::fs::read(seed_path.trim()).map_err(|_| "could not read the owner seed".to_string())?;
+    if seed.len() != 32 {
+        return Err("owner seed must be 32 bytes".into());
+    }
+    let mut seed_bytes = [0u8; 32];
+    seed_bytes.copy_from_slice(&seed);
+    let signing = ed25519_dalek::SigningKey::from_bytes(&seed_bytes);
+    let public = signing.verifying_key();
+    let public_key = format!("ed25519:{}", bs58::encode(public.as_bytes()).into_string());
+    let account = hex::encode(public.as_bytes());
+    let asset = "nep141:wnear.tidepool-sandbox.testnet";
+    let policy = serde_json::json!({
+        "frozen": false,
+        "actions": ["swap"],
+        "assets": [asset],
+        "limits": {
+            "per_transaction": { asset: "1000000000000000000000000" },
+            "daily": { asset: "5000000000000000000000000" }
+        },
+        "max_actions_per_hour": 60,
+        "destinations": { "mode": "only", "list": [] },
+        "budget": { "daily_usd": "5.00" }
+    });
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let generated = client
+        .post(format!("{host}/v1/generate-intent"))
+        .bearer_auth(api_key.trim())
+        .json(&serde_json::json!({
+            "type": "agent_create",
+            "name": "fe2vi-demo",
+            "owner": { "type": "near", "account_id": account, "public_key": public_key },
+            "policy": policy,
+        }))
+        .send()
+        .map_err(|err| err.to_string())?;
+    let generated: serde_json::Value = generated.json().map_err(|err| err.to_string())?;
+    let payload = generated
+        .pointer("/intent/payload")
+        .cloned()
+        .ok_or_else(|| "testnet sandbox did not return an intent payload".to_string())?;
+    let message = payload
+        .get("message")
+        .and_then(|value| value.as_str())
+        .ok_or("intent payload has no message")?;
+    let recipient = payload
+        .get("recipient")
+        .and_then(|value| value.as_str())
+        .ok_or("intent payload has no recipient")?;
+    let nonce_b64 = payload
+        .get("nonce")
+        .and_then(|value| value.as_str())
+        .ok_or("intent payload has no nonce")?;
+    let nonce_raw = base64::engine::general_purpose::STANDARD
+        .decode(nonce_b64)
+        .map_err(|_| "intent nonce was not base64".to_string())?;
+    if nonce_raw.len() != 32 {
+        return Err("intent nonce must be 32 bytes".into());
+    }
+    let mut nonce = [0u8; 32];
+    nonce.copy_from_slice(&nonce_raw);
+    let digest = nep413::nep413_digest(message, &nonce, recipient);
+    let signature = signing.sign(&digest);
+    let signed = serde_json::json!({
+        "standard": "nep413",
+        "payload": payload,
+        "public_key": public_key,
+        "signature": format!("ed25519:{}", bs58::encode(signature.to_bytes()).into_string()),
+    });
+    let submitted = client
+        .post(format!("{host}/v1/submit-intent"))
+        .bearer_auth(api_key.trim())
+        .json(&serde_json::json!({
+            "type": generated.get("type").and_then(|value| value.as_str()).unwrap_or("agent_create"),
+            "correlation_id": generated.get("correlation_id").cloned().unwrap_or(serde_json::Value::Null),
+            "signed_data": signed,
+        }))
+        .send()
+        .map_err(|err| err.to_string())?;
+    let submitted: serde_json::Value = submitted.json().map_err(|err| err.to_string())?;
+    Ok(serde_json::json!({
+        "broadcast": true,
+        "network": "testnet",
+        "host": host,
+        "correlation_id": submitted.get("correlation_id").cloned().unwrap_or(serde_json::Value::Null),
+        "status": submitted.get("status").cloned().unwrap_or(serde_json::Value::Null),
+        "agent_id": submitted.get("agent_id").cloned().unwrap_or(serde_json::Value::Null),
+        "type": submitted.get("type").cloned().unwrap_or(serde_json::Value::Null),
+    })
+    .to_string())
+}
+
 fn intents(action: IntentsCommand) -> Result<String, String> {
     let live = live_gate(
         &std::env::var("FE2VI_INTENTS_LIVE").unwrap_or_default(),
@@ -262,14 +508,22 @@ fn intents(action: IntentsCommand) -> Result<String, String> {
     match action {
         IntentsCommand::Policy => {
             let policy = policy_from_caps(&default_platform_caps(), MOCK_USD_PER_NEAR_CENTS);
+            let testnet_host = "https://www.usetidepool.tech";
+            let testnet_ok = intents_host_allowed(testnet_host).is_ok();
+            let mainnet_refused = intents_host_allowed("https://api.agentsonintents.com").is_err();
             Ok(serde_json::to_string_pretty(&serde_json::json!({
-                "mode": if live { "live-dry" } else { "mock" },
+                "testnetAllowed": testnet_ok,
+                "mainnetRefused": mainnet_refused,
+                "mode": if live { "testnet-ready" } else { "policy-only" },
                 "broadcast": false,
-                "note": "fe2VI does not broadcast swaps, transfers, or withdrawals",
+                "mainnet": "disabled",
+                "testnetHost": "https://www.usetidepool.tech",
+                "note": "The agent signs a NEP-413 intent and submits it to the testnet sandbox. Mainnet is refused. This command does not print a key.",
                 "policy": policy,
             }))
             .unwrap_or_else(|_| "{}".into()))
         }
+        IntentsCommand::Submit { host } => intents_submit(&host),
         IntentsCommand::Grant { game, agent } => {
             let mut grants = Vec::new();
             let issued = issue_session(&mut grants, &game, &agent, 0, 3600);
@@ -498,6 +752,8 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
         },
         Command::Intents { action } => intents(action),
         Command::SettleVault { match_id, dry_run } => settle_vault(config, &match_id, dry_run),
+        Command::VaultLoop { matches, dry_run } => vault_loop(config, matches, dry_run),
+        Command::Hl { action } => hl_command(action),
         Command::Watch { game_id, once } => watch(config, &game_id, once),
     }
 }
@@ -625,6 +881,308 @@ fn seed(
     .unwrap_or_else(|_| "{}".into()))
 }
 
+fn vault_result_ready(rule: &str, outcome: &str) -> bool {
+    matches!(
+        (rule, outcome),
+        ("winner-takes-all", "win") | ("equal-split", "draw") | ("creator-refund", "cancel")
+    )
+}
+
+fn loop_preflight(
+    dry_run: bool,
+    api: &str,
+    token_a: &str,
+    token_b: &str,
+    secret: &str,
+    bearer: &str,
+    account: &str,
+) -> Result<(), String> {
+    if dry_run {
+        return Ok(());
+    }
+    let missing: Vec<&str> = [
+        ("FE2VI_API_URL", api),
+        ("FE2VI_LOOP_TOKEN_A", token_a),
+        ("FE2VI_LOOP_TOKEN_B", token_b),
+        ("FE2VI_SETTLER_SECRET_KEY", secret),
+        ("FE2VI_SETTLER_KEY", bearer),
+        ("signer account", account),
+    ]
+    .into_iter()
+    .filter(|(_, value)| value.trim().is_empty())
+    .map(|(name, _)| name)
+    .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "vault loop refused before queuing: {}",
+            missing.join(", ")
+        ))
+    }
+}
+
+fn receipt_lets_the_loop_continue(body: &serde_json::Value) -> bool {
+    let tx = body["txHash"].as_str().unwrap_or("").trim();
+    if tx.is_empty() {
+        return false;
+    }
+    if body["reason"].as_str() == Some("already settled") && body["settled"].as_bool() == Some(true)
+    {
+        return true;
+    }
+    body["settled"].as_bool() == Some(true)
+        && body["finality"].as_str() == Some("FINAL")
+        && body["pays"].as_bool() == Some(true)
+}
+
+fn vault_loop(config: &Config, matches: u32, dry_run: bool) -> Result<String, String> {
+    let matches = matches.clamp(1, 5);
+    if dry_run {
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": false,
+            "broadcast": false,
+            "matches": matches,
+            "reason": "dry-run",
+            "steps": [
+                "queue both agents on /v1/arenas/vault/queue",
+                "submit cover until the public match is over",
+                "settle_vault with FE2VI_SETTLER_SECRET_KEY",
+                "record the FINAL receipt",
+                "repeat"
+            ],
+            "secrets": "not printed",
+        }))
+        .unwrap_or_else(|_| "{}".into()));
+    }
+    let api = config.api_url.clone().unwrap_or_default();
+    let token_a = std::env::var("FE2VI_LOOP_TOKEN_A").unwrap_or_default();
+    let token_b = std::env::var("FE2VI_LOOP_TOKEN_B").unwrap_or_default();
+    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY").unwrap_or_default();
+    let bearer = std::env::var("FE2VI_SETTLER_KEY").unwrap_or_default();
+    let account = config.account_id.clone().unwrap_or_default();
+    loop_preflight(false, &api, &token_a, &token_b, &secret, &bearer, &account)?;
+    let api = api.trim_end_matches('/').to_string();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let mut played = Vec::new();
+    for index in 0..matches {
+        let queued_a = bearer_post(
+            &client,
+            &format!("{api}/v1/arenas/vault/queue"),
+            &token_a,
+            &serde_json::json!({}),
+        )?;
+        let queued_b = bearer_post(
+            &client,
+            &format!("{api}/v1/arenas/vault/queue"),
+            &token_b,
+            &serde_json::json!({}),
+        )?;
+        let match_id = queued_b
+            .pointer("/match/matchId")
+            .or_else(|| queued_a.pointer("/match/matchId"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let match_id = match match_id {
+            Some(id) => id,
+            None => poll_match_id(&client, &api, &token_a)?,
+        };
+        let mut spins = 0_u32;
+        loop {
+            let mine = bearer_get(&client, &format!("{api}/v1/agents/me/matches"), &token_a)?;
+            let row = mine["matches"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["match"]["matchId"] == match_id))
+                .cloned()
+                .ok_or("loop match disappeared")?;
+            let status = row["match"]["status"].as_str().unwrap_or("");
+            if status == "over" {
+                break;
+            }
+            let turn = row["match"]["turn"].as_u64().unwrap_or(1);
+            let body = serde_json::json!({
+                "turn": turn,
+                "action": {"type": "cover", "intent": "vault loop"},
+                "clientRequestId": format!("loop-{index}-{turn}-a"),
+            });
+            let _ = bearer_post(
+                &client,
+                &format!("{api}/v1/matches/{match_id}/actions"),
+                &token_a,
+                &body,
+            );
+            let body_b = serde_json::json!({
+                "turn": turn,
+                "action": {"type": "cover", "intent": "vault loop"},
+                "clientRequestId": format!("loop-{index}-{turn}-b"),
+            });
+            let _ = bearer_post(
+                &client,
+                &format!("{api}/v1/matches/{match_id}/actions"),
+                &token_b,
+                &body_b,
+            );
+            spins += 1;
+            if spins > 12 {
+                return Err("vault loop did not reach a public result".into());
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+        let public = api_get(&client, &format!("{api}/v1/matches/{match_id}"))?;
+        let receipt = settle_vault(config, &match_id, false)?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&receipt).unwrap_or(serde_json::Value::Null);
+        if !receipt_lets_the_loop_continue(&parsed) {
+            return Err(
+                "vault loop stopped: the receipt was not an accepted FINAL result or an already-settled record"
+                    .into(),
+            );
+        }
+        played.push(serde_json::json!({
+            "matchId": match_id,
+            "outcome": public.pointer("/vault/pot/outcome").cloned().unwrap_or(serde_json::Value::Null),
+            "rule": public.pointer("/vault/pot/rule").cloned().unwrap_or(serde_json::Value::Null),
+            "receipt": parsed,
+        }));
+    }
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "ok": true,
+        "broadcast": true,
+        "source": "settled-receipts",
+        "matches": played,
+    }))
+    .unwrap_or_else(|_| "{}".into()))
+}
+
+fn poll_match_id(
+    client: &reqwest::blocking::Client,
+    api: &str,
+    token: &str,
+) -> Result<String, String> {
+    for _ in 0..5 {
+        let mine = bearer_get(client, &format!("{api}/v1/agents/me/matches"), token)?;
+        if let Some(id) = mine["matches"]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|row| row["match"]["matchId"].as_str())
+        {
+            return Ok(id.to_string());
+        }
+        thread::sleep(Duration::from_millis(300));
+    }
+    Err("no vault match was opened".into())
+}
+
+fn bearer_get(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .get(url)
+        .header("authorization", format!("Bearer {token}"))
+        .send()
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}"));
+    }
+    serde_json::from_str(&text).map_err(|err| format!("api body: {err}"))
+}
+
+fn bearer_post(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(url)
+        .header("authorization", format!("Bearer {token}"))
+        .json(body)
+        .send()
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("api returned {status}"));
+    }
+    Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::{loop_preflight, receipt_lets_the_loop_continue, vault_result_ready};
+
+    #[test]
+    fn a_missing_settler_secret_is_not_a_success_summary() {
+        let err = loop_preflight(
+            false,
+            "https://api.fe2vi.space",
+            "a",
+            "b",
+            "",
+            "bearer",
+            "acct",
+        )
+        .unwrap_err();
+        assert!(err.contains("FE2VI_SETTLER_SECRET_KEY"));
+        assert!(!err.contains("\"ok\": true"));
+        assert!(!err.contains("broadcast"));
+    }
+
+    #[test]
+    fn a_missing_receipt_bearer_is_not_a_success_summary() {
+        let err = loop_preflight(
+            false,
+            "https://api.fe2vi.space",
+            "a",
+            "b",
+            "secret",
+            "",
+            "acct",
+        )
+        .unwrap_err();
+        assert!(err.contains("FE2VI_SETTLER_KEY"));
+        assert!(!err.contains("\"ok\": true"));
+        assert!(!err.contains("broadcast"));
+    }
+
+    #[test]
+    fn the_loop_moves_on_only_after_a_receipt() {
+        assert!(!receipt_lets_the_loop_continue(&serde_json::json!({
+            "ok": true,
+            "broadcast": false
+        })));
+        assert!(receipt_lets_the_loop_continue(&serde_json::json!({
+            "settled": true,
+            "finality": "FINAL",
+            "pays": true,
+            "txHash": "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61"
+        })));
+        assert!(receipt_lets_the_loop_continue(&serde_json::json!({
+            "ok": true,
+            "broadcast": false,
+            "settled": true,
+            "txHash": "AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy",
+            "reason": "already settled"
+        })));
+    }
+
+    #[test]
+    fn a_draw_is_ready_for_settle_vault() {
+        assert!(vault_result_ready("winner-takes-all", "win"));
+        assert!(vault_result_ready("equal-split", "draw"));
+        assert!(vault_result_ready("creator-refund", "cancel"));
+        assert!(!vault_result_ready("winner-takes-all", "draw"));
+        assert!(!vault_result_ready("equal-split", "unmapped"));
+    }
+}
+
 fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String, String> {
     let api = config
         .api_url
@@ -653,7 +1211,7 @@ fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String
         }))
         .unwrap_or_else(|_| "{}".into()));
     }
-    if rule != "winner-takes-all" || !matches!(outcome, "win" | "draw" | "cancel") {
+    if !vault_result_ready(rule, outcome) {
         return Err("match is unmapped or not a vault result; no account was invented".into());
     }
     let winner = pot["winner"].as_str().unwrap_or("");
@@ -667,7 +1225,20 @@ fn settle_vault(config: &Config, match_id: &str, dry_run: bool) -> Result<String
         "outcome": outcome,
         "winner": if outcome == "win" { serde_json::Value::String(winner.into()) } else { serde_json::Value::Null },
     });
-    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY").ok();
+    let secret = std::env::var("FE2VI_SETTLER_SECRET_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    if !dry_run && secret.is_none() {
+        return Err("FE2VI_SETTLER_SECRET_KEY is required".into());
+    }
+    if !dry_run
+        && std::env::var("FE2VI_SETTLER_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .is_none()
+    {
+        return Err("FE2VI_SETTLER_KEY is required to record the receipt".into());
+    }
     let mut settling = config.clone();
     settling.signer_secret = secret.clone();
     let submitted = submit(

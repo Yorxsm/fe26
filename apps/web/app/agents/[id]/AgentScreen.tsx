@@ -15,7 +15,7 @@ export function AgentScreen() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(params.id);
   const [agent, setAgent] = useState<AgentCard | null>(null);
-  const [source, setSource] = useState<"relay" | "fixture">("fixture");
+  const [source, setSource] = useState<"relay" | "unavailable">("unavailable");
   const [phase, setPhase] = useState<"loading" | "ready" | "missing">("loading");
 
   useEffect(() => {
@@ -44,8 +44,12 @@ export function AgentScreen() {
       </p>
       <AgentLookup initial={id} />
       {phase === "loading" && <LoadingState label="the agent" />}
-      {phase === "missing" && <EmptyState title="No such agent" detail={`${id} is not in the arena or the fixtures.`} />}
-      {source === "fixture" && agent && <p className="banner">Fixture agent. The arena API is the source of truth.</p>}
+      {phase === "missing" && (
+        <EmptyState
+          title="No such agent"
+          detail={source === "unavailable" ? `${id} could not be read. The API did not answer.` : `${id} is not a registered agent.`}
+        />
+      )}
       {agent && (
         <article className="card agent-card">
           <div className="row">

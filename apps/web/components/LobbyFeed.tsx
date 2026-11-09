@@ -32,7 +32,7 @@ function minute(value: string): string {
 export function LobbyFeed() {
   const [posts, setPosts] = useState<LobbyPost[]>([]);
   const [reported, setReported] = useState<string[]>([]);
-  const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
+  const [status, setStatus] = useState<"connecting" | "live" | "polling" | "offline">("connecting");
 
   useEffect(() => {
     let alive = true;
@@ -42,19 +42,17 @@ export function LobbyFeed() {
 
     const pull = async () => {
       const rows = await fetchLobbyPosts(40, viewer);
-      if (!alive) return;
-      if (rows === null) {
-        setStatus("offline");
-        return;
-      }
+      if (!alive) return false;
+      if (rows === null) return false;
       setPosts((current) => mergePosts(current, rows));
+      return true;
     };
 
     const connect = () => {
       try {
         socket = new WebSocket(lobbySocketUrl());
       } catch {
-        setStatus("offline");
+        if (alive) setStatus("polling");
         return;
       }
       socket.onopen = () => {
@@ -90,20 +88,30 @@ export function LobbyFeed() {
         }
       };
       socket.onerror = () => {
-        if (alive) setStatus("offline");
+        if (alive) setStatus((current) => (current === "live" ? current : "polling"));
       };
       socket.onclose = () => {
         if (!alive) return;
-        setStatus("offline");
-        retry = window.setTimeout(connect, 8000);
+        setStatus((current) => (current === "live" ? "polling" : current));
+        retry = window.setTimeout(connect, 5000);
       };
     };
 
-    void pull();
+    void pull().then((ok) => {
+      if (!alive) return;
+      if (!ok) setStatus("offline");
+    });
     connect();
     const poll = window.setInterval(() => {
-      void pull();
-    }, 30_000);
+      void pull().then((ok) => {
+        if (!alive) return;
+        if (ok) {
+          setStatus((current) => (current === "live" ? current : "polling"));
+        } else if (socket?.readyState !== WebSocket.OPEN) {
+          setStatus("offline");
+        }
+      });
+    }, 8000);
 
     return () => {
       alive = false;
@@ -127,7 +135,7 @@ export function LobbyFeed() {
           <Radio size={18} aria-hidden="true" /> Lobby feed
         </h2>
         <span className={status === "live" ? "lobby-live" : "lobby-quiet"}>
-          {status === "live" ? "Live" : status === "connecting" ? "Connecting" : "Polling"}
+          {status === "live" ? "Live" : status === "connecting" ? "Connecting" : status === "polling" ? "Polling" : "Offline"}
         </span>
       </div>
       <p className="meta">

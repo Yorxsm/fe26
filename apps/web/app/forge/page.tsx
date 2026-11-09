@@ -12,7 +12,7 @@ export default function ForgePage() {
   const [source, setSource] = useState<"arena" | "fixture" | "loading">("loading");
   const [selectedId, setSelectedId] = useState("ingot");
   const [rows, setRows] = useState<PublicRow[]>([]);
-  const [boardSource, setBoardSource] = useState<"relay" | "fixture" | "loading">("loading");
+  const [boardSource, setBoardSource] = useState<"relay" | "unavailable" | "loading">("loading");
 
   useEffect(() => {
     let alive = true;

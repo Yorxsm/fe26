@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { CupLive } from "@/components/CupLive";
 import { LiveMatches } from "@/components/LiveMatches";
+import { VaultSettlements } from "@/components/VaultSettlements";
 import { QuestPing } from "@/components/QuestPing";
 import { CountdownChip, EventBanner, HeistBoard, QuoteBoard, ScheduleList } from "@/components/SpectatorBoards";
 import { EmptyState } from "@/components/States";
@@ -66,6 +67,7 @@ export default function GamePage() {
         </p>
       </section>
       {game.heist ? <LiveMatches arena={game.arena} /> : null}
+      {game.heist ? <VaultSettlements /> : null}
       {game.heist ? (
         <>
           <CountdownChip />

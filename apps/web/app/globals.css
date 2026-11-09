@@ -1862,7 +1862,8 @@ button.pronounce:focus-visible {
   justify-content: space-between;
   gap: 8px;
 }
-.room-board-head > span {
+.room-board-head > span,
+.room-fold > span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1927,6 +1928,23 @@ button.pronounce:focus-visible {
   padding: 10px 12px;
   display: grid;
   gap: 6px;
+}
+.room-board.is-collapsed > :not(.room-board-head),
+.room-activity.is-collapsed > :not(.room-fold) { display: none; }
+.room-fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .room-activity h2 { margin: 0; font-size: var(--type-body); font-weight: 700; }
 .room-activity p, .room-activity li { margin: 0; }

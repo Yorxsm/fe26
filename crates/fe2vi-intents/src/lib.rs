@@ -176,13 +176,35 @@ pub fn revoke_session(grants: &mut [StoredGrant], grant_id: &str) -> bool {
     }
 }
 
-/// A mock action inside the caps. This never becomes a chain or API write.
-pub fn mock_act(
+/// Official NEAR Intents Agent API is mainnet. Tidepool is the testnet sandbox.
+/// A mainnet host is refused before any submit.
+pub fn intents_host_allowed(url: &str) -> Result<(), &'static str> {
+    let lower = url.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return Err("intents host missing");
+    }
+    if lower.contains("agentsonintents.com")
+        || lower.contains("mainnet")
+        || lower.contains("api.near-intents.org")
+    {
+        return Err("mainnet intents refused");
+    }
+    if lower.contains("usetidepool.tech") || lower.contains("testnet") {
+        return Ok(());
+    }
+    Err("intents host must be a testnet sandbox")
+}
+
+/// A policy-checked action. `mode` is `policy-only` until the agent submits a
+/// signature to a testnet host. This function does not hold a key and does not
+/// broadcast.
+pub fn policy_act(
     grants: &mut [StoredGrant],
     grant_id: &str,
     amount_yocto: u128,
     caps: &PlatformCaps,
     now: u64,
+    mode: &str,
 ) -> Result<serde_json::Value, IntentsError> {
     let agent_spent = {
         let grant = grants
@@ -214,12 +236,30 @@ pub fn mock_act(
     grant.spent_yocto = grant.spent_yocto.saturating_add(amount_yocto);
     Ok(serde_json::json!({
         "ok": true,
-        "mode": "mock",
-        "dry": true,
+        "mode": mode,
+        "dry": mode != "testnet-signed",
         "broadcast": false,
         "grant_id": grant_id,
-        "amount_yocto": amount_yocto.to_string()
+        "amount_yocto": amount_yocto.to_string(),
+        "spent_yocto": grant.spent_yocto.to_string(),
     }))
+}
+
+/// A mock action inside the caps. This never becomes a chain or API write.
+pub fn mock_act(
+    grants: &mut [StoredGrant],
+    grant_id: &str,
+    amount_yocto: u128,
+    caps: &PlatformCaps,
+    now: u64,
+) -> Result<serde_json::Value, IntentsError> {
+    let mut value = policy_act(grants, grant_id, amount_yocto, caps, now, "mock")?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("mode".into(), serde_json::json!("mock"));
+        object.insert("dry".into(), serde_json::json!(true));
+        object.insert("broadcast".into(), serde_json::json!(false));
+    }
+    Ok(value)
 }
 
 /// Live mode still refuses a broadcast. Dry quotes are the only remote call.

@@ -1,4 +1,12 @@
+import type { Metadata } from "next";
 import { LiveMatches } from "@/components/LiveMatches";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "War Room",
+  "War Room proofs and recent claims from the arena API. No invented solves.",
+  "/war-room",
+);
 import { QuestPing } from "@/components/QuestPing";
 import { ChallengeBoard } from "@/components/SpectatorBoards";
 
