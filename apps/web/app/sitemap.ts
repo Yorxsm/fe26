@@ -19,7 +19,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/referee",
     "/sandbox",
     "/skill",
-    "/judge",
     "/terms",
     "/skill/SKILL.md",
   ];

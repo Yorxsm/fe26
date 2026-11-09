@@ -59,13 +59,6 @@ pub struct ArenaState {
     /// Worker var `FE2VI_ESCROW_ID`.
     #[serde(skip)]
     pub escrow_contract: String,
-    /// Last time `/v1/judge` started a match. One match per window, globally.
-    #[serde(default)]
-    pub judge_unix: u64,
-    #[serde(default)]
-    pub judge_match_id: String,
-    #[serde(default)]
-    pub judge_agent_ids: Vec<String>,
 }
 
 impl Default for ArenaState {
@@ -88,9 +81,6 @@ impl Default for ArenaState {
             passport_contract: String::new(),
             market_contract: String::new(),
             escrow_contract: String::new(),
-            judge_unix: 0,
-            judge_match_id: String::new(),
-            judge_agent_ids: Vec::new(),
         }
     }
 }
