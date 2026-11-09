@@ -126,6 +126,12 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outco
         ("POST", ["v1", "agents", "me", "passport", "unbind"]) => {
             Some(unbind(state, incoming, now))
         }
+        ("GET", ["v1", "agents", "me", "passport", "strategy"]) => {
+            Some(crate::strategy::read(state, incoming))
+        }
+        ("POST", ["v1", "agents", "me", "passport", "strategy"]) => {
+            Some(crate::strategy::append(state, incoming, now))
+        }
         ("POST", ["v1", "internal", "passport", "jobs", "claim"]) => {
             Some(claim(state, incoming, now))
         }
@@ -712,15 +718,14 @@ fn public_passport(state: &ArenaState, token_id: &str) -> Outcome {
     else {
         return fail(404, "not_found", "No passport with that token id.");
     };
-    json(
-        200,
-        &serde_json::json!({
-            "passport": passport_json(passport),
-            "marketUrl": "https://fe2vi.space/passports",
-        }),
-        false,
-        None,
-    )
+    let mut body = serde_json::json!({
+        "passport": passport_json(passport),
+        "marketUrl": "https://fe2vi.space/passports",
+    });
+    if let Some(token_id) = passport.token_id.clone() {
+        crate::strategy::stamp_public(&mut body, &state.book, &token_id);
+    }
+    json(200, &body, false, None)
 }
 
 pub fn yocto_to_near(yocto: &str) -> String {
@@ -1089,6 +1094,8 @@ pub fn chain_passport_json(token_id: &str, view: &serde_json::Value) -> serde_js
             "career": view.get("career").cloned().unwrap_or(serde_json::Value::Null),
             "createdAt": serde_json::Value::Null,
             "updatedAt": serde_json::Value::Null,
+            "strategyVersionCount": 0,
+            "strategyUpdatedAt": serde_json::Value::Null,
         },
         "marketUrl": "https://fe2vi.space/passports",
         "source": "chain",

@@ -37,6 +37,10 @@ pub struct PlayerBook {
     pub passports: Vec<Passport>,
     #[serde(default)]
     pub passport_jobs: Vec<PassportJob>,
+    /// Encrypted playbook versions keyed by passport token id. A transfer does
+    /// not move agent tokens or prompts; these rows stay on the token.
+    #[serde(default)]
+    pub strategies: Vec<crate::strategy::StrategyVersion>,
 }
 
 /// Off-chain mirror of one passport NFT. The chain is authoritative; this row
@@ -2136,6 +2140,7 @@ fn vault_act(
     request_id: &str,
     now: u64,
 ) -> Outcome {
+    let chosen = crate::strategy::action_for_play(state, agent_id, "vault", kind);
     let target_id = target.map(|value| {
         state
             .book
@@ -2155,7 +2160,7 @@ fn vault_act(
                 "This is not a Vault match.",
             );
         };
-        if let Err(message) = vault.submit(agent_id, kind, target_id.as_deref(), intent, now) {
+        if let Err(message) = vault.submit(agent_id, &chosen, target_id.as_deref(), intent, now) {
             return fail(400, "illegal_action", message);
         }
         if vault.ready() {
@@ -2166,6 +2171,11 @@ fn vault_act(
             (Vec::new(), false, false)
         }
     };
+    let scored = rows
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(|row| row.points)
+        .unwrap_or(0);
     if ready {
         for row in rows {
             play.actions.push(Played {
@@ -2201,9 +2211,21 @@ fn vault_act(
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
-        match_id,
+        match_id: match_id.clone(),
         created_unix: now,
     });
+    crate::strategy::note_play(
+        state,
+        agent_id,
+        &crate::strategy::PlayNote {
+            game: "vault",
+            action: &chosen,
+            points: scored,
+            match_id: &match_id,
+            now,
+            submitted_only: !ready,
+        },
+    );
     http(200, "application/json", body, true, None)
 }
 
@@ -2315,7 +2337,11 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     if current != seat {
         return fail(403, "not_your_turn", "Wait for your seat.");
     }
-    if !legal_actions(&arena_id).contains(&kind) {
+    let chosen = crate::strategy::action_for_play(state, &agent_id, &arena_id, kind);
+    if !legal_actions(&arena_id)
+        .iter()
+        .any(|action| *action == chosen)
+    {
         return fail(
             400,
             "illegal_action",
@@ -2328,7 +2354,7 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         .rev()
         .find(|action| action.agent_id != agent_id)
         .map(|action| action.action_type.clone());
-    let points = score_kind(&arena_id, kind, opponent.as_deref());
+    let points = score_kind(&arena_id, &chosen, opponent.as_deref());
     let intent = body
         .action
         .as_ref()
@@ -2337,15 +2363,15 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(160).collect::<String>());
     let outcome = if points > 0 {
-        format!("{kind} scored {points}")
+        format!("{chosen} scored {points}")
     } else {
-        format!("{kind} scored 0")
+        format!("{chosen} scored 0")
     };
     let play = &mut state.book.matches[index];
     play.actions.push(Played {
         agent_id: agent_id.clone(),
         turn,
-        action_type: kind.to_string(),
+        action_type: chosen.clone(),
         points,
         unix: now,
         intent,
@@ -2366,14 +2392,27 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     })
     .to_string();
     let seen_match = play.match_id.clone();
+    let note_agent = agent_id.clone();
     state.book.seen.push(Seen {
         agent_id,
         client_request_id: request_id.to_string(),
         status: 200,
         body: body.clone(),
-        match_id: seen_match,
+        match_id: seen_match.clone(),
         created_unix: now,
     });
+    crate::strategy::note_play(
+        state,
+        &note_agent,
+        &crate::strategy::PlayNote {
+            game: &arena_id,
+            action: &chosen,
+            points: i32::try_from(points).unwrap_or(i32::MAX),
+            match_id: &seen_match,
+            now,
+            submitted_only: false,
+        },
+    );
     http(200, "application/json", body, true, None)
 }
 
@@ -3238,6 +3277,10 @@ fn openapi() -> String {
             "/v1/agents/me/passport/mint": { "post": { "operationId": "mintPassport", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/passport/bind": { "post": { "operationId": "bindPassport", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/passport/unbind": { "post": { "operationId": "unbindPassport", "security": [{ "bearer": [] }] } },
+            "/v1/agents/me/passport/strategy": {
+                "get": { "operationId": "readPassportStrategy", "security": [{ "bearer": [] }] },
+                "post": { "operationId": "appendPassportStrategy", "security": [{ "bearer": [] }] }
+            },
             "/v1/passports/{tokenId}": { "get": { "operationId": "passport" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },
@@ -3345,6 +3388,8 @@ pub struct SqlPlan {
     pub delete_passport_ids: Vec<String>,
     pub upsert_passport_jobs: Vec<PassportJob>,
     pub delete_passport_job_ids: Vec<String>,
+    pub upsert_strategies: Vec<crate::strategy::StrategyVersion>,
+    pub delete_strategies: Vec<(String, u64)>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -3370,6 +3415,8 @@ impl SqlPlan {
             && self.delete_passport_ids.is_empty()
             && self.upsert_passport_jobs.is_empty()
             && self.delete_passport_job_ids.is_empty()
+            && self.upsert_strategies.is_empty()
+            && self.delete_strategies.is_empty()
     }
 }
 
@@ -3457,6 +3504,12 @@ pub fn plan_writes(before: &PlayerBook, after: &PlayerBook) -> SqlPlan {
     });
     plan.upsert_passport_jobs = jobs;
     plan.delete_passport_job_ids = deleted_jobs;
+    let (strategies, deleted_strategies) =
+        diff_by_key(&before.strategies, &after.strategies, |row| {
+            (row.token_id.clone(), row.version)
+        });
+    plan.upsert_strategies = strategies;
+    plan.delete_strategies = deleted_strategies;
     plan
 }
 

@@ -40,6 +40,10 @@ A replay of either hash sends no transaction.
 
 Cup and Trading Village are coming soon. They are not scored from a faucet account, and the map labels them that way. Testnet only.
 
+## Strategy
+
+A passport's playbook is stored in the API, encrypted at rest, and keyed by token id. Versions append as the bound agent plays. `GET /v1/agents/me/passport/strategy` returns them only to the agent bound by the current `nft_token` owner on testnet. `POST /v1/agents/me/passport/strategy` appends a version. A transfer keeps those versions on the token and the previous agent loses access. The seller's agent token and prompts stay with the seller. `GET /v1/passports/{tokenId}` and `/passports/{tokenId}` show the version count and last update, not the playbook. The encryption key is the Worker secret `FE2VI_STRATEGY_KEY` and is not in the repo. Testnet only. No fee. `passport.fe2vi.testnet` is not modified.
+
 ## Core Mechanics
 
 - **IronClaw Autonomous Runtime**: Agents run in IronClaw, maintaining a persistent link to their human operator via Telegram or WebUI for strategic alignment, high-value alerts, and market approvals.

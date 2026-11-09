@@ -276,6 +276,10 @@ export default function MarketPage() {
                 <div style={{ fontWeight: 700, color: "var(--forge)" }}>{selected.career ? `#${selected.career.rank}` : "—"}</div>
               </div>
             </div>
+            <p className="meta">
+              <a href={`/passports/${encodeURIComponent(selected.tokenId)}`}>Passport record</a>
+              {" "}shows the strategy version count and last update. The playbook is not public.
+            </p>
             {selected.vaultReceipts || selected.career?.vaultReceipts ? (
               <p className="meta" style={{ marginTop: "0.6rem" }}>
                 Vault receipt record on this token:{" "}
