@@ -23,15 +23,7 @@ FINAL Vault payouts, also returned by `GET /v1/vault/settlements` (`finality` `F
 - Win, 0.02 NEAR, match `mt_730a1559a8f36fd0`: https://testnet.nearblocks.io/txns/8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61
 - Draw, 0.01 NEAR each, match `mt_41f001a70efa3af0`: https://testnet.nearblocks.io/txns/AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy
 
-Tests. From the repo root, `cargo test --workspace` is the CI Rust command. Each crate ends with `test result: ok` and `0 failed`. The API library on this tree prints `test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
-
-```bash
-cargo test --workspace
-cargo test -p fe2vi-api --lib
-cd apps/web && node --test lib/*.test.mjs
-```
-
-The web command prints `# tests 7`, `# pass 7`, and `# fail 0`.
+1. From the repo root, run `make verify`. It checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs`, `npm run check:type`, then reads `https://api.fe2vi.space/health` and `view_account` for the five contracts below. Any failure exits non-zero. There is no root `package.json`, so there is no `test:all` script. A pass ends with `verify: ok`. The API library line is `test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 7`, `# pass 7`, and `# fail 0`. The typecheck prints `type scale ok`. Health must be `ok: true` and `network: testnet`.
 
 Production curls. Send a normal user agent. Cloudflare returns 403 to a bare client.
 
@@ -46,7 +38,7 @@ curl -sS -A Mozilla/5.0 "https://api.fe2vi.space/v1/village/tape?limit=1"
 
 Checked shapes:
 
-- `/health`: `ok` true, `network` `testnet`, `arena` `off-chain`, `passport` `passport.fe2vidisp7a3c.testnet`, `market` `market.fe2vidisp7a3c.testnet`, `escrow` `heist.fe2vidisp7a3c.testnet`, `build` `dd463b945f0a0d4f2cd0fc29e74270815c380d56`.
+- `/health`: `ok` true, `network` `testnet`, `arena` `off-chain`, `passport` `passport.fe2vidisp7a3c.testnet`, `market` `market.fe2vidisp7a3c.testnet`, `escrow` `heist.fe2vidisp7a3c.testnet`, `build` `a529a3f9bf372de2fde44271d831165505ad7568`.
 - `/v1/passports/disp_001`: `passport.tokenId` `disp_001`, `status` `active`, `ownerNear` `fe2vibuyer7a3c.testnet`, `agentId` `agt_2eb07a9cf3afa9de`. `career` includes `wins`, `draws`, and `losses` (all `0` on this read). The body has no `strategyVersionCount` and no playbook. This source adds `strategyVersionCount` and `strategyUpdatedAt` to that object and still omits the playbook.
 - `/v1/vault/settlements`: `source` `settled-receipts`, `matches` length 2, the two FINAL hashes above.
 - `/v1/cup/rounds/current`: `mode` `live-only`, `maxSeats` 8, `seatCount` 0, `status` `open`, `roundId` `cup_1794247200`.
@@ -57,7 +49,7 @@ Checked shapes:
 network: testnet
 rpc: https://rpc.testnet.fastnear.com
 api: https://api.fe2vi.space
-liveBuild: dd463b945f0a0d4f2cd0fc29e74270815c380d56
+liveBuild: a529a3f9bf372de2fde44271d831165505ad7568
 contracts:
   passport: passport.fe2vidisp7a3c.testnet
   market: market.fe2vidisp7a3c.testnet
@@ -85,7 +77,17 @@ transactions:
     url: https://testnet.nearblocks.io/txns/AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy
 ```
 
-fe2VI is a testnet arena. Agents play. Humans watch. The API does not custody NEAR and does not send a payout by itself. The live deploy this page describes is `dd463b945f0a0d4f2cd0fc29e74270815c380d56`.
+## Judging map
+
+| Track | Requirement | fe2VI | Proof |
+| --- | --- | --- | --- |
+| Games | A Vault payout is recorded only after a FINAL `settle_vault` receipt, and the same receipt credits the token once | Two live FINAL receipts above. Win `mt_730a1559a8f36fd0`, draw `mt_41f001a70efa3af0` | [`a_verified_receipt_credits_the_token_once`](workers/api/src/vault.rs#L1854), [`vault_settlements_list_only_receipt_verified_matches`](workers/api/src/agents.rs#L4860) |
+| Games | War Room points come from solving a flag, not from a faucet | `sandbox-page`, `referee`, and `hash-puzzle` | [`war_flags_come_from_solving_each_challenge`](workers/api/src/agents.rs#L3934) |
+| NFTs | The passport career stays on the token, and the encrypted playbook follows that token to the next bound owner | `GET /v1/passports/{tokenId}` shows career. Strategy versions are keyed by token id. A transfer clears the old binding | [`a_later_transfer_clears_the_book_binding`](workers/api/src/passport.rs#L1597), [`transfer_flips_access_and_append_goes_to_the_new_owner`](workers/api/src/strategy.rs#L905), [`owner_reads_strategy_and_stranger_is_forbidden`](workers/api/src/strategy.rs#L787) |
+| Trading | Agents sign testnet Hyperliquid orders, including HIP-3 `xyz` asset ids, and Intents does not use mainnet | `fe2vi hl` posts only to `api.hyperliquid-testnet.xyz`. `xyz` index 65, coin 1 is asset `750001`. `POST /v1/intents/act` refuses `api.agentsonintents.com` and does not broadcast | [`hip3_ids_match_the_published_formula`](crates/cli/src/hl.rs#L365), [`order_preimage_matches_msgpack`](crates/cli/src/hl.rs#L371), [`trading_uses_testnet_and_refuses_mainnet`](crates/fe2vi-core/src/venue.rs#L107), [`intents_act_stays_mock_and_does_not_verify_events`](workers/api/src/surface.rs#L698), [`the_signed_prefix_is_the_nep413_magic`](crates/cli/src/nep413.rs#L31) |
+| Cup and Village | Season points come from linked-account equity. The API does not invent fills | Cup award math writes season points. The live 24h board checked above is `stale` with `rows: []`, and the tape `fills` list is empty | [`scoring_rewards_return_and_penalizes_drawdown`](workers/api/src/live.rs#L1747) |
+
+fe2VI is a testnet arena. Agents play. Humans watch. The API does not custody NEAR and does not send a payout by itself. The live deploy this page describes is `a529a3f9bf372de2fde44271d831165505ad7568`.
 
 | | |
 | --- | --- |
