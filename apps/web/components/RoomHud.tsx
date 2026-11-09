@@ -267,6 +267,24 @@ export function RoomHud({
 }) {
   const about = ABOUT[roomId];
   const [open, setOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(true);
+  const [activityOpen, setActivityOpen] = useState(true);
+  useEffect(() => {
+    setBoardOpen(sessionStorage.getItem("fe2vi.room.board") !== "closed");
+    setActivityOpen(sessionStorage.getItem("fe2vi.room.activity") !== "closed");
+  }, []);
+  const toggleBoard = () => {
+    setBoardOpen((value) => {
+      sessionStorage.setItem("fe2vi.room.board", value ? "closed" : "open");
+      return !value;
+    });
+  };
+  const toggleActivity = () => {
+    setActivityOpen((value) => {
+      sessionStorage.setItem("fe2vi.room.activity", value ? "closed" : "open");
+      return !value;
+    });
+  };
   const [full, setFull] = useState(false);
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
@@ -366,13 +384,15 @@ export function RoomHud({
         {about.title}
       </button>
       <p className="room-goal">{about.works}</p>
-      <section className={full ? "room-board is-full" : "room-board"} aria-label={`${about.title} leaderboard`}>
+      <section className={full ? `room-board is-full${boardOpen ? "" : " is-collapsed"}` : `room-board${boardOpen ? "" : " is-collapsed"}`} aria-label={`${about.title} leaderboard`}>
         <header className="room-board-head">
-          <span>
-            <Trophy aria-hidden="true" strokeWidth={1.75} />
-            <h2>{about.title} board</h2>
-          </span>
-          <span className="meta">Season</span>
+          <button type="button" className="room-fold" aria-expanded={boardOpen} onClick={toggleBoard}>
+            <span>
+              <Trophy aria-hidden="true" strokeWidth={1.75} />
+              <h2>{about.title} board</h2>
+            </span>
+            <span className="meta">{boardOpen ? "Hide" : "Show"}</span>
+          </button>
         </header>
         {rows === null ? <p className="meta">Reading the board…</p> : null}
         {rows !== null && boardError ? <p className="meta">Board unavailable. The relay did not answer.</p> : null}
@@ -398,8 +418,11 @@ export function RoomHud({
           NFT Market
         </a>
       </section>
-      <section className="room-activity" aria-label={`${about.title} activity`}>
-        <h2>What's happening</h2>
+      <section className={activityOpen ? "room-activity" : "room-activity is-collapsed"} aria-label={`${about.title} activity`}>
+        <button type="button" className="room-fold" aria-expanded={activityOpen} onClick={toggleActivity}>
+          <h2>What's happening</h2>
+          <span className="meta">{activityOpen ? "Hide" : "Show"}</span>
+        </button>
         <p>{activity.summary}{liveDeadline(matches, slug)}</p>
         {activity.rows.length ? (
           <ul>

@@ -1555,11 +1555,18 @@ function AgentMesh({
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useFrame((state, delta) => {
-    const liveStand = agent.stand && !poster && !lineup && mode !== "cutscene" ? agent.stand : null;
+    const liveStand = agent.stand && mode !== "cutscene" ? agent.stand : null;
     const walking = poseClearOf(placeAgent(index, state.clock.elapsedTime, paused), focusId, index);
     let pose: { x: number; y: number; z: number; rot: number } = liveStand
       ? { x: liveStand.x, y: 0, z: liveStand.z, rot: liveStand.rot }
       : walking;
+    if (liveStand && frameMode === "in" && focusId === liveStand.room) {
+      const origin = ROOM_XZ[focusId];
+      if (origin) {
+        const slot = index % 3;
+        pose = { x: origin[0] + (slot - 1) * 1.35, y: 0, z: origin[1] - 2.2, rot: Math.PI };
+      }
+    }
     if (liveStand) {
       // Real seats stand at the district the API named. No synthetic walk.
     } else if (poster === "face") pose = { x: 0, y: 0, z: 0, rot: 0 };
@@ -2973,11 +2980,7 @@ export default function CityMap({
       <FrameAudit />
       {crowdOn ? (
         <StressCrowd count={crowd.count} fullDetail={crowd.full} paused={paused} focusId={focusId} onFollow={onFollow} />
-      ) : poster || lineup || street || mode === "cutscene" ? (
-        (poster === "skins" ? Array.from({ length: 12 }, (_, index) => CITY_AGENTS[index % CITY_AGENTS.length]) : CITY_AGENTS).map((agent, index) => (
-          <AgentMesh key={`${poster ?? "city"}-${index}`} agent={agent} index={index} paused={paused || lineup || Boolean(poster)} focusId={focusId} lineup={lineup} poster={poster} onFollow={onFollow} onPeek={setPeek} roomBusy={roomBusy} mode={mode} beat={beat} frameMode={frameMode} />
-        ))
-      ) : detail ? (
+      ) : detail || poster || lineup || street || mode === "cutscene" ? (
         <>
           {crew.map((agent, index) => (
             <AgentMesh

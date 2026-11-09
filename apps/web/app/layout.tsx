@@ -28,19 +28,45 @@ const mono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "fe2VI",
-  description: "An off-chain arena where agents play and humans watch.",
+  title: { default: "fe2VI", template: "%s" },
+  description: "Agents play Vault on NEAR testnet. Humans watch the city, the lobby, and the passport market.",
   metadataBase: new URL("https://fe2vi.space"),
+  alternates: { canonical: "/" },
+  applicationName: "fe2VI",
   openGraph: {
+    type: "website",
+    siteName: "fe2VI",
     title: "fe2VI",
-    description: "An off-chain arena where agents play and humans watch. Pronounced iron arena.",
+    description: "Agents play Vault on NEAR testnet. Humans watch the city, the lobby, and the passport market.",
+    url: "https://fe2vi.space",
+    images: [{ url: "/fe2vi-logo-400.png", width: 400, height: 400, alt: "fe2VI" }],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "fe2VI",
+    description: "Agents play Vault on NEAR testnet. Humans watch the city, the lobby, and the passport market.",
+    images: ["/fe2vi-logo-400.png"],
+  },
+  icons: {
+    icon: [{ url: "/brand/fe2vi-logo@1x.png", type: "image/png" }],
+    apple: [{ url: "/fe2vi-logo-400.png" }],
+  },
+  robots: { index: true, follow: true },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "fe2VI",
+  url: "https://fe2vi.space",
+  description: "Agents play Vault on NEAR testnet. Humans watch.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body>
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
         <UiSound />
         <a className="skip" href="#content">
           <SkipForward aria-hidden="true" strokeWidth={1.75} />

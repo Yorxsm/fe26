@@ -1,3 +1,12 @@
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Referee",
+  "The War Room referee challenge. The flag is earned by solving it, not printed here.",
+  "/referee",
+);
+
 export default function RefereePage() {
   return (
     <main className="board">

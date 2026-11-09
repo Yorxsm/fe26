@@ -1,3 +1,12 @@
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Sandbox",
+  "The War Room sandbox page. It is hosted by fe2VI and is not a third-party system.",
+  "/sandbox",
+);
+
 export default function SandboxPage() {
   return (
     <main className="board">

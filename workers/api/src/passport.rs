@@ -782,9 +782,48 @@ pub fn listed_passport(
         "name": title,
         "seller": seller,
         "owner": owner,
+        "listed": true,
         "priceNear": yocto_to_near(price),
         "priceYocto": price,
         "approvalId": listing.get("approval_id").cloned().unwrap_or(serde_json::Value::Null),
+        "description": description,
+    }))
+}
+
+/// A passport the contract returned. `listed` is true only when the market
+/// stores an ask. An unlisted token is still shown so the page is not blank.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn market_passport(
+    token: &serde_json::Value,
+    listing: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let token_id = token
+        .get("token_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    let title = token
+        .pointer("/metadata/title")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(token_id);
+    let description = token
+        .pointer("/metadata/description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Passport on the configured contract.");
+    let owner = token
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let ask = listed_passport(token, listing);
+    Some(serde_json::json!({
+        "tokenId": token_id,
+        "name": title,
+        "owner": owner,
+        "seller": ask.as_ref().and_then(|row| row.get("seller").cloned()).unwrap_or(serde_json::Value::Null),
+        "listed": ask.is_some(),
+        "priceNear": ask.as_ref().and_then(|row| row.get("priceNear").cloned()).unwrap_or(serde_json::Value::Null),
+        "priceYocto": ask.as_ref().and_then(|row| row.get("priceYocto").cloned()).unwrap_or(serde_json::Value::Null),
+        "approvalId": ask.as_ref().and_then(|row| row.get("approvalId").cloned()).unwrap_or(serde_json::Value::Null),
         "description": description,
     }))
 }
@@ -816,6 +855,7 @@ pub fn market_from_chain(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("0");
             Some(serde_json::json!({
+                "tokenId": value.get("token_id").cloned().or_else(|| value.get("tokenId").cloned()).unwrap_or(serde_json::Value::Null),
                 "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
                 "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
                 "priceNear": yocto_to_near(price),
@@ -825,6 +865,19 @@ pub fn market_from_chain(
         }
         _ => None,
     };
+    let sales: Vec<serde_json::Value> = last_settlement
+        .as_ref()
+        .map(|value| {
+            vec![serde_json::json!({
+                "id": "last-settlement",
+                "tokenId": value.get("tokenId").cloned().unwrap_or(serde_json::Value::Null),
+                "buyer": value.get("buyer").cloned().unwrap_or(serde_json::Value::Null),
+                "seller": value.get("seller").cloned().unwrap_or(serde_json::Value::Null),
+                "priceNear": value.get("priceNear").cloned().unwrap_or(serde_json::Value::Null),
+                "note": value.get("note").cloned().unwrap_or(serde_json::Value::Null),
+            })]
+        })
+        .unwrap_or_default();
     let blockers = if network == "testnet" {
         vec!["Vault, War, Cup, and Village season points stay in the arena API. An on-chain pot opens only when the factory owner calls open_game with a deposit equal to the pot."]
     } else {
@@ -837,7 +890,7 @@ pub fn market_from_chain(
     };
     serde_json::json!({
         "listings": listings,
-        "sales": [],
+        "sales": sales,
         "lastSettlement": last_settlement,
         "stats": {
             "floorPriceNear": floor_near,
@@ -2363,5 +2416,27 @@ mod tests {
         assert!(body["lastSettlement"].is_null());
         assert!(body["stats"]["totalSalesCount"].is_null());
         assert!(body["blockers"].as_array().unwrap().len() == 1);
+        let held = market_passport(&token, &serde_json::Value::Null).unwrap();
+        assert_eq!(held["tokenId"], "fdr_001");
+        assert_eq!(held["listed"], false);
+        assert!(held["priceNear"].is_null());
+        let settlement = serde_json::json!({
+            "token_id": "disp_001",
+            "buyer": "fe2vibuyer7a3c.testnet",
+            "seller": "fe2vidisp7a3c.testnet",
+            "price": "1000000000000000000000000"
+        });
+        let sold = market_from_chain(
+            "market.fe2vidisp7a3c.testnet",
+            "testnet",
+            &[],
+            Some(&settlement),
+            "chain",
+        );
+        assert_eq!(sold["sales"].as_array().unwrap().len(), 1);
+        assert_eq!(sold["sales"][0]["tokenId"], "disp_001");
+        assert_eq!(sold["sales"][0]["priceNear"], "1");
+        assert_eq!(sold["lastSettlement"]["seller"], "fe2vidisp7a3c.testnet");
+        assert_eq!(sold["listings"].as_array().unwrap().len(), 0);
     }
 }

@@ -23,6 +23,7 @@ const EMPTY_STATS: MarketStats = {
 
 export default function MarketPage() {
   const [listings, setListings] = useState<MarketListing[]>([]);
+  const [passports, setPassports] = useState<MarketListing[]>([]);
   const [sales, setSales] = useState<MarketSale[]>([]);
   const [stats, setStats] = useState<MarketStats>(EMPTY_STATS);
   const [source, setSource] = useState<"chain" | "not-read" | "unavailable" | "loading">("loading");
@@ -30,7 +31,7 @@ export default function MarketPage() {
   const [network, setNetwork] = useState("");
   const [blockers, setBlockers] = useState<string[]>([]);
   const [lastSettlement, setLastSettlement] = useState<{ buyer?: string; seller?: string; priceNear?: string; note?: string } | null>(null);
-  const [selectedId, setSelectedId] = useState<string>("fdr_001");
+  const [selectedId, setSelectedId] = useState<string>("");
   const [rarityFilter, setRarityFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"price-asc" | "price-desc" | "rank">("price-asc");
 
@@ -39,7 +40,10 @@ export default function MarketPage() {
     fetchMarketData().then((result) => {
       if (!alive) return;
       setListings(result.listings);
+      setPassports(result.passports);
       setSales(result.sales);
+      const first = result.passports[0]?.tokenId ?? result.listings[0]?.tokenId;
+      if (first) setSelectedId(first);
       setStats(result.stats);
       setSource(result.source);
       setContract(result.contract);
@@ -52,24 +56,25 @@ export default function MarketPage() {
     };
   }, []);
 
+  const inventory = passports.length ? passports : listings;
   const filteredListings = useMemo(() => {
-    let result = [...listings];
+    let result = [...inventory];
     if (rarityFilter !== "all") {
       result = result.filter((item) => (item.rarity ?? "").toLowerCase() === rarityFilter.toLowerCase());
     }
     if (sortOrder === "price-asc") {
-      result.sort((a, b) => parseFloat(a.priceNear) - parseFloat(b.priceNear));
+      result.sort((a, b) => parseFloat(a.priceNear || "0") - parseFloat(b.priceNear || "0"));
     } else if (sortOrder === "price-desc") {
-      result.sort((a, b) => parseFloat(b.priceNear) - parseFloat(a.priceNear));
+      result.sort((a, b) => parseFloat(b.priceNear || "0") - parseFloat(a.priceNear || "0"));
     } else if (sortOrder === "rank") {
       result.sort((a, b) => (a.career?.rank ?? 0) - (b.career?.rank ?? 0));
     }
     return result;
-  }, [listings, rarityFilter, sortOrder]);
+  }, [inventory, rarityFilter, sortOrder]);
 
   const selected = useMemo(() => {
-    return listings.find((item) => item.tokenId === selectedId) ?? listings[0] ?? null;
-  }, [listings, selectedId]);
+    return inventory.find((item) => item.tokenId === selectedId) ?? inventory[0] ?? null;
+  }, [inventory, selectedId]);
 
   return (
     <main className="board">
@@ -93,9 +98,11 @@ export default function MarketPage() {
         {source === "loading"
           ? "Reading the market contract."
           : source === "chain"
-            ? listings.length
-              ? "These asks were returned by the market contract."
-              : "The market contract has no listings."
+            ? inventory.length
+              ? listings.length
+                ? "These asks were returned by the market contract."
+                : "The passport contract returned tokens. None of them has an ask stored right now."
+              : "The market contract has no listings and the passport contract returned no tokens."
             : source === "not-read"
               ? "This response did not read the chain."
               : "The market contract could not be read. This page is not showing a sample."}
@@ -171,7 +178,7 @@ export default function MarketPage() {
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: "1.75rem", fontWeight: 700, color: "var(--ink)" }}>
-                {selected.priceNear} <span style={{ fontSize: "1rem", color: "var(--ink-secondary)" }}>NEAR</span>
+                {selected.listed === false || !selected.priceNear ? "Not listed" : <>{selected.priceNear} <span style={{ fontSize: "1rem", color: "var(--ink-secondary)" }}>NEAR</span></>}
               </div>
               <span className="meta" style={{ color: "var(--ink-secondary)" }}>0% platform fee</span>
             </div>
@@ -290,7 +297,9 @@ export default function MarketPage() {
               <span className="meta" style={{ fontWeight: 600 }}>Buy on testnet</span>
               <span className="meta">Contract: <code>{contract || "not configured"}</code></span>
             </div>
-            {(() => {
+            {selected.listed === false || !selected.priceYocto ? (
+              <p className="meta">This passport has no ask on the market contract.</p>
+            ) : (() => {
               const callback = typeof window === "undefined" ? "https://fe2vi.space/market" : window.location.href.split("?")[0];
               const handoff = buyHandoff(configuredEconomy(), selected.tokenId, selected.priceYocto, callback);
               if (!handoff.ok) return <p className="meta">{handoff.reason}</p>;
@@ -309,19 +318,19 @@ export default function MarketPage() {
           </div>
         </section>
       </div>
-      ) : (
+      ) : sales.length === 0 ? (
         <section className="card">
-          <h2>No listings</h2>
-          <p>The market contract returned no listings.</p>
+          <h2>No market records</h2>
+          <p>The testnet market returned no asks, no passports, and no stored settlement.</p>
         </section>
-      )}
+      ) : null}
 
       {/* Filter and Browse Listings */}
       <section>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
           <div>
-            <h2>Active Listings ({filteredListings.length})</h2>
-            <p className="meta">Passports listed on the market contract.</p>
+            <h2>Passports ({filteredListings.length})</h2>
+            <p className="meta">Tokens on the passport contract. An ask appears only when the market stores one.</p>
           </div>
           <div className="row" style={{ gap: "0.5rem" }}>
             <div className="forge-tabs" style={{ margin: 0 }}>
@@ -395,9 +404,9 @@ export default function MarketPage() {
 
                 <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.6rem", marginTop: "0.6rem" }}>
                   <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                    <span className="meta">{listing.owner ? `Owner ${listing.owner}` : "Listed"}</span>
+                    <span className="meta">{listing.owner ? `Owner ${listing.owner}` : listing.listed === false ? "Not listed" : "Listed"}</span>
                     <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--forge)" }}>
-                      {listing.priceNear} NEAR
+                      {listing.listed === false || !listing.priceNear ? "Not listed" : `${listing.priceNear} NEAR`}
                     </span>
                   </div>
                 </div>
@@ -431,17 +440,19 @@ export default function MarketPage() {
           <tbody>
             {sales.length === 0 ? (
               <tr>
-                <td colSpan={6}>No sales recorded.</td>
+                <td colSpan={6}>No settlement is stored.</td>
               </tr>
             ) : null}
             {sales.map((sale) => (
               <tr key={sale.id}>
-                <td className="meta">{sale.timestamp}</td>
+                <td className="meta">{sale.timestamp || "Stored settlement"}</td>
                 <td>
-                  <span style={{ fontWeight: 600 }}>{sale.tokenId}</span>{" "}
-                  <span className={sale.rarity === "Mythic" ? "tag tag-hot" : "tag"} style={{ fontSize: "0.7rem", padding: "0.1rem 0.3rem" }}>
-                    {sale.rarity}
-                  </span>
+                  <span style={{ fontWeight: 600 }}>{sale.tokenId || "—"}</span>
+                  {sale.rarity ? (
+                    <span className={sale.rarity === "Mythic" ? "tag tag-hot" : "tag"} style={{ fontSize: "0.7rem", padding: "0.1rem 0.3rem" }}>
+                      {sale.rarity}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="addr">{sale.buyer}</td>
                 <td className="addr">{sale.seller}</td>

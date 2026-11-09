@@ -281,6 +281,15 @@ struct LobbyPostBody {
     client_request_id: Option<String>,
 }
 
+/// True when the request asked to upgrade to a WebSocket. A plain HTTP GET does not.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn is_websocket_upgrade(upgrade: Option<&str>) -> bool {
+    upgrade
+        .unwrap_or("")
+        .split(',')
+        .any(|part| part.trim().eq_ignore_ascii_case("websocket"))
+}
+
 pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Option<Outcome> {
     let path = path_only(incoming.path);
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
@@ -5119,6 +5128,16 @@ mod tests {
         assert_eq!(row["arenaId"], "vault");
         assert_eq!(row["status"], "over");
         assert!(row["vault"]["rounds"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn plain_http_is_not_a_lobby_socket() {
+        assert!(!is_websocket_upgrade(None));
+        assert!(!is_websocket_upgrade(Some("")));
+        assert!(!is_websocket_upgrade(Some("h2c")));
+        assert!(is_websocket_upgrade(Some("websocket")));
+        assert!(is_websocket_upgrade(Some("WebSocket")));
+        assert!(is_websocket_upgrade(Some("keep-alive, websocket")));
     }
 
     #[test]

@@ -629,6 +629,16 @@ mod edge {
                     with_cors(response, content_type)
                 }
                 Outcome::Websocket { game_id, history } => {
+                    let upgrade = req.headers().get("upgrade")?;
+                    if !crate::agents::is_websocket_upgrade(upgrade.as_deref()) {
+                        let mut response = Response::ok(
+                            r#"{"error":"upgrade_required","message":"Open this path with a WebSocket."}"#,
+                        )?
+                        .with_status(426);
+                        response.headers_mut().set("upgrade", "websocket")?;
+                        response.headers_mut().set("connection", "Upgrade")?;
+                        return with_cors(response, "application/json");
+                    }
                     let pair = WebSocketPair::new()?;
                     let tag = socket_tag(&game_id);
                     self.state
@@ -2079,6 +2089,7 @@ mod edge {
                 );
             };
             let mut listed = Vec::new();
+            let mut passports = Vec::new();
             for token in tokens {
                 let Some(token_id) = token.get("token_id").and_then(serde_json::Value::as_str)
                 else {
@@ -2096,6 +2107,9 @@ mod edge {
                         if let Some(row) = crate::passport::listed_passport(token, &listing) {
                             listed.push(row);
                         }
+                        if let Some(card) = crate::passport::market_passport(token, &listing) {
+                            passports.push(card);
+                        }
                     }
                     Err(error) => {
                         return market_error(
@@ -2106,7 +2120,7 @@ mod edge {
                     }
                 }
             }
-            let settlement =
+            let mut settlement =
                 match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
                     Ok(value) if value.is_null() => None,
                     Ok(value) => Some(value),
@@ -2118,6 +2132,13 @@ mod edge {
                         )
                     }
                 };
+            if passports.len() == 1 {
+                if let Some(value) = settlement.as_mut() {
+                    if let Some(token_id) = passports[0].get("tokenId").cloned() {
+                        value["token_id"] = token_id;
+                    }
+                }
+            }
             let mut body = crate::passport::market_from_chain(
                 &market,
                 &network,
@@ -2133,6 +2154,7 @@ mod edge {
                     crate::passport::overlay_vault_careers(&mut body, &arena.book.passports);
                 }
             }
+            body["passports"] = serde_json::Value::Array(passports);
             let payload = if path.ends_with("/sales") {
                 serde_json::json!({
                     "sales": body["sales"],

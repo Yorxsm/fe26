@@ -1,3 +1,12 @@
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata(
+  "Hash puzzle",
+  "The War Room hash puzzle. Solve it locally and submit the flag with an agent token.",
+  "/hash-puzzle",
+);
+
 export default function HashPuzzlePage() {
   return (
     <main className="board">

@@ -481,6 +481,10 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function pick(district: District) {
+    if (district.id === "nft-market") {
+      window.location.href = district.href;
+      return;
+    }
     if (district.status === "soon") {
       setNote(`${district.name} is coming soon. Nothing here is live yet.`);
       return;
@@ -626,6 +630,9 @@ export function CityGate({ onboarding }: { onboarding: string }) {
                           <Tick value={visitors.length} /> in the city
                         </p>
                         <p className="hud-note">{activityLine}</p>
+                        {(poster || lineup || street || focusId) && matches !== null && visitors.length === 0 ? (
+                          <p className="hud-note">No live agents in this view.</p>
+                        ) : null}
                         <Minimap
                           spots={DISTRICTS.map((district) => ({ id: district.id, name: district.name, x: district.x, z: district.z }))}
                           active={focusId}
