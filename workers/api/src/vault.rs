@@ -1754,8 +1754,9 @@ mod tests {
 
     #[test]
     fn read_only_final_tx_http_rejects_the_crossed_match() {
-        // HTTP read of the two existing FINAL transactions. This is not a
-        // production receipt-route call and it does not send a transaction.
+        // HTTP read of the two existing FINAL transactions. The non-archival
+        // testnet RPC no longer keeps them, so this read uses Fastnear's
+        // archival testnet endpoint. It does not send a transaction.
         let factory = "factory.fe2vidisp7a3c.testnet";
         let heist = "heist.fe2vidisp7a3c.testnet";
         let win_hash = "8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61";
@@ -1827,7 +1828,7 @@ mod tests {
                 "40",
                 "-X",
                 "POST",
-                "https://rpc.testnet.fastnear.com",
+                "https://archival-rpc.testnet.fastnear.com",
                 "-H",
                 "content-type: application/json",
                 "--data",
