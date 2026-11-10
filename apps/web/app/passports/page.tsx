@@ -2,21 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiBase } from "@/lib/protocol";
-import { accountFromStorage, priceFor, splitByOwner, type PassportRow } from "@/lib/passports";
+import { PlayerFigure } from "@/components/PlayerFigure";
+import { accountFromStorage, priceFor, recordLine, splitByOwner, type PassportRow } from "@/lib/passports";
 
 type Listing = { tokenId?: string; priceNear?: string | null; listed?: boolean };
-
-function careerLine(row: PassportRow): string {
-  const career = row.career;
-  if (!career) return "No career on this token.";
-  const parts = [
-    row.tier,
-    career.xp === undefined ? null : `${career.xp} xp`,
-    career.wins === undefined ? null : `${career.wins} wins`,
-    career.matches === undefined ? null : `${career.matches} matches`,
-  ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "No career on this token.";
-}
 
 export default function PassportsPage() {
   const [rows, setRows] = useState<PassportRow[] | null>(null);
@@ -111,19 +100,19 @@ export default function PassportsPage() {
         </p>
       ) : null}
       <div className="passport-grid">
-        {shown.map((row) => (
-          <a key={`${row.contract}:${row.tokenId}`} className="card passport-card" href={`/passports/${encodeURIComponent(row.tokenId)}`}>
-            <h2>{row.tokenId}</h2>
-            <p className="meta">{row.owner || "Owner unavailable"}</p>
-            <p>{careerLine(row)}</p>
-            <p className="meta">
-              {row.strategyVersion === null ? "No playbook version." : `Playbook v${row.strategyVersion}`}
-              {row.strategyHash ? ` · ${row.strategyHash.slice(0, 12)}…` : ""}
-            </p>
-            <p className="meta">{row.priceNear ? `Listed at ${row.priceNear} NEAR` : "Not listed."}</p>
-            <p className="meta">{row.contract}</p>
-          </a>
-        ))}
+        {shown.map((row) => {
+          const record = recordLine(row.career);
+          return (
+            <a key={`${row.contract}:${row.tokenId}`} className="card passport-card" href={`/passports/${encodeURIComponent(row.tokenId)}`}>
+              <PlayerFigure tokenId={row.tokenId} tier={row.tier} />
+              <h2>{row.tokenId}</h2>
+              {row.tier ? <p className="meta">{row.tier}</p> : null}
+              {typeof row.career?.xp === "number" ? <p>{row.career.xp} XP</p> : null}
+              {record ? <p className="meta">{record}</p> : null}
+              {row.priceNear ? <p className="meta">Listed at {row.priceNear} NEAR</p> : null}
+            </a>
+          );
+        })}
       </div>
     </main>
   );
