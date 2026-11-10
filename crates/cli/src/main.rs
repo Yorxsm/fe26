@@ -14,7 +14,8 @@ use clap::{Parser, Subcommand};
 use ed25519_dalek::Signer;
 use fe2vi_core::{default_platform_caps, MIN_AGENT_DEPOSIT_YOCTO, ONE_NEAR};
 use fe2vi_intents::{
-    intents_host_allowed, issue_session, live_gate, policy_from_caps, MOCK_USD_PER_NEAR_CENTS,
+    intents_host_allowed, interpret_tidepool_submit, issue_session, live_gate, policy_from_caps,
+    tidepool_submit_body, MOCK_USD_PER_NEAR_CENTS,
 };
 
 use crate::tx::SignedCall;
@@ -122,6 +123,49 @@ enum PassportCommand {
     Cancel {
         #[arg(long)]
         token_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Recorder writes Cup and Village counters with the existing sync_career method.
+    SyncCareer {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        seq: u64,
+        #[arg(long)]
+        xp: u64,
+        #[arg(long, default_value_t = 0)]
+        wins: u32,
+        #[arg(long, default_value_t = 0)]
+        losses: u32,
+        #[arg(long, default_value_t = 0)]
+        draws: u32,
+        #[arg(long, default_value_t = 0)]
+        matches: u32,
+        #[arg(long, default_value_t = 0)]
+        heists: u32,
+        #[arg(long, default_value_t = 0)]
+        seasons: u32,
+        #[arg(long, default_value_t = 0)]
+        season_titles: u32,
+        #[arg(long, default_value_t = 0)]
+        best_rank: u32,
+        #[arg(long, default_value_t = 0)]
+        rank: u32,
+        #[arg(long, default_value_t = 0)]
+        rank_epoch: u32,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Recorder stores the sha256 of one encrypted strategy version.
+    PlaybookHash {
+        #[arg(long)]
+        token_id: String,
+        #[arg(long)]
+        version: u64,
+        /// 64 hex characters. This is not the playbook.
+        #[arg(long)]
+        hash: String,
         #[arg(long)]
         dry_run: bool,
     },
@@ -477,27 +521,28 @@ fn intents_submit(host: &str) -> Result<String, String> {
         "public_key": public_key,
         "signature": format!("ed25519:{}", bs58::encode(signature.to_bytes()).into_string()),
     });
+    let intent_type = generated
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("agent_create");
+    let correlation_id = generated
+        .get("correlation_id")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let payload = tidepool_submit_body(intent_type, &correlation_id, &signed);
     let submitted = client
         .post(format!("{host}/v1/submit-intent"))
         .bearer_auth(api_key.trim())
-        .json(&serde_json::json!({
-            "type": generated.get("type").and_then(|value| value.as_str()).unwrap_or("agent_create"),
-            "correlation_id": generated.get("correlation_id").cloned().unwrap_or(serde_json::Value::Null),
-            "signed_data": signed,
-        }))
+        .json(&payload)
         .send()
         .map_err(|err| err.to_string())?;
+    let http = submitted.status().as_u16();
     let submitted: serde_json::Value = submitted.json().map_err(|err| err.to_string())?;
-    Ok(serde_json::json!({
-        "broadcast": true,
-        "network": "testnet",
-        "host": host,
-        "correlation_id": submitted.get("correlation_id").cloned().unwrap_or(serde_json::Value::Null),
-        "status": submitted.get("status").cloned().unwrap_or(serde_json::Value::Null),
-        "agent_id": submitted.get("agent_id").cloned().unwrap_or(serde_json::Value::Null),
-        "type": submitted.get("type").cloned().unwrap_or(serde_json::Value::Null),
-    })
-    .to_string())
+    let mut outcome = interpret_tidepool_submit(http, &submitted);
+    if let Some(object) = outcome.as_object_mut() {
+        object.insert("host".into(), serde_json::json!(host));
+    }
+    Ok(outcome.to_string())
 }
 
 fn intents(action: IntentsCommand) -> Result<String, String> {
@@ -746,6 +791,70 @@ fn run(config: &Config, command: Command) -> Result<String, String> {
                     &serde_json::json!({ "token_id": token_id }),
                     price,
                     80_000_000_000_000,
+                )
+            }
+            PassportCommand::SyncCareer {
+                token_id,
+                seq,
+                xp,
+                wins,
+                losses,
+                draws,
+                matches,
+                heists,
+                seasons,
+                season_titles,
+                best_rank,
+                rank,
+                rank_epoch,
+                dry_run,
+            } => submit(
+                config,
+                dry_run,
+                &config.passport_id,
+                "sync_career",
+                &serde_json::json!({
+                    "token_id": token_id,
+                    "update": {
+                        "seq": seq,
+                        "xp": xp,
+                        "wins": wins,
+                        "losses": losses,
+                        "draws": draws,
+                        "matches": matches,
+                        "heists": heists,
+                        "seasons": seasons,
+                        "season_titles": season_titles,
+                        "best_rank": best_rank,
+                        "rank": rank,
+                        "rank_epoch": rank_epoch,
+                    }
+                }),
+                0,
+                50_000_000_000_000,
+            ),
+            PassportCommand::PlaybookHash {
+                token_id,
+                version,
+                hash,
+                dry_run,
+            } => {
+                let hash = hash.trim();
+                if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err("playbook hash must be 64 hex characters".into());
+                }
+                submit(
+                    config,
+                    dry_run,
+                    &config.passport_id,
+                    "set_playbook_hash",
+                    &serde_json::json!({
+                        "token_id": token_id,
+                        "version": version,
+                        "hash": hash.to_ascii_lowercase(),
+                    }),
+                    0,
+                    30_000_000_000_000,
                 )
             }
             PassportCommand::Relay { once } => relay(config, once),

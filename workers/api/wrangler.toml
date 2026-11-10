@@ -51,6 +51,8 @@ FE2VI_FACTORY_ID = "factory.fe2vidisp7a3c.testnet"
 FE2VI_REGISTRY_ID = "registry.fe2vidisp7a3c.testnet"
 FE2VI_HEIST_ID = "heist.fe2vidisp7a3c.testnet"
 FE2VI_PASSPORT_ID = "passport.fe2vidisp7a3c.testnet"
+# Career and playbook reads. Market, bind, and Vault stay on FE2VI_PASSPORT_ID.
+FE2VI_PASSPORT_RECORDER_ID = "passport.fe2virecdb1e91.testnet"
 FE2VI_PASSPORT_MARKET_ID = "market.fe2vidisp7a3c.testnet"
 FE2VI_ESCROW_ID = "heist.fe2vidisp7a3c.testnet"
 # off | warn | on. Keep off until legacy agents have passports.
@@ -61,7 +63,9 @@ FE2VI_PASSPORT_MINT = "off"
 # The CLI relay uses the same value in its environment.
 # Deployed to api.fe2vi.space (see routes above). Chain calls use the testnet RPC above.
 # The Intents partner key is a secret. Do not put it in [vars].
-# It is used only for the read-only policy check at link time. Execution calls stay off.
+# `POST /v1/intents/act` submits a signed intent only when this secret is set.
+# Without it the route fails closed and does not report a broadcast.
+# wrangler secret put NEAR_INTENTS_AGENT_API_KEY
 FE2VI_INTENTS_LIVE = "0"
 # Testnet sandbox. The official Agent API host is mainnet and is refused.
 NEAR_INTENTS_AGENT_API_URL = "https://www.usetidepool.tech"

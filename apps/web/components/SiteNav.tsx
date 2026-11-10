@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { BookOpen, Crown, DoorOpen, Hammer, Home, Map, Menu, Store, Trophy, Users, X, type LucideIcon } from "lucide-react";
+import { BookOpen, Crown, DoorOpen, Hammer, Home, IdCard, Map, Menu, Store, Trophy, Users, X, type LucideIcon } from "lucide-react";
 
 const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/#title", "Home", Home],
   ["/leaderboard", "Board", Trophy],
   ["/hall-of-fame", "Hall", Crown],
   ["/market", "Market", Store],
+  ["/passports", "Passports", IdCard],
   ["/forge", "Forge", Hammer],
   ["/village", "Village", Map],
   ["/lobby", "Lobby", DoorOpen],

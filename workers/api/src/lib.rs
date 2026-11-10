@@ -406,6 +406,9 @@ mod edge {
                     }
                 }
             }
+            if method == "GET" && route_path == "/v1/passports" {
+                return passport_list_response(&self.env).await;
+            }
             if method == "GET" {
                 if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
                     if !token_id.is_empty()
@@ -434,7 +437,10 @@ mod edge {
                                 let mut body =
                                     crate::passport::chain_passport_json(token_id, &view);
                                 crate::strategy::stamp_public(&mut body, &arena.book, token_id);
-                                let body = body.to_string();
+                                let body =
+                                    with_chain_playbook(&self.env, token_id, body.to_string())
+                                        .await;
+                                let body = overlay_recorder(&self.env, token_id, body).await;
                                 return with_cors(
                                     Response::ok(body)?.with_status(200),
                                     "application/json",
@@ -442,6 +448,12 @@ mod edge {
                             }
                             Ok(None) => {}
                             Err(failure) => {
+                                if let Some(response) =
+                                    recorder_passport_response(&self.env, &arena.book, token_id)
+                                        .await?
+                                {
+                                    return Ok(response);
+                                }
                                 let message =
                                     format!("Could not read the passport contract ({failure}).");
                                 let body = serde_json::json!({
@@ -471,6 +483,28 @@ mod edge {
             crate::passport::set_match_end_chain(chain_reads);
             crate::strategy::set_strategy_key(None);
             crate::strategy::clear_chain_owners();
+            let mut signed_submit: Option<serde_json::Value> = None;
+            if method == "POST" && route_path == "/v1/intents/act" {
+                let request: serde_json::Value =
+                    serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+                let host = intents_submit_host(&self.env);
+                let key_present = !intents_api_key(&self.env).is_empty();
+                match fe2vi_intents::gate_signed_submit(&request, &host, key_present) {
+                    Err((status, message)) => {
+                        let payload = serde_json::json!({
+                            "broadcast": false,
+                            "network": "testnet",
+                            "error": message,
+                        })
+                        .to_string();
+                        return with_cors(
+                            Response::ok(payload)?.with_status(status),
+                            "application/json",
+                        );
+                    }
+                    Ok(ready) => signed_submit = ready,
+                }
+            }
             if arena.chain_network == "testnet" && strategy_request(method, route_path) {
                 let secret = self
                     .env
@@ -510,7 +544,7 @@ mod edge {
             crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
-                    status,
+                    mut status,
                     content_type,
                     mut body,
                     mut mutated,
@@ -627,6 +661,42 @@ mod edge {
                         let _ = storage
                             .put("metric_errors", &(errors.saturating_add(1)))
                             .await;
+                    }
+                    if method == "POST" && route_path == "/v1/intents/act" && status == 200 {
+                        if let Some(payload) = signed_submit {
+                            let host = intents_submit_host(&self.env);
+                            let key = intents_api_key(&self.env);
+                            match post_tidepool(&host, &key, &payload).await {
+                                Ok((http, upstream)) => {
+                                    let interpreted =
+                                        fe2vi_intents::interpret_tidepool_submit(http, &upstream);
+                                    let broadcast =
+                                        interpreted.get("broadcast").and_then(|v| v.as_bool())
+                                            == Some(true);
+                                    body = fe2vi_intents::redact_secrets(&interpreted.to_string());
+                                    if !broadcast {
+                                        status = 502;
+                                    }
+                                }
+                                Err(()) => {
+                                    body = serde_json::json!({
+                                        "broadcast": false,
+                                        "network": "testnet",
+                                        "error": "intents_rejected",
+                                    })
+                                    .to_string();
+                                    status = 502;
+                                }
+                            }
+                        }
+                    }
+                    if status == 200 && method == "GET" {
+                        if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
+                            if !token_id.is_empty() && !token_id.contains('/') {
+                                body = with_chain_playbook(&self.env, token_id, body).await;
+                                body = overlay_recorder(&self.env, token_id, body).await;
+                            }
+                        }
                     }
                     if status == 200 && method == "GET" {
                         if let Some(match_id) = finished_match_id(route_path) {
@@ -1887,6 +1957,287 @@ mod edge {
             }
         }
         out
+    }
+
+    fn intents_api_key(env: &Env) -> String {
+        let from_secret = env
+            .secret("NEAR_INTENTS_AGENT_API_KEY")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        if !from_secret.trim().is_empty() {
+            return from_secret.trim().to_string();
+        }
+        env.var("NEAR_INTENTS_AGENT_API_KEY")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
+    fn intents_submit_host(env: &Env) -> String {
+        let host = env
+            .var("NEAR_INTENTS_AGENT_API_URL")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "https://www.usetidepool.tech".to_string());
+        host.trim().trim_end_matches('/').to_string()
+    }
+
+    async fn post_tidepool(
+        host: &str,
+        key: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(u16, serde_json::Value), ()> {
+        if key.is_empty() || fe2vi_intents::intents_host_allowed(host).is_err() {
+            return Err(());
+        }
+        let url = format!("{host}/v1/submit-intent");
+        let headers = Headers::new();
+        if headers
+            .set("authorization", &format!("Bearer {key}"))
+            .is_err()
+            || headers.set("content-type", "application/json").is_err()
+            || headers.set("accept", "application/json").is_err()
+        {
+            return Err(());
+        }
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post);
+        init.with_headers(headers);
+        init.with_body(Some(wasm_bindgen::JsValue::from_str(&payload.to_string())));
+        let request = Request::new_with_init(&url, &init).map_err(|_| ())?;
+        let mut response = Fetch::Request(request).send().await.map_err(|_| ())?;
+        let status = response.status_code();
+        let text = response.text().await.map_err(|_| ())?;
+        let text = fe2vi_intents::redact_secrets(&text);
+        let value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        Ok((status, value))
+    }
+
+    async fn passport_list_response(env: &Env) -> Result<Response> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            let body = serde_json::json!({
+                "error": "passport_lookup_unavailable",
+                "message": message,
+                "source": "unavailable",
+            })
+            .to_string();
+            return with_cors(Response::ok(body)?.with_status(503), "application/json");
+        }
+        let mut contracts = Vec::new();
+        let main = env_string(env, "FE2VI_PASSPORT_ID");
+        if !main.is_empty() {
+            contracts.push(main);
+        }
+        let recorder = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+        if !recorder.is_empty() && !contracts.iter().any(|account| account == &recorder) {
+            contracts.push(recorder);
+        }
+        let mut passports = Vec::new();
+        let mut read_one = false;
+        for account in contracts {
+            let Ok(tokens) = nft_token_page(&rpc, &account).await else {
+                continue;
+            };
+            read_one = true;
+            for token in tokens {
+                let token_id = token
+                    .get("token_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let playbook = if token_id.is_empty() {
+                    None
+                } else {
+                    read_playbook(&rpc, &account, token_id).await
+                };
+                if let Some(row) =
+                    crate::passport::passport_list_row(&account, &token, playbook.as_ref())
+                {
+                    passports.push(row);
+                }
+            }
+        }
+        if !read_one {
+            let body = serde_json::json!({
+                "error": "passport_lookup_unavailable",
+                "message": "Could not read the passport contracts.",
+                "source": "unavailable",
+            })
+            .to_string();
+            return with_cors(Response::ok(body)?.with_status(503), "application/json");
+        }
+        let body = serde_json::json!({ "passports": passports, "source": "chain" }).to_string();
+        with_cors(Response::ok(body)?.with_status(200), "application/json")
+    }
+
+    async fn recorder_passport_response(
+        env: &Env,
+        book: &crate::agents::PlayerBook,
+        token_id: &str,
+    ) -> Result<Option<Response>> {
+        let account = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+        if account.is_empty() {
+            return Ok(None);
+        }
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if indexer::allow_chain_rpc(&network, &rpc).is_err() {
+            return Ok(None);
+        }
+        let Some(view) = read_passport_view(&rpc, &account, token_id).await else {
+            return Ok(None);
+        };
+        let playbook = read_playbook(&rpc, &account, token_id).await;
+        let mut body = crate::passport::chain_passport_json(token_id, &view);
+        crate::strategy::stamp_public(&mut body, book, token_id);
+        crate::passport::merge_recorder(&mut body, &account, &view, playbook.as_ref());
+        let response = with_cors(
+            Response::ok(body.to_string())?.with_status(200),
+            "application/json",
+        )?;
+        Ok(Some(response))
+    }
+
+    async fn overlay_recorder(env: &Env, token_id: &str, body: String) -> String {
+        let account = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+        if account.is_empty() {
+            return body;
+        }
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if indexer::allow_chain_rpc(&network, &rpc).is_err() {
+            return body;
+        }
+        let Some(view) = read_passport_view(&rpc, &account, token_id).await else {
+            return body;
+        };
+        let playbook = read_playbook(&rpc, &account, token_id).await;
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&body) else {
+            return body;
+        };
+        crate::passport::merge_recorder(&mut value, &account, &view, playbook.as_ref());
+        value.to_string()
+    }
+
+    async fn read_passport_view(
+        rpc: &str,
+        account_id: &str,
+        token_id: &str,
+    ) -> Option<serde_json::Value> {
+        let args = serde_json::json!({ "token_id": token_id });
+        let (status, text) = rpc_view_raw(rpc, account_id, "passport", args).await.ok()?;
+        if text.contains("no token") {
+            return None;
+        }
+        indexer::interpret_rpc_query(status, &text)
+            .ok()
+            .filter(|value| !value.is_null())
+    }
+
+    async fn read_playbook(
+        rpc: &str,
+        account_id: &str,
+        token_id: &str,
+    ) -> Option<serde_json::Value> {
+        let (status, text) = rpc_view_raw(
+            rpc,
+            account_id,
+            "playbook_latest",
+            serde_json::json!({ "token_id": token_id }),
+        )
+        .await
+        .ok()?;
+        indexer::interpret_rpc_query(status, &text)
+            .ok()
+            .filter(|value| value.is_object())
+    }
+
+    async fn nft_token_page(rpc: &str, account_id: &str) -> Result<Vec<serde_json::Value>, ()> {
+        let mut rows = Vec::new();
+        let mut from = 0_u64;
+        for _ in 0..4 {
+            let (status, text) = rpc_view_raw(
+                rpc,
+                account_id,
+                "nft_tokens",
+                serde_json::json!({ "from_index": from.to_string(), "limit": 50 }),
+            )
+            .await?;
+            let value = indexer::interpret_rpc_query(status, &text).map_err(|_| ())?;
+            let Some(page) = value.as_array() else {
+                break;
+            };
+            let count = page.len() as u64;
+            rows.extend(page.iter().cloned());
+            if count < 50 {
+                break;
+            }
+            from = from.saturating_add(count);
+        }
+        Ok(rows)
+    }
+
+    async fn rpc_view_raw(
+        rpc: &str,
+        account_id: &str,
+        method_name: &str,
+        args: serde_json::Value,
+    ) -> Result<(u16, String), ()> {
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&args).map_err(|_| ())?);
+        rpc_exchange(
+            rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": account_id,
+                "method_name": method_name,
+                "args_base64": encoded,
+            }),
+        )
+        .await
+        .map_err(|_| ())
+    }
+
+    async fn with_chain_playbook(env: &Env, token_id: &str, body: String) -> String {
+        let Some(hash) = chain_playbook_hash(env, token_id).await else {
+            return body;
+        };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&body) else {
+            return body;
+        };
+        crate::strategy::apply_chain_playbook(&mut value, Some(&hash));
+        value.to_string()
+    }
+
+    async fn chain_playbook_hash(env: &Env, token_id: &str) -> Option<String> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if indexer::allow_chain_rpc(&network, &rpc).is_err() {
+            return None;
+        }
+        let account_id = env_string(env, "FE2VI_PASSPORT_ID");
+        if account_id.is_empty() {
+            return None;
+        }
+        let value = rpc_view(
+            &rpc,
+            &account_id,
+            "playbook_latest",
+            serde_json::json!({ "token_id": token_id }),
+        )
+        .await
+        .ok()?;
+        value
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .filter(|hash| hash.len() == 64)
+            .map(str::to_string)
     }
 
     async fn rpc_view(
