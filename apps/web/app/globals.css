@@ -2154,7 +2154,7 @@ button.pronounce:focus-visible {
 .market-head h1 { margin-bottom: 0; }
 .market-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: var(--space-sm); }
 .market-stats p { margin: 0; display: grid; gap: 2px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
-.market-filters { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: end; }
+.market-filters { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: flex-end; }
 .market-filters select { min-height: 44px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
 .market-grid { display: grid; gap: var(--space-md); grid-template-columns: 1fr; }
 .market-card { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
