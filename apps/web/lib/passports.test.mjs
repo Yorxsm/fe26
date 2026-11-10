@@ -11,16 +11,17 @@ test("a connected testnet account is read from wallet storage", () => {
   assert.equal(accountFromStorage([["theme", "fe2vi.testnet"]]), null);
 });
 
-test("owned and not owned follow the entered account", () => {
+test("with no account every passport stays visible in Not owned", () => {
   const rows = [
     { tokenId: "rec_001", owner: "fe2virecdb1e91.testnet" },
     { tokenId: "disp_001", owner: "fe2vibuyer7a3c.testnet" },
   ];
-  const split = splitByOwner(rows, "fe2virecdb1e91.testnet");
-  assert.deepEqual(split.owned.map((row) => row.tokenId), ["rec_001"]);
-  assert.deepEqual(split.other.map((row) => row.tokenId), ["disp_001"]);
-  assert.equal(splitByOwner(rows, "").owned.length, 0);
-  assert.equal(splitByOwner(rows, "").other.length, 2);
+  const open = splitByOwner(rows, "");
+  assert.deepEqual(open.owned, []);
+  assert.deepEqual(open.other, rows);
+  const claimed = splitByOwner(rows, "fe2virecdb1e91.testnet");
+  assert.deepEqual(claimed.owned.map((row) => row.tokenId), ["rec_001"]);
+  assert.deepEqual(claimed.other.map((row) => row.tokenId), ["disp_001"]);
 });
 
 test("a listing price is attached only when the token is listed", () => {

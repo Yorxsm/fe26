@@ -23,7 +23,7 @@ export default function PassportsPage() {
   const [failed, setFailed] = useState(false);
   const [account, setAccount] = useState("");
   const [connected, setConnected] = useState(false);
-  const [tab, setTab] = useState<"owned" | "other">("owned");
+  const [tab, setTab] = useState<"owned" | "other">("other");
 
   useEffect(() => {
     const entries: Array<[string, string | null]> = [];
@@ -84,7 +84,9 @@ export default function PassportsPage() {
           value={account}
           onChange={(event) => {
             setConnected(false);
-            setAccount(event.target.value);
+            const next = event.target.value;
+            setAccount(next);
+            if (!next.trim()) setTab("other");
           }}
           placeholder="name.testnet"
           autoComplete="off"
