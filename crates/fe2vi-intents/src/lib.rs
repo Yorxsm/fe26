@@ -197,7 +197,8 @@ pub fn intents_host_allowed(url: &str) -> Result<(), &'static str> {
 
 /// A policy-checked action. `mode` is `policy-only` until the agent submits a
 /// signature to a testnet host. This function does not hold a key and does not
-/// broadcast.
+/// broadcast. The worker broadcasts only after [`interpret_tidepool_submit`]
+/// sees HTTP success and status `SUCCESS`.
 pub fn policy_act(
     grants: &mut [StoredGrant],
     grant_id: &str,
@@ -262,9 +263,109 @@ pub fn mock_act(
     Ok(value)
 }
 
-/// Live mode still refuses a broadcast. Dry quotes are the only remote call.
+/// Live mode still refuses a broadcast from this function. A signed Tidepool
+/// submit is a separate call, and it counts only when the sandbox says SUCCESS.
 pub fn refuse_broadcast() -> IntentsError {
     IntentsError::SpendRefused
+}
+
+/// Body posted to `{host}/v1/submit-intent`. Same shape the CLI already submits.
+pub fn tidepool_submit_body(
+    intent_type: &str,
+    correlation_id: &serde_json::Value,
+    signed_data: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": intent_type,
+        "correlation_id": correlation_id,
+        "signed_data": signed_data,
+    })
+}
+
+/// `broadcast` is true only for a 2xx response whose `status` is `SUCCESS`.
+pub fn interpret_tidepool_submit(http_status: u16, body: &serde_json::Value) -> serde_json::Value {
+    let status = body
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let broadcast = (200..300).contains(&http_status) && status == "SUCCESS";
+    let mut out = serde_json::json!({
+        "broadcast": broadcast,
+        "network": "testnet",
+        "status": status,
+        "correlation_id": body.get("correlation_id").cloned().unwrap_or(serde_json::Value::Null),
+        "agent_id": body.get("agent_id").cloned().unwrap_or(serde_json::Value::Null),
+        "type": body.get("type").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    if !broadcast {
+        if let Some(code) = body
+            .get("failure_code")
+            .and_then(serde_json::Value::as_str)
+            .filter(|code| {
+                !code.is_empty()
+                    && code.len() <= 64
+                    && code
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            })
+        {
+            out["failure_code"] = serde_json::json!(code);
+        }
+    }
+    out
+}
+
+/// Whether `POST /v1/intents/act` should call the Tidepool submit path.
+/// A missing key or a host other than the configured sandbox fails closed.
+pub fn gate_signed_submit(
+    body: &serde_json::Value,
+    configured_host: &str,
+    key_present: bool,
+) -> Result<Option<serde_json::Value>, (u16, &'static str)> {
+    let Some(signed) = body.get("signed_data") else {
+        return Ok(None);
+    };
+    if signed.is_null() {
+        return Ok(None);
+    }
+    if !signed.is_object() {
+        return Err((400, "signed_data must be the NEP-413 object"));
+    }
+    let Some(intent_type) = body.get("type").and_then(serde_json::Value::as_str) else {
+        return Err((400, "signed submit needs type"));
+    };
+    if intent_type.trim().is_empty() || intent_type.len() > 64 {
+        return Err((400, "signed submit needs type"));
+    }
+    let Some(correlation_id) = body.get("correlation_id") else {
+        return Err((400, "signed submit needs correlation_id"));
+    };
+    if correlation_id.is_null() {
+        return Err((400, "signed submit needs correlation_id"));
+    }
+    let host = body
+        .get("host")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .unwrap_or(configured_host);
+    let configured = configured_host.trim().trim_end_matches('/');
+    let host = host.trim_end_matches('/');
+    if intents_host_allowed(configured).is_err() || intents_host_allowed(host).is_err() {
+        return Err((403, "mainnet intents refused"));
+    }
+    if host != configured {
+        return Err((403, "submit host must be the configured testnet sandbox"));
+    }
+    if !key_present {
+        return Err((503, "intents_unconfigured"));
+    }
+    Ok(Some(tidepool_submit_body(
+        intent_type.trim(),
+        correlation_id,
+        signed,
+    )))
 }
 
 #[cfg(feature = "live")]
@@ -383,6 +484,81 @@ mod tests {
         assert!(!cleaned.contains("naa_"));
         assert!(!cleaned.contains("ngt_"));
         assert!(cleaned.contains("[redacted]"));
+    }
+
+    #[test]
+    fn tidepool_submit_broadcasts_only_on_success() {
+        let signed = serde_json::json!({"standard": "nep413", "signature": "ed25519:abc"});
+        let body = tidepool_submit_body("agent_create", &serde_json::json!("intent_1"), &signed);
+        assert_eq!(body["type"], "agent_create");
+        assert_eq!(body["signed_data"]["standard"], "nep413");
+        let ok = interpret_tidepool_submit(
+            200,
+            &serde_json::json!({
+                "status": "SUCCESS",
+                "correlation_id": "intent_1",
+                "agent_id": "agent_a",
+                "type": "agent_create",
+            }),
+        );
+        assert_eq!(ok["broadcast"], true);
+        assert_eq!(ok["status"], "SUCCESS");
+        assert_eq!(ok["correlation_id"], "intent_1");
+        let rejected = interpret_tidepool_submit(
+            200,
+            &serde_json::json!({"status": "FAILED", "failure_code": "owner_key_not_full_access"}),
+        );
+        assert_eq!(rejected["broadcast"], false);
+        assert_eq!(rejected["failure_code"], "owner_key_not_full_access");
+        let http = interpret_tidepool_submit(500, &serde_json::json!({"status": "SUCCESS"}));
+        assert_eq!(http["broadcast"], false);
+    }
+
+    #[test]
+    fn signed_submit_fails_closed_without_the_sandbox_key() {
+        let host = "https://www.usetidepool.tech";
+        let body = serde_json::json!({
+            "type": "agent_create",
+            "correlation_id": "intent_1",
+            "host": host,
+            "signed_data": {"standard": "nep413"},
+        });
+        assert!(gate_signed_submit(&serde_json::json!({}), host, true)
+            .unwrap()
+            .is_none());
+        assert_eq!(gate_signed_submit(&body, host, false).unwrap_err().0, 503);
+        let ready = gate_signed_submit(&body, host, true).unwrap().unwrap();
+        assert_eq!(ready["correlation_id"], "intent_1");
+        assert_eq!(
+            gate_signed_submit(
+                &serde_json::json!({
+                    "type": "agent_create",
+                    "correlation_id": "intent_1",
+                    "host": "https://api.agentsonintents.com",
+                    "signed_data": {"standard": "nep413"},
+                }),
+                host,
+                true,
+            )
+            .unwrap_err()
+            .0,
+            403
+        );
+        assert_eq!(
+            gate_signed_submit(
+                &serde_json::json!({
+                    "type": "agent_create",
+                    "correlation_id": "intent_1",
+                    "host": "https://evil.testnet.example",
+                    "signed_data": {"standard": "nep413"},
+                }),
+                host,
+                true,
+            )
+            .unwrap_err()
+            .0,
+            403
+        );
     }
 }
 

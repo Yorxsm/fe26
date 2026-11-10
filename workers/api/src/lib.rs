@@ -434,7 +434,9 @@ mod edge {
                                 let mut body =
                                     crate::passport::chain_passport_json(token_id, &view);
                                 crate::strategy::stamp_public(&mut body, &arena.book, token_id);
-                                let body = body.to_string();
+                                let body =
+                                    with_chain_playbook(&self.env, token_id, body.to_string())
+                                        .await;
                                 return with_cors(
                                     Response::ok(body)?.with_status(200),
                                     "application/json",
@@ -471,6 +473,28 @@ mod edge {
             crate::passport::set_match_end_chain(chain_reads);
             crate::strategy::set_strategy_key(None);
             crate::strategy::clear_chain_owners();
+            let mut signed_submit: Option<serde_json::Value> = None;
+            if method == "POST" && route_path == "/v1/intents/act" {
+                let request: serde_json::Value =
+                    serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+                let host = intents_submit_host(&self.env);
+                let key_present = !intents_api_key(&self.env).is_empty();
+                match fe2vi_intents::gate_signed_submit(&request, &host, key_present) {
+                    Err((status, message)) => {
+                        let payload = serde_json::json!({
+                            "broadcast": false,
+                            "network": "testnet",
+                            "error": message,
+                        })
+                        .to_string();
+                        return with_cors(
+                            Response::ok(payload)?.with_status(status),
+                            "application/json",
+                        );
+                    }
+                    Ok(ready) => signed_submit = ready,
+                }
+            }
             if arena.chain_network == "testnet" && strategy_request(method, route_path) {
                 let secret = self
                     .env
@@ -510,7 +534,7 @@ mod edge {
             crate::logic::set_request_war_secret(None);
             match outcome {
                 Outcome::Http {
-                    status,
+                    mut status,
                     content_type,
                     mut body,
                     mut mutated,
@@ -627,6 +651,41 @@ mod edge {
                         let _ = storage
                             .put("metric_errors", &(errors.saturating_add(1)))
                             .await;
+                    }
+                    if method == "POST" && route_path == "/v1/intents/act" && status == 200 {
+                        if let Some(payload) = signed_submit {
+                            let host = intents_submit_host(&self.env);
+                            let key = intents_api_key(&self.env);
+                            match post_tidepool(&host, &key, &payload).await {
+                                Ok((http, upstream)) => {
+                                    let interpreted =
+                                        fe2vi_intents::interpret_tidepool_submit(http, &upstream);
+                                    let broadcast =
+                                        interpreted.get("broadcast").and_then(|v| v.as_bool())
+                                            == Some(true);
+                                    body = fe2vi_intents::redact_secrets(&interpreted.to_string());
+                                    if !broadcast {
+                                        status = 502;
+                                    }
+                                }
+                                Err(()) => {
+                                    body = serde_json::json!({
+                                        "broadcast": false,
+                                        "network": "testnet",
+                                        "error": "intents_rejected",
+                                    })
+                                    .to_string();
+                                    status = 502;
+                                }
+                            }
+                        }
+                    }
+                    if status == 200 && method == "GET" {
+                        if let Some(token_id) = route_path.strip_prefix("/v1/passports/") {
+                            if !token_id.is_empty() && !token_id.contains('/') {
+                                body = with_chain_playbook(&self.env, token_id, body).await;
+                            }
+                        }
                     }
                     if status == 200 && method == "GET" {
                         if let Some(match_id) = finished_match_id(route_path) {
@@ -1887,6 +1946,99 @@ mod edge {
             }
         }
         out
+    }
+
+    fn intents_api_key(env: &Env) -> String {
+        let from_secret = env
+            .secret("NEAR_INTENTS_AGENT_API_KEY")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        if !from_secret.trim().is_empty() {
+            return from_secret.trim().to_string();
+        }
+        env.var("NEAR_INTENTS_AGENT_API_KEY")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
+    fn intents_submit_host(env: &Env) -> String {
+        let host = env
+            .var("NEAR_INTENTS_AGENT_API_URL")
+            .ok()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "https://www.usetidepool.tech".to_string());
+        host.trim().trim_end_matches('/').to_string()
+    }
+
+    async fn post_tidepool(
+        host: &str,
+        key: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(u16, serde_json::Value), ()> {
+        if key.is_empty() || fe2vi_intents::intents_host_allowed(host).is_err() {
+            return Err(());
+        }
+        let url = format!("{host}/v1/submit-intent");
+        let headers = Headers::new();
+        if headers
+            .set("authorization", &format!("Bearer {key}"))
+            .is_err()
+            || headers.set("content-type", "application/json").is_err()
+            || headers.set("accept", "application/json").is_err()
+        {
+            return Err(());
+        }
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post);
+        init.with_headers(headers);
+        init.with_body(Some(wasm_bindgen::JsValue::from_str(&payload.to_string())));
+        let request = Request::new_with_init(&url, &init).map_err(|_| ())?;
+        let mut response = Fetch::Request(request).send().await.map_err(|_| ())?;
+        let status = response.status_code();
+        let text = response.text().await.map_err(|_| ())?;
+        let text = fe2vi_intents::redact_secrets(&text);
+        let value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        Ok((status, value))
+    }
+
+    async fn with_chain_playbook(env: &Env, token_id: &str, body: String) -> String {
+        let Some(hash) = chain_playbook_hash(env, token_id).await else {
+            return body;
+        };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&body) else {
+            return body;
+        };
+        crate::strategy::apply_chain_playbook(&mut value, Some(&hash));
+        value.to_string()
+    }
+
+    async fn chain_playbook_hash(env: &Env, token_id: &str) -> Option<String> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if indexer::allow_chain_rpc(&network, &rpc).is_err() {
+            return None;
+        }
+        let account_id = env_string(env, "FE2VI_PASSPORT_ID");
+        if account_id.is_empty() {
+            return None;
+        }
+        let value = rpc_view(
+            &rpc,
+            &account_id,
+            "playbook_latest",
+            serde_json::json!({ "token_id": token_id }),
+        )
+        .await
+        .ok()?;
+        value
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .filter(|hash| hash.len() == 64)
+            .map(str::to_string)
     }
 
     async fn rpc_view(

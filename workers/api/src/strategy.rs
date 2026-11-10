@@ -329,6 +329,64 @@ pub fn stamp_public(body: &mut serde_json::Value, book: &PlayerBook, token_id: &
     };
     object.insert("strategyVersionCount".into(), serde_json::json!(count));
     object.insert("strategyUpdatedAt".into(), updated_at(updated));
+    let hashes = strategy_hashes(book, token_id);
+    object.insert(
+        "strategyHash".into(),
+        hashes
+            .last()
+            .map(|row| serde_json::json!(row.1.clone()))
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "strategyHashes".into(),
+        serde_json::json!(hashes
+            .iter()
+            .map(|(version, hash)| serde_json::json!({"version": version, "sha256": hash}))
+            .collect::<Vec<_>>()),
+    );
+}
+
+/// sha256 of each encrypted version, hex encoded. The playbook is not hashed
+/// in plaintext and is not included here.
+pub fn strategy_hashes(book: &PlayerBook, token_id: &str) -> Vec<(u64, String)> {
+    let mut rows = Vec::new();
+    for row in &book.strategies {
+        if row.token_id != token_id {
+            continue;
+        }
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(row.ciphertext_b64.trim())
+        else {
+            continue;
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        rows.push((row.version, hex_encode(&Sha256::digest(bytes))));
+    }
+    rows.sort_by_key(|(version, _)| *version);
+    rows
+}
+
+/// A chain view wins when it is a 64-character hex digest. Plaintext is ignored.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn apply_chain_playbook(body: &mut serde_json::Value, chain_hash: Option<&str>) {
+    let Some(hash) = chain_hash else {
+        return;
+    };
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return;
+    }
+    let Some(object) = body
+        .get_mut("passport")
+        .and_then(|value| value.as_object_mut())
+    else {
+        return;
+    };
+    object.insert(
+        "strategyHash".into(),
+        serde_json::json!(hash.to_ascii_lowercase()),
+    );
+    object.insert("strategyHashSource".into(), serde_json::json!("chain"));
 }
 
 struct Access {
@@ -887,7 +945,20 @@ mod tests {
         assert_eq!(public.0, 200, "{}", public.1);
         assert_eq!(public.1["passport"]["strategyVersionCount"], 1);
         assert!(public.1["passport"]["strategyUpdatedAt"].is_string());
+        let hash = public.1["passport"]["strategyHash"].as_str().unwrap();
+        assert_eq!(hash.len(), 64);
+        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let hashes = strategy_hashes(&state.book, TOKEN);
+        assert_eq!(hash, hashes[0].1);
         assert!(!public.1.to_string().contains("hold the east door"));
+        let mut chained = public.1.clone();
+        apply_chain_playbook(&mut chained, Some("not-a-digest"));
+        assert_eq!(chained["passport"]["strategyHash"], hash);
+        let chain_hash = "ab".repeat(32);
+        apply_chain_playbook(&mut chained, Some(&chain_hash));
+        assert_eq!(chained["passport"]["strategyHash"], chain_hash);
+        assert_eq!(chained["passport"]["strategyHashSource"], "chain");
+        assert!(!chained.to_string().contains("hold the east door"));
         assert!(!public.1.to_string().contains("seller prompt stays"));
         assert_eq!(
             state

@@ -145,6 +145,18 @@ pub struct PassportView {
     pub locked_until: u64,
 }
 
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct PlaybookHashView {
+    pub token_id: String,
+    pub version: u64,
+    pub hash: String,
+}
+
+fn valid_playbook_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Passport {
@@ -437,6 +449,59 @@ impl Passport {
             last_sync_seq: token.last_sync_seq,
             locked_until: token.locked_until,
         }
+    }
+
+    /// Record the sha256 of one encrypted strategy version. The argument is a
+    /// 64-character hex digest. Plaintext is rejected. Only a recorder may write.
+    pub fn set_playbook_hash(&mut self, token_id: String, version: u64, hash: String) {
+        self.only_recorder();
+        let _ = self.token_or_panic(&token_id);
+        require!(version > 0, "version");
+        require!(valid_playbook_hash(&hash), "hash");
+        let hash = hash.to_ascii_lowercase();
+        let mut store = LookupMap::<String, String>::new(b"h");
+        let version_key = format!("v:{token_id}:{version}");
+        if let Some(existing) = store.get(&version_key) {
+            require!(*existing == hash, "hash");
+        } else {
+            store.insert(version_key, hash.clone());
+        }
+        let latest_key = format!("l:{token_id}");
+        if let Some(latest) = store.get(&latest_key) {
+            let current = latest
+                .split_once(':')
+                .and_then(|(version, _)| version.parse::<u64>().ok())
+                .unwrap_or(0);
+            require!(version >= current, "version");
+        }
+        store.insert(latest_key, format!("{version}:{hash}"));
+        env::log_str(&passport_event(
+            "playbook_hash",
+            &near_sdk::serde_json::json!({
+                "token_id": token_id,
+                "version": version,
+            }),
+        ));
+    }
+
+    pub fn playbook_hash(&self, token_id: String, version: u64) -> Option<String> {
+        let store = LookupMap::<String, String>::new(b"h");
+        store.get(&format!("v:{token_id}:{version}")).cloned()
+    }
+
+    pub fn playbook_latest(&self, token_id: String) -> Option<PlaybookHashView> {
+        let store = LookupMap::<String, String>::new(b"h");
+        let stored = store.get(&format!("l:{token_id}"))?;
+        let (version, hash) = stored.split_once(':')?;
+        let version = version.parse().ok()?;
+        if !valid_playbook_hash(hash) {
+            return None;
+        }
+        Some(PlaybookHashView {
+            token_id,
+            version,
+            hash: hash.to_string(),
+        })
     }
 
     pub fn token_agent(&self, token_id: String) -> Option<String> {
@@ -1260,6 +1325,43 @@ mod tests {
         }))
         .unwrap_err();
         assert!(panic_text(err).contains("agent bound"));
+    }
+
+    #[test]
+    fn playbook_hash_is_recorder_only_and_stores_the_digest() {
+        let (mut passport, token) = minted();
+        let digest = "ab".repeat(32);
+        context("owner.fe2vi.testnet", "owner.fe2vi.testnet", 0, 2);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_playbook_hash(token.clone(), 1, digest.clone());
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("recorder"));
+
+        context("recorder.fe2vi.testnet", "recorder.fe2vi.testnet", 0, 3);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_playbook_hash(token.clone(), 1, "hold the east door".into());
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("hash"));
+
+        passport.set_playbook_hash(token.clone(), 1, digest.clone());
+        passport.set_playbook_hash(token.clone(), 1, digest.to_uppercase());
+        assert_eq!(
+            passport.playbook_hash(token.clone(), 1).as_deref(),
+            Some(digest.as_str())
+        );
+        let latest = passport.playbook_latest(token.clone()).unwrap();
+        assert_eq!(latest.version, 1);
+        assert_eq!(latest.hash, digest);
+        assert!(passport.passport(token.clone()).career.xp == 0);
+
+        let other = "cd".repeat(32);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_playbook_hash(token.clone(), 1, other);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("hash"));
     }
 
     #[test]

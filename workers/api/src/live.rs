@@ -1331,10 +1331,60 @@ pub fn apply_season_career(
                 serde_json::json!(prior.saturating_add(u64::from(award.points))),
             );
         }
+        if let Some(object) = career.as_object_mut() {
+            if let Some(season) = object.get_mut("season") {
+                if let Some(season) = season.as_object_mut() {
+                    season.insert("onChain".into(), season_chain_delta(season.get("records")));
+                }
+            }
+        }
         passport.career = Some(career);
         wrote += 1;
     }
     wrote
+}
+
+/// Counters a recorder adds with the existing `sync_career` method.
+/// `points` uses the same win, draw, and loss values as the rest of the arena.
+pub fn season_chain_delta(records: Option<&serde_json::Value>) -> serde_json::Value {
+    let mut xp = 0_u64;
+    let mut wins = 0_u32;
+    let mut losses = 0_u32;
+    let mut draws = 0_u32;
+    let mut matches = 0_u32;
+    let rows = records.and_then(serde_json::Value::as_array);
+    if let Some(rows) = rows {
+        for row in rows {
+            let room = row.get("room").and_then(serde_json::Value::as_str);
+            if room != Some("cup") && room != Some("village") {
+                continue;
+            }
+            let points = row
+                .get("points")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u32;
+            matches = matches.saturating_add(1);
+            xp = xp.saturating_add(u64::from(points));
+            if points == fe2vi_core::MATCH_WIN {
+                wins = wins.saturating_add(1);
+            } else if points == fe2vi_core::MATCH_DRAW {
+                draws = draws.saturating_add(1);
+            } else {
+                losses = losses.saturating_add(1);
+            }
+        }
+    }
+    serde_json::json!({
+        "method": "sync_career",
+        "xp": xp,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "matches": matches,
+        "heists": 0,
+        "seasons": if matches == 0 { 0 } else { 1 },
+        "season_titles": 0,
+    })
 }
 
 pub fn refresh_seats(book: &mut LiveBook, now: u64) {
@@ -1794,6 +1844,19 @@ mod tests {
             passports[0].career.as_ref().unwrap()["season"]["cupPoints"],
             fe2vi_core::MATCH_WIN
         );
+        let on_chain = &passports[0].career.as_ref().unwrap()["season"]["onChain"];
+        assert_eq!(on_chain["method"], "sync_career");
+        assert_eq!(on_chain["wins"], 1);
+        assert_eq!(on_chain["matches"], 1);
+        assert_eq!(on_chain["xp"], fe2vi_core::MATCH_WIN);
+        assert_eq!(on_chain["losses"], 0);
+        let loss = season_chain_delta(Some(&serde_json::json!([
+            {"room": "village", "points": 0, "label": "village 24h 1"}
+        ])));
+        assert_eq!(loss["method"], "sync_career");
+        assert_eq!(loss["losses"], 1);
+        assert_eq!(loss["matches"], 1);
+        assert_eq!(loss["xp"], 0);
     }
 
     #[test]
