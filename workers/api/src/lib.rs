@@ -1,14 +1,17 @@
 #![recursion_limit = "256"]
 
 mod agents;
+mod auto_settle;
 mod indexer;
 mod limits;
 mod live;
 #[cfg(target_arch = "wasm32")]
 mod live_edge;
 mod logic;
+mod market_batch;
 #[cfg(target_arch = "wasm32")]
 mod markets;
+mod near_sign;
 mod passport;
 mod skins;
 mod strategy;
@@ -844,6 +847,10 @@ mod edge {
                     reconciled += 1;
                 }
             }
+            crate::auto_settle::sync_vault_jobs(&mut arena);
+            crate::auto_settle::attach_playbook_hashes(&mut arena);
+            drive_chain_jobs(self, &mut arena).await;
+            let _ = self.cached_market("/v1/market/listings").await;
             let synced = crate::live_edge::refresh(&mut arena).await;
             let policy_revalidated =
                 crate::live_edge::refresh_policies(&self.env, &mut arena).await;
@@ -1622,6 +1629,294 @@ mod edge {
         .collect()
     }
 
+    async fn drive_chain_jobs(feed: &SpectatorFeed, arena: &mut ArenaState) {
+        let env = &feed.env;
+        crate::auto_settle::recover_crashed(&mut arena.chain_jobs);
+        if let Some(index) = crate::auto_settle::active_broadcast(&arena.chain_jobs) {
+            confirm_chain_job(feed, arena, index).await;
+            return;
+        }
+        let settler_secret = worker_secret(env, "FE2VI_SETTLER_SECRET_KEY");
+        let recorder_secret = worker_secret(env, "FE2VI_RECORDER_SECRET_KEY");
+        let Some(index) = crate::auto_settle::claim_ready(
+            &mut arena.chain_jobs,
+            !settler_secret.is_empty(),
+            !recorder_secret.is_empty(),
+        ) else {
+            return;
+        };
+        let kind = arena.chain_jobs[index].kind.clone();
+        if kind == "career" {
+            let token = arena.chain_jobs[index].token_id.clone();
+            let frozen = arena.chain_jobs[index]
+                .args
+                .get("update")
+                .and_then(serde_json::Value::as_object)
+                .is_some();
+            let rpc = env_string(env, "FE2VI_RPC_URL");
+            let account = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+            let Some(view) = read_passport_view(&rpc, &account, &token).await else {
+                crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                return;
+            };
+            if !frozen {
+                if !crate::auto_settle::freeze_career_update(&mut arena.chain_jobs[index], &view) {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+                crate::auto_settle::release_pending(&mut arena.chain_jobs[index]);
+                return;
+            }
+            let seq = arena.chain_jobs[index].args["update"]["seq"]
+                .as_u64()
+                .unwrap_or(0);
+            if crate::auto_settle::career_already_applied(&view, seq) {
+                crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                return;
+            }
+        }
+        let (secret, signer) = if kind == "settle" {
+            (settler_secret, env_string(env, "FE2VI_SETTLER_ACCOUNT"))
+        } else {
+            let account = env_string(env, "FE2VI_RECORDER_ACCOUNT");
+            (
+                recorder_secret,
+                if account.is_empty() {
+                    "fe2virecdb1e91.testnet".into()
+                } else {
+                    account
+                },
+            )
+        };
+        let receiver = if kind == "settle" {
+            env_string(env, "FE2VI_FACTORY_ID")
+        } else {
+            env_string(env, "FE2VI_PASSPORT_RECORDER_ID")
+        };
+        if signer.is_empty() || receiver.is_empty() {
+            crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+            return;
+        }
+        let method = match kind.as_str() {
+            "settle" => "settle_vault",
+            "playbook" => "set_playbook_hash",
+            _ => "sync_career",
+        };
+        let args = if kind == "career" {
+            match crate::auto_settle::career_call_body(&arena.chain_jobs[index]) {
+                Some(body) => body.to_string().into_bytes(),
+                None => {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+            }
+        } else {
+            arena.chain_jobs[index].args.to_string().into_bytes()
+        };
+        let gas = match kind.as_str() {
+            "settle" => 300_000_000_000_000,
+            "playbook" => 30_000_000_000_000,
+            _ => 50_000_000_000_000,
+        };
+        match broadcast_call(env, &signer, &secret, &receiver, method, &args, gas).await {
+            Ok(hash) => crate::auto_settle::mark_broadcast(&mut arena.chain_jobs[index], &hash),
+            Err(()) => crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]),
+        }
+    }
+
+    async fn confirm_chain_job(feed: &SpectatorFeed, arena: &mut ArenaState, index: usize) {
+        let env = &feed.env;
+        let hash = arena.chain_jobs[index].tx_hash.clone();
+        let kind = arena.chain_jobs[index].kind.clone();
+        let match_id = arena.chain_jobs[index].match_id.clone();
+        let signer = if kind == "settle" {
+            env_string(env, "FE2VI_SETTLER_ACCOUNT")
+        } else {
+            let account = env_string(env, "FE2VI_RECORDER_ACCOUNT");
+            if account.is_empty() {
+                "fe2virecdb1e91.testnet".into()
+            } else {
+                account
+            }
+        };
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        let Ok((status, text)) = rpc_exchange(
+            &rpc,
+            "EXPERIMENTAL_tx_status",
+            serde_json::json!({
+                "tx_hash": hash,
+                "sender_account_id": signer,
+                "wait_until": "FINAL",
+            }),
+        )
+        .await
+        else {
+            return;
+        };
+        if text.contains("does not exist") || status == 404 {
+            return;
+        }
+        if text.contains("Failure") {
+            crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
+            return;
+        }
+        if !text.contains("SuccessValue") {
+            return;
+        }
+        if kind == "settle" {
+            let Ok(result) = crate::vault::read_tx_response(status, &text) else {
+                return;
+            };
+            let Some(play_index) = arena
+                .book
+                .matches
+                .iter()
+                .position(|play| play.match_id == match_id)
+            else {
+                return;
+            };
+            let Some(mut pot) = arena.book.matches[play_index]
+                .vault
+                .as_ref()
+                .and_then(|vault| vault.pot.clone())
+            else {
+                return;
+            };
+            let Ok(facts) = heist_pot_facts(feed, &match_id).await else {
+                return;
+            };
+            if pot.creator.is_empty() {
+                if let Some(creator) = facts.creator {
+                    pot.creator = creator;
+                }
+            }
+            let factory = env_string(env, "FE2VI_FACTORY_ID");
+            let heist = env_string(env, "FE2VI_HEIST_ID");
+            if factory.is_empty() || heist.is_empty() {
+                return;
+            }
+            match crate::vault::confirm_vault_receipt(
+                &pot,
+                &hash,
+                &result,
+                facts.pot_yocto,
+                &factory,
+                &heist,
+            ) {
+                Ok(next) => {
+                    if let Some(vault) = arena.book.matches[play_index].vault.as_mut() {
+                        vault.pot = Some(next.clone());
+                    }
+                    crate::passport::credit_passports(&mut arena.book.passports, &next);
+                    crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                    crate::auto_settle::sync_vault_jobs(arena);
+                    crate::auto_settle::attach_playbook_hashes(arena);
+                }
+                Err("transaction is not final success") => {}
+                Err(_) => crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]),
+            }
+            return;
+        }
+        crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+        crate::auto_settle::sync_vault_jobs(arena);
+        crate::auto_settle::attach_playbook_hashes(arena);
+    }
+
+    async fn broadcast_call(
+        env: &Env,
+        signer: &str,
+        secret: &str,
+        receiver: &str,
+        method: &str,
+        args: &[u8],
+        gas: u64,
+    ) -> Result<String, ()> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if indexer::allow_chain_rpc(&network, &rpc).is_err() || !rpc.contains("testnet") {
+            return Err(());
+        }
+        let public = crate::near_sign::public_key(secret).map_err(|_| ())?;
+        let (_status, key_text) = rpc_exchange(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "view_access_key",
+                "finality": "final",
+                "account_id": signer,
+                "public_key": public,
+            }),
+        )
+        .await
+        .map_err(|_| ())?;
+        let nonce = serde_json::from_str::<serde_json::Value>(&key_text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/result/nonce")
+                    .and_then(|item| item.as_u64())
+            })
+            .ok_or(())?
+            .saturating_add(1);
+        let (_status, block_text) =
+            rpc_exchange(&rpc, "block", serde_json::json!({"finality": "final"}))
+                .await
+                .map_err(|_| ())?;
+        let block_hash = serde_json::from_str::<serde_json::Value>(&block_text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/result/header/hash")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string)
+            })
+            .ok_or(())?;
+        let signed = crate::near_sign::sign_function_call(
+            signer,
+            secret,
+            receiver,
+            method,
+            args,
+            gas,
+            0,
+            nonce,
+            &block_hash,
+        )
+        .map_err(|_| ())?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(signed);
+        let (_status, sent) =
+            rpc_exchange(&rpc, "broadcast_tx_commit", serde_json::json!([encoded]))
+                .await
+                .map_err(|_| ())?;
+        serde_json::from_str::<serde_json::Value>(&sent)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/result/transaction/hash")
+                    .or_else(|| value.pointer("/result/transaction_outcome/id"))
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string)
+            })
+            .filter(|hash| !hash.is_empty())
+            .ok_or(())
+    }
+
+    fn worker_secret(env: &Env, name: &str) -> String {
+        env.secret(name)
+            .ok()
+            .map(|value| value.to_string())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                env.var(name)
+                    .ok()
+                    .map(|value| value.to_string())
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
+
     async fn vault_receipt(
         feed: &SpectatorFeed,
         arena: &mut ArenaState,
@@ -1776,6 +2071,9 @@ mod edge {
                     vault.pot = Some(next.clone());
                 }
                 crate::passport::credit_passports(&mut arena.book.passports, &next);
+                crate::auto_settle::finish_settle_job(&mut arena.chain_jobs, match_id, &tx_hash);
+                crate::auto_settle::sync_vault_jobs(arena);
+                crate::auto_settle::attach_playbook_hashes(arena);
                 Ok((
                     200,
                     serde_json::to_string(&next).unwrap_or_else(|_| "{}".into()),
@@ -2045,18 +2343,7 @@ mod edge {
             };
             read_one = true;
             for token in tokens {
-                let token_id = token
-                    .get("token_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let playbook = if token_id.is_empty() {
-                    None
-                } else {
-                    read_playbook(&rpc, &account, token_id).await
-                };
-                if let Some(row) =
-                    crate::passport::passport_list_row(&account, &token, playbook.as_ref())
-                {
+                if let Some(row) = crate::passport::passport_list_row(&account, &token, None) {
                     passports.push(row);
                 }
             }
@@ -2520,150 +2807,59 @@ mod edge {
 
     impl SpectatorFeed {
         async fn market_response(&self, path: &str) -> Result<Response> {
-            let network = env_string(&self.env, "FE2VI_NETWORK");
-            let rpc = env_string(&self.env, "FE2VI_RPC_URL");
-            if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
-                return market_error(403, "chain_mismatch", message);
-            }
-            let passport = env_string(&self.env, "FE2VI_PASSPORT_ID");
-            let market = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
-            if passport.is_empty() || market.is_empty() {
-                return market_error(
-                    503,
-                    "market_unconfigured",
-                    "Passport or market account is not configured.",
-                );
-            }
-            if path.ends_with("/sales") {
-                let settlement =
-                    match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
-                        Ok(value) if value.is_null() => None,
-                        Ok(value) => Some(value),
-                        Err(error) => {
-                            return market_error(
-                                503,
-                                "market_unavailable",
-                                &format!("Could not read the last settlement ({error})."),
-                            )
-                        }
-                    };
-                let body = crate::passport::market_from_chain(
-                    &market,
-                    &network,
-                    &[],
-                    settlement.as_ref(),
-                    "chain",
-                );
-                let payload = serde_json::json!({
-                    "sales": body["sales"],
-                    "source": "chain",
-                    "contract": market,
-                    "network": network,
-                });
-                return with_cors(Response::ok(payload.to_string())?, "application/json");
-            }
-            let tokens = match rpc_view(
-                &rpc,
-                &passport,
-                "nft_tokens",
-                serde_json::json!({"from_index":"0","limit":32}),
-            )
-            .await
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    return market_error(
-                        503,
-                        "market_unavailable",
-                        &format!("Could not read passport tokens ({error})."),
-                    );
-                }
-            };
-            let Some(tokens) = tokens.as_array() else {
-                return market_error(
-                    503,
-                    "market_unavailable",
-                    "Passport token list was not an array.",
-                );
-            };
-            let mut listed = Vec::new();
-            let mut passports = Vec::new();
-            for token in tokens {
-                let Some(token_id) = token.get("token_id").and_then(serde_json::Value::as_str)
-                else {
-                    continue;
-                };
-                match rpc_view(
-                    &rpc,
-                    &market,
-                    "get_listing",
-                    serde_json::json!({"token_id": token_id}),
-                )
+            self.cached_market(path).await
+        }
+
+        async fn cached_market(&self, path: &str) -> Result<Response> {
+            let now = worker::Date::now().as_millis() / 1000;
+            let storage = self.state.storage();
+            let stored = storage
+                .get::<crate::market_batch::MarketSnapshot>("market_snapshot")
                 .await
-                {
-                    Ok(listing) => {
-                        if let Some(row) = crate::passport::listed_passport(token, &listing) {
-                            listed.push(row);
-                        }
-                        if let Some(card) = crate::passport::market_passport(token, &listing) {
-                            passports.push(card);
-                        }
-                    }
-                    Err(error) => {
-                        return market_error(
-                            503,
-                            "market_unavailable",
-                            &format!("Could not read a market listing ({error})."),
-                        );
+                .ok()
+                .flatten();
+            if !crate::market_batch::should_refresh(stored.as_ref(), now) {
+                return market_from_snapshot(self, path, stored.as_ref(), false).await;
+            }
+            match load_market_body(&self.env).await {
+                Ok(body) => {
+                    let snapshot = crate::market_batch::MarketSnapshot {
+                        fetched_unix: now,
+                        backoff_until: 0,
+                        body: Some(body),
+                    };
+                    let _ = storage.put("market_snapshot", &snapshot).await;
+                    market_from_snapshot(self, path, Some(&snapshot), false).await
+                }
+                Err(MarketFail::RateLimited) => {
+                    let mut snapshot = stored.unwrap_or(crate::market_batch::MarketSnapshot {
+                        fetched_unix: now,
+                        backoff_until: 0,
+                        body: None,
+                    });
+                    crate::market_batch::apply_rate_limit(&mut snapshot, now);
+                    let _ = storage.put("market_snapshot", &snapshot).await;
+                    if snapshot.body.is_some() {
+                        market_from_snapshot(self, path, Some(&snapshot), true).await
+                    } else {
+                        market_error(503, "market_unavailable", "The market RPC is rate limited.")
                     }
                 }
-            }
-            let mut settlement =
-                match rpc_view(&rpc, &market, "last_settlement", serde_json::json!({})).await {
-                    Ok(value) if value.is_null() => None,
-                    Ok(value) => Some(value),
-                    Err(error) => {
-                        return market_error(
+                Err(MarketFail::Failed(message)) => {
+                    if stored
+                        .as_ref()
+                        .is_some_and(|snapshot| snapshot.body.is_some())
+                    {
+                        market_from_snapshot(self, path, stored.as_ref(), true).await
+                    } else {
+                        market_error(
                             503,
                             "market_unavailable",
-                            &format!("Could not read the last settlement ({error})."),
+                            &format!("Could not read the market ({message})."),
                         )
                     }
-                };
-            if passports.len() == 1 {
-                if let Some(value) = settlement.as_mut() {
-                    if let Some(token_id) = passports[0].get("tokenId").cloned() {
-                        value["token_id"] = token_id;
-                    }
                 }
             }
-            let mut body = crate::passport::market_from_chain(
-                &market,
-                &network,
-                &listed,
-                settlement.as_ref(),
-                "chain",
-            );
-            let storage = self.state.storage();
-            if let Ok(stored) = storage.get::<crate::logic::ArenaState>("arena").await {
-                let mut arena = stored.unwrap_or_default();
-                let sql = storage.sql();
-                if attach_player_book(&sql, &mut arena).is_ok() {
-                    crate::passport::overlay_vault_careers(&mut body, &arena.book.passports);
-                }
-            }
-            body["passports"] = serde_json::Value::Array(passports);
-            let payload = if path.ends_with("/sales") {
-                serde_json::json!({
-                    "sales": body["sales"],
-                    "source": "chain",
-                    "contract": market,
-                    "network": network,
-                })
-            } else {
-                body
-            };
-            with_cors(Response::ok(payload.to_string())?, "application/json")
         }
 
         async fn enforce_rate_limit(&self, req: &Request) -> Result<Option<Response>> {
@@ -2823,6 +3019,248 @@ mod edge {
             .unwrap_or_default()
             .trim()
             .to_string()
+    }
+
+    enum MarketFail {
+        RateLimited,
+        Failed(String),
+    }
+
+    async fn market_from_snapshot(
+        feed: &SpectatorFeed,
+        path: &str,
+        snapshot: Option<&crate::market_batch::MarketSnapshot>,
+        stale: bool,
+    ) -> Result<Response> {
+        let Some(body) = snapshot.and_then(|snapshot| snapshot.body.clone()) else {
+            return market_error(503, "market_unavailable", "Could not read the market.");
+        };
+        let mut body = body;
+        if stale {
+            body["source"] = serde_json::json!("stale");
+        }
+        let storage = feed.state.storage();
+        if let Ok(stored) = storage.get::<crate::logic::ArenaState>("arena").await {
+            let mut arena = stored.unwrap_or_default();
+            let sql = storage.sql();
+            if attach_player_book(&sql, &mut arena).is_ok() {
+                crate::passport::overlay_vault_careers(&mut body, &arena.book.passports);
+            }
+        }
+        let payload = if path.ends_with("/sales") {
+            serde_json::json!({
+                "sales": body["sales"],
+                "source": body["source"],
+                "contract": body["contract"],
+                "network": body["network"],
+            })
+        } else {
+            body
+        };
+        with_cors(Response::ok(payload.to_string())?, "application/json")
+    }
+
+    async fn load_market_body(env: &Env) -> Result<serde_json::Value, MarketFail> {
+        let network = env_string(env, "FE2VI_NETWORK");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if let Err(message) = indexer::allow_chain_rpc(&network, &rpc) {
+            return Err(MarketFail::Failed(message.to_string()));
+        }
+        let passport = env_string(env, "FE2VI_PASSPORT_ID");
+        let market = env_string(env, "FE2VI_PASSPORT_MARKET_ID");
+        if passport.is_empty() || market.is_empty() {
+            return Err(MarketFail::Failed(
+                "Passport or market account is not configured.".into(),
+            ));
+        }
+        let mut boards = vec![(passport.clone(), market.clone())];
+        let recorder_passport = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+        let recorder_market = env_string(env, "FE2VI_RECORDER_MARKET_ID");
+        if !recorder_passport.is_empty() && !recorder_market.is_empty() && recorder_market != market
+        {
+            boards.push((recorder_passport, recorder_market));
+        }
+        let mut listed = Vec::new();
+        let mut passports = Vec::new();
+        let mut read_one = false;
+        let mut first_error = None;
+        for (passport_id, market_id) in &boards {
+            let board = match read_market_board(&rpc, passport_id, market_id).await {
+                Ok(board) => board,
+                Err(MarketFail::RateLimited) => return Err(MarketFail::RateLimited),
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    continue;
+                }
+            };
+            read_one = true;
+            for token in &board.tokens {
+                let token_id = token
+                    .get("token_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let listing = board
+                    .listings
+                    .get(token_id)
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                if let Some(mut row) = crate::passport::listed_passport(token, &listing) {
+                    row["marketContract"] = serde_json::json!(market_id);
+                    listed.push(row);
+                }
+                if let Some(mut card) = crate::passport::market_passport(token, &listing) {
+                    card["marketContract"] = serde_json::json!(market_id);
+                    passports.push(card);
+                }
+            }
+        }
+        if !read_one {
+            return Err(
+                first_error.unwrap_or(MarketFail::Failed("Could not read the market.".into()))
+            );
+        }
+        let mut settlement =
+            match market_call(&rpc, &market, "last_settlement", serde_json::json!({})).await {
+                Ok(value) if value.is_null() => None,
+                Ok(value) => Some(value),
+                Err(_) => None,
+            };
+        if passports.len() == 1 {
+            if let Some(value) = settlement.as_mut() {
+                if let Some(token_id) = passports[0].get("tokenId").cloned() {
+                    value["token_id"] = token_id;
+                }
+            }
+        }
+        let mut body = crate::passport::market_from_chain(
+            &market,
+            &network,
+            &listed,
+            settlement.as_ref(),
+            "chain",
+        );
+        body["passports"] = serde_json::Value::Array(passports);
+        Ok(body)
+    }
+
+    struct MarketBoard {
+        tokens: Vec<serde_json::Value>,
+        listings: std::collections::HashMap<String, serde_json::Value>,
+    }
+
+    async fn read_market_board(
+        rpc: &str,
+        passport: &str,
+        market: &str,
+    ) -> Result<MarketBoard, MarketFail> {
+        let mut tokens = Vec::new();
+        let mut from = 0_u64;
+        for pages in 1..=crate::market_batch::MAX_PAGES {
+            let page = market_call(
+                rpc,
+                passport,
+                "nft_tokens",
+                serde_json::json!({
+                    "from_index": from.to_string(),
+                    "limit": crate::market_batch::PAGE_LIMIT,
+                }),
+            )
+            .await?;
+            let Some(rows) = page.as_array().cloned() else {
+                return Err(MarketFail::Failed(
+                    "Passport token list was not an array.".into(),
+                ));
+            };
+            let count = rows.len() as u64;
+            tokens.extend(rows);
+            match crate::market_batch::next_token_page(from, count, pages) {
+                Some(next) => from = next,
+                None => break,
+            }
+        }
+        let mut listings = std::collections::HashMap::new();
+        for row in market_listing_batch(rpc, market).await? {
+            listings.insert(
+                row.token_id.clone(),
+                crate::market_batch::listing_json(&row),
+            );
+        }
+        Ok(MarketBoard { tokens, listings })
+    }
+
+    async fn market_listing_batch(
+        rpc: &str,
+        market: &str,
+    ) -> Result<Vec<crate::market_batch::SaleRow>, MarketFail> {
+        let prefix = base64::engine::general_purpose::STANDARD.encode([b'l']);
+        let (status, text) = rpc_exchange(
+            rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "view_state",
+                "finality": "final",
+                "account_id": market,
+                "prefix_base64": prefix,
+            }),
+        )
+        .await
+        .map_err(|_| MarketFail::Failed("transport".into()))?;
+        if crate::market_batch::is_rate_limited(status, &text) {
+            return Err(MarketFail::RateLimited);
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| MarketFail::Failed("decode".into()))?;
+        if value.get("error").is_some_and(|item| !item.is_null()) {
+            if crate::market_batch::is_rate_limited(status, &text) {
+                return Err(MarketFail::RateLimited);
+            }
+            return Err(MarketFail::Failed("listing batch".into()));
+        }
+        let Some(rows) = value
+            .pointer("/result/values")
+            .and_then(|item| item.as_array())
+        else {
+            return Err(MarketFail::Failed("listing batch".into()));
+        };
+        let mut sales = Vec::new();
+        for row in rows {
+            let Some(key) = row
+                .get("key")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|item| base64::engine::general_purpose::STANDARD.decode(item).ok())
+            else {
+                continue;
+            };
+            let Some(raw) = row
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|item| base64::engine::general_purpose::STANDARD.decode(item).ok())
+            else {
+                continue;
+            };
+            if let Some(sale) = crate::market_batch::decode_listing_entry(&key, &raw) {
+                sales.push(sale);
+            }
+        }
+        Ok(sales)
+    }
+
+    async fn market_call(
+        rpc: &str,
+        account: &str,
+        method: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, MarketFail> {
+        let (status, text) = rpc_view_raw(rpc, account, method, args)
+            .await
+            .map_err(|_| MarketFail::Failed("transport".into()))?;
+        if crate::market_batch::is_rate_limited(status, &text) {
+            return Err(MarketFail::RateLimited);
+        }
+        indexer::interpret_rpc_query(status, &text)
+            .map_err(|failure| MarketFail::Failed(failure.class.to_string()))
     }
 
     fn market_error(status: u16, code: &str, message: &str) -> Result<Response> {

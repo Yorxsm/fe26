@@ -37,10 +37,15 @@ export function tierFrame(tier: string | null): string {
 export function listedOffer(
   tokenId: string,
   listings: Array<{ tokenId?: string; priceNear?: string | null; priceYocto?: string | null; listed?: boolean }>,
-): { priceNear: string; priceYocto: string | null } | null {
+): { priceNear: string; priceYocto: string | null; market: string | null } | null {
   const row = listings.find((item) => item.tokenId === tokenId && item.listed !== false && item.priceNear);
   if (!row?.priceNear) return null;
-  return { priceNear: row.priceNear, priceYocto: row.priceYocto ?? null };
+  const market = (row as { marketContract?: unknown }).marketContract;
+  return {
+    priceNear: row.priceNear,
+    priceYocto: row.priceYocto ?? null,
+    market: typeof market === "string" && market.endsWith(".testnet") ? market : null,
+  };
 }
 
 export function marketStats(

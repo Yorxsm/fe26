@@ -151,7 +151,15 @@ export default function MarketPage() {
           {shown.map((row) => {
             const record = recordLine(row.career);
             const offer = listedOffer(row.tokenId, offers);
-            const handoff = offer?.priceYocto ? buyHandoff(configuredEconomy(), row.tokenId, offer.priceYocto, callback) : null;
+            const economy = configuredEconomy();
+            const handoff = offer?.priceYocto
+              ? buyHandoff(
+                  { ...economy, market: offer.market ?? economy.market },
+                  row.tokenId,
+                  offer.priceYocto,
+                  callback,
+                )
+              : null;
             const frame = tierFrame(row.tier);
             return (
               <article key={`${row.contract}:${row.tokenId}`} className="market-card" style={{ borderColor: frame }}>
