@@ -48,7 +48,7 @@ pub fn sync_vault_jobs(state: &mut ArenaState) {
             );
             continue;
         }
-        for token in &snap.tokens {
+        for (token, seat) in &snap.tokens {
             enqueue(
                 &mut state.chain_jobs,
                 &format!("career:{}:{token}", snap.match_id),
@@ -59,6 +59,7 @@ pub fn sync_vault_jobs(state: &mut ArenaState) {
                     "token_id": token,
                     "outcome": snap.outcome,
                     "winner": snap.winner,
+                    "seatAccount": seat,
                 }),
             );
             if let Some(hash) = snap.hashes.get(token) {
@@ -86,7 +87,7 @@ struct Snap {
     settled: bool,
     outcome: String,
     winner: String,
-    tokens: Vec<String>,
+    tokens: Vec<(String, String)>,
     hashes: std::collections::BTreeMap<String, (u64, String)>,
 }
 
@@ -106,8 +107,12 @@ fn snap_of(play: &PlayMatch) -> Snap {
         .map(|pot| {
             pot.seat_links
                 .iter()
-                .filter(|link| link.source == "seat-at-match-end" && !link.token_id.is_empty())
-                .map(|link| link.token_id.clone())
+                .filter(|link| {
+                    link.source == "seat-at-match-end"
+                        && !link.token_id.is_empty()
+                        && !link.near_account.trim().is_empty()
+                })
+                .map(|link| (link.token_id.clone(), link.near_account.trim().to_string()))
                 .collect()
         })
         .unwrap_or_default();
@@ -240,6 +245,24 @@ pub fn mark_done(job: &mut ChainJob) {
     job.status = "done".into();
 }
 
+/// A verified receipt already paid this match. Do not send `settle_vault` again.
+pub fn finish_settle_job(jobs: &mut [ChainJob], match_id: &str, tx_hash: &str) {
+    let Some(job) = jobs.iter_mut().find(|job| {
+        job.kind == "settle"
+            && job.match_id == match_id
+            && job.status != "done"
+            && job.status != "failed"
+    }) else {
+        return;
+    };
+    if job.tx_hash.trim().is_empty() {
+        job.tx_hash = tx_hash.trim().to_string();
+    }
+    if job.tx_hash == tx_hash.trim() {
+        job.status = "done".into();
+    }
+}
+
 pub fn mark_retry(job: &mut ChainJob) {
     job.attempts = job.attempts.saturating_add(1);
     job.tx_hash.clear();
@@ -253,6 +276,110 @@ pub fn mark_retry(job: &mut ChainJob) {
 /// The chain call landed and was rejected. Keep the hash and do not send another.
 pub fn park_rejected(job: &mut ChainJob) {
     job.status = "failed".into();
+}
+
+/// Drop a claim that has not been signed yet. The frozen arguments stay.
+pub fn release_pending(job: &mut ChainJob) {
+    if job.tx_hash.trim().is_empty() {
+        job.status = "pending".into();
+    }
+}
+
+/// One monotonic `sync_career` body. `seq` is the on-chain `last_sync_seq` plus one.
+/// Win, draw, and loss use the same 3/1/0 points as the arena. Other counters are copied.
+pub fn career_sync_args(
+    view: &serde_json::Value,
+    token_id: &str,
+    outcome: &str,
+    winner_account: &str,
+    seat_account: &str,
+) -> Option<serde_json::Value> {
+    let seat = seat_account.trim();
+    if token_id.is_empty() || seat.is_empty() {
+        return None;
+    }
+    let career = view.get("career")?;
+    let seq = view
+        .get("last_sync_seq")
+        .and_then(serde_json::Value::as_u64)?
+        + 1;
+    let (wins_add, losses_add, draws_add, xp_add) = match outcome {
+        "win" if seat == winner_account.trim() => (1_u64, 0, 0, 3),
+        "win" => (0, 1, 0, 0),
+        "draw" => (0, 0, 1, 1),
+        _ => return None,
+    };
+    Some(serde_json::json!({
+        "token_id": token_id,
+        "update": {
+            "seq": seq,
+            "xp": field_u64(career, "xp")?.saturating_add(xp_add),
+            "wins": field_u64(career, "wins")?.saturating_add(wins_add),
+            "losses": field_u64(career, "losses")?.saturating_add(losses_add),
+            "draws": field_u64(career, "draws")?.saturating_add(draws_add),
+            "matches": field_u64(career, "matches")?.saturating_add(1),
+            "heists": field_u64(career, "heists")?,
+            "seasons": field_u64(career, "seasons")?,
+            "season_titles": field_u64(career, "season_titles")?,
+            "best_rank": field_u64(career, "best_rank")?,
+            "rank": field_u64(career, "rank")?,
+            "rank_epoch": field_u64(career, "rank_epoch")?,
+        }
+    }))
+}
+
+pub fn career_already_applied(view: &serde_json::Value, seq: u64) -> bool {
+    view.get("last_sync_seq")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|current| current >= seq)
+}
+
+/// Store the update once. A later retry sends these same numbers.
+pub fn freeze_career_update(job: &mut ChainJob, view: &serde_json::Value) -> bool {
+    if job
+        .args
+        .get("update")
+        .and_then(serde_json::Value::as_object)
+        .is_some()
+    {
+        return true;
+    }
+    let body = career_sync_args(
+        view,
+        &job.token_id,
+        job.args
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+        job.args
+            .get("winner")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+        job.args
+            .get("seatAccount")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
+    );
+    let Some(body) = body else {
+        return false;
+    };
+    if let Some(update) = body.get("update") {
+        job.args["update"] = update.clone();
+        return true;
+    }
+    false
+}
+
+pub fn career_call_body(job: &ChainJob) -> Option<serde_json::Value> {
+    let update = job.args.get("update")?.as_object()?;
+    Some(serde_json::json!({
+        "token_id": job.token_id,
+        "update": update,
+    }))
+}
+
+fn field_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(serde_json::Value::as_u64)
 }
 
 #[cfg(test)]
@@ -379,5 +506,118 @@ mod tests {
         mark_retry(&mut job);
         assert_eq!(job.status, "failed");
         assert!(job.tx_hash.is_empty());
+    }
+
+    fn rookie_view() -> serde_json::Value {
+        serde_json::json!({
+            "last_sync_seq": 4,
+            "career": {
+                "xp": 30, "wins": 1, "losses": 0, "draws": 0, "matches": 2,
+                "heists": 0, "seasons": 0, "season_titles": 0,
+                "best_rank": 0, "rank": 0, "rank_epoch": 0
+            }
+        })
+    }
+
+    #[test]
+    fn career_sync_is_one_step_and_a_landed_seq_is_not_applied_again() {
+        let view = rookie_view();
+        let win = career_sync_args(
+            &view,
+            "rec_001",
+            "win",
+            "fe2virecdb1e91.testnet",
+            "fe2virecdb1e91.testnet",
+        )
+        .unwrap();
+        assert_eq!(win["update"]["seq"], 5);
+        assert_eq!(win["update"]["xp"], 33);
+        assert_eq!(win["update"]["wins"], 2);
+        assert_eq!(win["update"]["matches"], 3);
+        assert_eq!(win["update"]["heists"], 0);
+        let loss = career_sync_args(
+            &view,
+            "rec_002",
+            "win",
+            "fe2virecdb1e91.testnet",
+            "other.testnet",
+        )
+        .unwrap();
+        assert_eq!(loss["update"]["losses"], 1);
+        assert_eq!(loss["update"]["xp"], 30);
+        let draw =
+            career_sync_args(&view, "rec_001", "draw", "", "fe2virecdb1e91.testnet").unwrap();
+        assert_eq!(draw["update"]["draws"], 1);
+        assert_eq!(draw["update"]["xp"], 31);
+        let mut job = ChainJob {
+            id: "career:mt_1:rec_001".into(),
+            match_id: "mt_1".into(),
+            kind: "career".into(),
+            token_id: "rec_001".into(),
+            status: "broadcasting".into(),
+            tx_hash: String::new(),
+            attempts: 0,
+            args: serde_json::json!({
+                "token_id": "rec_001",
+                "outcome": "win",
+                "winner": "fe2virecdb1e91.testnet",
+                "seatAccount": "fe2virecdb1e91.testnet"
+            }),
+        };
+        assert!(freeze_career_update(&mut job, &view));
+        let seq = job.args["update"]["seq"].clone();
+        assert!(freeze_career_update(&mut job, &rookie_view()));
+        assert_eq!(job.args["update"]["seq"], seq);
+        recover_crashed(std::slice::from_mut(&mut job));
+        assert_eq!(job.status, "pending");
+        assert_eq!(job.args["update"]["seq"], seq);
+        let mut landed = view.clone();
+        landed["last_sync_seq"] = seq.clone();
+        assert!(career_already_applied(&landed, seq.as_u64().unwrap()));
+        assert_eq!(career_call_body(&job).unwrap()["update"]["seq"], seq);
+    }
+
+    #[test]
+    fn an_auto_trigger_queues_settle_then_career_after_the_receipt() {
+        let mut state = state(false);
+        sync_vault_jobs(&mut state);
+        assert_eq!(state.chain_jobs.len(), 1);
+        finish_settle_job(&mut state.chain_jobs, "mt_1", "tx");
+        assert_eq!(state.chain_jobs[0].status, "done");
+        finish_settle_job(&mut state.chain_jobs, "mt_1", "other");
+        assert_eq!(state.chain_jobs[0].tx_hash, "tx");
+        state.book.matches[0]
+            .vault
+            .as_mut()
+            .unwrap()
+            .pot
+            .as_mut()
+            .unwrap()
+            .settled = true;
+        let pot = state.book.matches[0]
+            .vault
+            .as_mut()
+            .unwrap()
+            .pot
+            .as_mut()
+            .unwrap();
+        pot.pays = true;
+        pot.finality = "FINAL".into();
+        pot.tx_hash = "tx".into();
+        sync_vault_jobs(&mut state);
+        let career = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.kind == "career")
+            .unwrap();
+        assert_eq!(career.args["seatAccount"], "fe2virecdb1e91.testnet");
+        assert_eq!(
+            state
+                .chain_jobs
+                .iter()
+                .filter(|job| job.kind == "settle")
+                .count(),
+            1
+        );
     }
 }

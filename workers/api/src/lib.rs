@@ -848,7 +848,7 @@ mod edge {
             }
             crate::auto_settle::sync_vault_jobs(&mut arena);
             crate::auto_settle::attach_playbook_hashes(&mut arena);
-            drive_chain_jobs(&self.env, &mut arena).await;
+            drive_chain_jobs(self, &mut arena).await;
             let synced = crate::live_edge::refresh(&mut arena).await;
             let policy_revalidated =
                 crate::live_edge::refresh_policies(&self.env, &mut arena).await;
@@ -1627,10 +1627,11 @@ mod edge {
         .collect()
     }
 
-    async fn drive_chain_jobs(env: &Env, arena: &mut ArenaState) {
+    async fn drive_chain_jobs(feed: &SpectatorFeed, arena: &mut ArenaState) {
+        let env = &feed.env;
         crate::auto_settle::recover_crashed(&mut arena.chain_jobs);
         if let Some(index) = crate::auto_settle::active_broadcast(&arena.chain_jobs) {
-            confirm_chain_job(env, arena, index).await;
+            confirm_chain_job(feed, arena, index).await;
             return;
         }
         let settler_secret = worker_secret(env, "FE2VI_SETTLER_SECRET_KEY");
@@ -1643,6 +1644,35 @@ mod edge {
             return;
         };
         let kind = arena.chain_jobs[index].kind.clone();
+        if kind == "career" {
+            let token = arena.chain_jobs[index].token_id.clone();
+            let frozen = arena.chain_jobs[index]
+                .args
+                .get("update")
+                .and_then(serde_json::Value::as_object)
+                .is_some();
+            let rpc = env_string(env, "FE2VI_RPC_URL");
+            let account = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+            let Some(view) = read_passport_view(&rpc, &account, &token).await else {
+                crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                return;
+            };
+            if !frozen {
+                if !crate::auto_settle::freeze_career_update(&mut arena.chain_jobs[index], &view) {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+                crate::auto_settle::release_pending(&mut arena.chain_jobs[index]);
+                return;
+            }
+            let seq = arena.chain_jobs[index].args["update"]["seq"]
+                .as_u64()
+                .unwrap_or(0);
+            if crate::auto_settle::career_already_applied(&view, seq) {
+                crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                return;
+            }
+        }
         let (secret, signer) = if kind == "settle" {
             (settler_secret, env_string(env, "FE2VI_SETTLER_ACCOUNT"))
         } else {
@@ -1670,7 +1700,17 @@ mod edge {
             "playbook" => "set_playbook_hash",
             _ => "sync_career",
         };
-        let args = arena.chain_jobs[index].args.to_string().into_bytes();
+        let args = if kind == "career" {
+            match crate::auto_settle::career_call_body(&arena.chain_jobs[index]) {
+                Some(body) => body.to_string().into_bytes(),
+                None => {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+            }
+        } else {
+            arena.chain_jobs[index].args.to_string().into_bytes()
+        };
         let gas = match kind.as_str() {
             "settle" => 300_000_000_000_000,
             "playbook" => 30_000_000_000_000,
@@ -1682,9 +1722,12 @@ mod edge {
         }
     }
 
-    async fn confirm_chain_job(env: &Env, arena: &mut ArenaState, index: usize) {
+    async fn confirm_chain_job(feed: &SpectatorFeed, arena: &mut ArenaState, index: usize) {
+        let env = &feed.env;
         let hash = arena.chain_jobs[index].tx_hash.clone();
-        let signer = if arena.chain_jobs[index].kind == "settle" {
+        let kind = arena.chain_jobs[index].kind.clone();
+        let match_id = arena.chain_jobs[index].match_id.clone();
+        let signer = if kind == "settle" {
             env_string(env, "FE2VI_SETTLER_ACCOUNT")
         } else {
             let account = env_string(env, "FE2VI_RECORDER_ACCOUNT");
@@ -1715,11 +1758,66 @@ mod edge {
             crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
             return;
         }
-        if text.contains("SuccessValue") {
-            crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
-            crate::auto_settle::sync_vault_jobs(arena);
-            crate::auto_settle::attach_playbook_hashes(arena);
+        if !text.contains("SuccessValue") {
+            return;
         }
+        if kind == "settle" {
+            let Ok(result) = crate::vault::read_tx_response(status, &text) else {
+                return;
+            };
+            let Some(play_index) = arena
+                .book
+                .matches
+                .iter()
+                .position(|play| play.match_id == match_id)
+            else {
+                return;
+            };
+            let Some(mut pot) = arena.book.matches[play_index]
+                .vault
+                .as_ref()
+                .and_then(|vault| vault.pot.clone())
+            else {
+                return;
+            };
+            let Ok(facts) = heist_pot_facts(feed, &match_id).await else {
+                return;
+            };
+            if pot.creator.is_empty() {
+                if let Some(creator) = facts.creator {
+                    pot.creator = creator;
+                }
+            }
+            let factory = env_string(env, "FE2VI_FACTORY_ID");
+            let heist = env_string(env, "FE2VI_HEIST_ID");
+            if factory.is_empty() || heist.is_empty() {
+                return;
+            }
+            match crate::vault::confirm_vault_receipt(
+                &pot,
+                &hash,
+                &result,
+                facts.pot_yocto,
+                &factory,
+                &heist,
+            ) {
+                Ok(next) => {
+                    if let Some(vault) = arena.book.matches[play_index].vault.as_mut() {
+                        vault.pot = Some(next.clone());
+                    }
+                    crate::passport::credit_passports(&mut arena.book.passports, &next);
+                    crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                    crate::auto_settle::sync_vault_jobs(arena);
+                    crate::auto_settle::attach_playbook_hashes(arena);
+                }
+                Err("transaction is not final success") => {}
+                Err(_) => crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]),
+            }
+            return;
+        }
+        crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+        crate::auto_settle::sync_vault_jobs(arena);
+        crate::auto_settle::attach_playbook_hashes(arena);
     }
 
     async fn broadcast_call(
@@ -1971,6 +2069,7 @@ mod edge {
                     vault.pot = Some(next.clone());
                 }
                 crate::passport::credit_passports(&mut arena.book.passports, &next);
+                crate::auto_settle::finish_settle_job(&mut arena.chain_jobs, match_id, &tx_hash);
                 crate::auto_settle::sync_vault_jobs(arena);
                 crate::auto_settle::attach_playbook_hashes(arena);
                 Ok((
