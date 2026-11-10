@@ -13,6 +13,7 @@ mod market_batch;
 mod markets;
 mod near_sign;
 mod passport;
+mod rules;
 mod skins;
 mod strategy;
 mod surface;
@@ -530,6 +531,11 @@ mod edge {
                     pin_strategy_owner(&self.env, &mut arena, &agent_id, chain_now).await;
                 }
             }
+            if method == "POST" && route_path == "/v1/agents/register" {
+                prepare_register_chain(&self.env, &body).await;
+            } else {
+                crate::rules::set_chain(None);
+            }
             let outcome = dispatch(
                 &mut arena,
                 &Incoming {
@@ -541,6 +547,7 @@ mod edge {
                     policy_check: policy_check.as_ref(),
                 },
             );
+            crate::rules::set_chain(None);
             crate::passport::set_match_end_chain(None);
             crate::strategy::set_strategy_key(None);
             crate::strategy::clear_chain_owners();
@@ -2525,6 +2532,96 @@ mod edge {
             .and_then(serde_json::Value::as_str)
             .filter(|hash| hash.len() == 64)
             .map(str::to_string)
+    }
+
+    async fn prepare_register_chain(env: &Env, body: &str) {
+        let request: serde_json::Value =
+            serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+        let account = request
+            .get("nearAccount")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let token_id = request
+            .get("tokenId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if account.is_empty() || token_id.is_empty() || rpc.is_empty() || !rpc.contains("testnet") {
+            crate::rules::set_chain(None);
+            return;
+        }
+        let keys = access_keys(&rpc, &account).await.unwrap_or_default();
+        let contracts = [
+            env_string(env, "FE2VI_PASSPORT_RECORDER_ID"),
+            env_string(env, "FE2VI_PASSPORT_ID"),
+        ];
+        for contract in contracts {
+            if contract.is_empty() {
+                continue;
+            }
+            if let Some(view) = read_passport_view(&rpc, &contract, &token_id).await {
+                let owner = view
+                    .get("owner_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let bound = view
+                    .get("bound_agent")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                crate::rules::set_chain(Some(crate::rules::ChainPassport {
+                    contract,
+                    owner_id: owner,
+                    bound_agent: bound,
+                    keys,
+                    found: true,
+                }));
+                return;
+            }
+        }
+        crate::rules::set_chain(Some(crate::rules::ChainPassport {
+            contract: String::new(),
+            owner_id: String::new(),
+            bound_agent: String::new(),
+            keys,
+            found: false,
+        }));
+    }
+
+    async fn access_keys(rpc: &str, account: &str) -> Result<Vec<String>, ()> {
+        let (status, text) = rpc_exchange(
+            rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "view_access_key_list",
+                "finality": "final",
+                "account_id": account,
+            }),
+        )
+        .await
+        .map_err(|_| ())?;
+        if status >= 400 {
+            return Err(());
+        }
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| ())?;
+        let rows = value
+            .pointer("/result/keys")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(rows
+            .iter()
+            .filter_map(|row| {
+                row.get("public_key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect())
     }
 
     async fn rpc_view(

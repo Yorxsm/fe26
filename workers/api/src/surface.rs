@@ -605,6 +605,26 @@ pub fn intents_act(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
             return http(403, "application/json", error_body(message), false, None);
         }
     }
+    if let Some(grant) = state
+        .grants
+        .iter()
+        .find(|grant| grant.grant_id == body.grant_id)
+    {
+        let agent = grant.agent.clone();
+        if !crate::passport::active_for_agent(state, &agent) {
+            return http(
+                403,
+                "application/json",
+                serde_json::json!({
+                    "error": "passport_required",
+                    "message": "Buy a listed passport and bind it before playing.",
+                })
+                .to_string(),
+                false,
+                None,
+            );
+        }
+    }
     let mode = if body.signed_data.is_some() {
         "testnet-signed"
     } else {
@@ -697,6 +717,18 @@ mod tests {
     #[test]
     fn intents_act_stays_mock_and_does_not_verify_events() {
         let mut state = ArenaState::default();
+        state.book.passports.push(crate::agents::Passport {
+            passport_id: "ppt_test".into(),
+            token_id: Some("gen_001".into()),
+            agent_id: "mason.village.fe2vi.testnet".into(),
+            owner_near: String::new(),
+            creator_near: String::new(),
+            status: "active".into(),
+            created_unix: 1,
+            updated_unix: 1,
+            last_sync_seq: 0,
+            career: None,
+        });
         let issued = body_of(call(
             &mut state,
             "POST",

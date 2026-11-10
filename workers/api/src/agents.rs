@@ -224,9 +224,19 @@ struct RegisterBody {
     owner_contact: Option<String>,
     wallets: Option<WalletBody>,
     capabilities: Option<Vec<String>>,
+    #[serde(default, rename = "nearAccount")]
+    near_account: Option<String>,
+    #[serde(default, rename = "tokenId")]
+    token_id: Option<String>,
+    #[serde(default, rename = "publicKey")]
+    public_key: Option<String>,
+    #[serde(default)]
+    signature: Option<String>,
+    #[serde(default)]
+    nonce: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct WalletBody {
     #[serde(rename = "evmAddress")]
     evm_address: Option<String>,
@@ -304,6 +314,10 @@ pub fn dispatch_player(state: &mut ArenaState, incoming: &Incoming<'_>) -> Optio
         ("GET", ["llms.txt"]) => Some(document("text/plain; charset=utf-8", onboarding_text())),
         ("GET", ["v1", "arenas"]) => Some(json(200, &arenas_body(), false, None)),
         ("GET", ["v1", "arenas", id]) => Some(arena_one(id)),
+        ("GET", ["v1", "agents", "register", "nonce"]) => {
+            let account = query_param(incoming.path, "account").unwrap_or("");
+            Some(crate::rules::issue_nonce(state, account, now))
+        }
         ("POST", ["v1", "agents", "register"]) => Some(register(state, incoming, now)),
         ("POST", ["v1", "agents", "me", "rotate-token"]) => Some(rotate(state, incoming)),
         ("POST", ["v1", "agents", "me", "wallet"]) => Some(link_wallet(state, incoming, now)),
@@ -703,6 +717,187 @@ fn clean_capabilities(input: Option<Vec<String>>) -> Vec<String> {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
+fn register_proved(
+    state: &mut ArenaState,
+    _incoming: &Incoming<'_>,
+    now: u64,
+    body: &RegisterBody,
+    handle: &str,
+    name: &str,
+    description: &str,
+    owner: Option<String>,
+    capabilities: Vec<String>,
+) -> Outcome {
+    let Some(account) = body
+        .near_account
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return fail(
+            400,
+            "passport_required",
+            "Buy a listed passport, then register with nearAccount and tokenId.",
+        );
+    };
+    let Ok(account) = clean_near(account) else {
+        return fail(
+            400,
+            "validation_error",
+            "nearAccount is not a testnet account.",
+        );
+    };
+    if !account.ends_with(".testnet") {
+        return fail(
+            400,
+            "validation_error",
+            "Registration uses a NEAR testnet account.",
+        );
+    }
+    let Some(token_id) = body
+        .token_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return fail(
+            400,
+            "passport_required",
+            "Send the passport tokenId the testnet account owns.",
+        );
+    };
+    let Some(public_key) = body.public_key.as_deref().map(str::trim) else {
+        return fail(400, "bad_signature", "Send the account publicKey.");
+    };
+    let Some(signature) = body.signature.as_deref().map(str::trim) else {
+        return fail(400, "bad_signature", "Send the NEP-413 signature.");
+    };
+    let Some(nonce) = body.nonce.as_deref().map(str::trim) else {
+        return fail(
+            400,
+            "bad_signature",
+            "Request a nonce from /v1/agents/register/nonce.",
+        );
+    };
+    if !crate::rules::consume_nonce(state, &account, nonce, now) {
+        return fail(
+            400,
+            "bad_signature",
+            "The nonce is missing, used, or expired.",
+        );
+    }
+    let Some(chain) = crate::rules::chain() else {
+        return fail(
+            503,
+            "chain_unavailable",
+            "The passport contract could not be read.",
+        );
+    };
+    if !chain.found || chain.owner_id != account {
+        return fail(
+            403,
+            "not_owner",
+            "That testnet account does not own this passport.",
+        );
+    }
+    if !chain.bound_agent.is_empty() {
+        return fail(
+            409,
+            "passport_already_bound",
+            "That passport is already bound to an agent.",
+        );
+    }
+    if crate::rules::verify_registration(
+        &account,
+        token_id,
+        handle,
+        nonce,
+        public_key,
+        signature,
+        &chain.keys,
+    )
+    .is_err()
+    {
+        return fail(
+            400,
+            "bad_signature",
+            "The signature does not match an access key on that account.",
+        );
+    }
+    if state
+        .book
+        .players
+        .iter()
+        .any(|player| player.handle == handle)
+    {
+        return fail(409, "handle_taken", "That handle is already registered.");
+    }
+    if state.book.passports.iter().any(|passport| {
+        passport.token_id.as_deref() == Some(token_id)
+            && matches!(passport.status.as_str(), "active" | "pending_bind")
+    }) {
+        return fail(
+            409,
+            "passport_already_bound",
+            "That passport is already bound to an agent.",
+        );
+    }
+    let token = fresh_token();
+    let agent_id = format!("agt_{}", random_hex(8));
+    let prefix = token.chars().take(8).collect::<String>();
+    let mut wallets = match clean_wallets(body.wallets.clone()) {
+        Ok(wallets) => wallets,
+        Err(message) => return fail(400, "validation_error", message),
+    };
+    wallets.near_account = Some(account.clone());
+    state.book.players.push(Player {
+        agent_id: agent_id.clone(),
+        handle: handle.to_string(),
+        name: name.to_string(),
+        description: description.to_string(),
+        owner_contact: owner,
+        token_hash: token_hash(&token),
+        token_prefix: prefix.clone(),
+        status: "active".to_string(),
+        created_unix: now,
+        wallets: wallets.clone(),
+        capabilities: capabilities.clone(),
+        skin_id: "ingot".to_string(),
+        war_hits: Vec::new(),
+    });
+    state.book.passports.push(Passport {
+        passport_id: format!("ppt_{}", random_hex(8)),
+        token_id: Some(token_id.to_string()),
+        agent_id: agent_id.clone(),
+        owner_near: account.clone(),
+        creator_near: account.clone(),
+        status: "active".to_string(),
+        created_unix: now,
+        updated_unix: now,
+        last_sync_seq: 0,
+        career: None,
+    });
+    json(
+        201,
+        &serde_json::json!({
+            "agentId": agent_id,
+            "handle": handle,
+            "name": name,
+            "apiToken": token,
+            "tokenPrefix": prefix,
+            "points": 0,
+            "wallets": wallets,
+            "capabilities": capabilities,
+            "passport": { "tokenId": token_id, "owner": account, "status": "active", "contract": chain.contract },
+            "profileUrl": format!("{SITE_ORIGIN}/agents/{handle}"),
+            "onboardingUrl": format!("{SITE_ORIGIN}/skill/SKILL.md"),
+        }),
+        true,
+        None,
+    )
+}
+
 fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcome {
     let body: RegisterBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
@@ -755,11 +950,27 @@ fn register(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outcom
             }
         },
     };
-    let wallets = match clean_wallets(body.wallets) {
+    let wallets = match clean_wallets(body.wallets.clone()) {
         Ok(wallets) => wallets,
         Err(message) => return fail(400, "validation_error", message),
     };
-    let capabilities = clean_capabilities(body.capabilities);
+    let capabilities = clean_capabilities(body.capabilities.clone());
+    let proved = body.token_id.as_deref().is_some()
+        || body.signature.as_deref().is_some()
+        || body.nonce.as_deref().is_some();
+    if proved || !cfg!(test) {
+        return register_proved(
+            state,
+            incoming,
+            now,
+            &body,
+            handle,
+            &name,
+            &description,
+            owner,
+            capabilities,
+        );
+    }
     if state
         .book
         .players
@@ -1087,6 +1298,13 @@ fn submit_war(
     };
     if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
         return outcome;
+    }
+    if !crate::rules::room_open(now, "war") {
+        return fail(
+            403,
+            "season_closed",
+            "War is open only during its season window. Read /v1/schedule.",
+        );
     }
     let body: WarSubmitBody = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
@@ -1723,49 +1941,58 @@ fn join_queue(
     if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
         return outcome;
     }
-    if state.book.matches.iter().any(|play| {
-        play.status == "live"
-            && play.arena_id == arena_id
-            && play.seats.iter().any(|seat| seat == &agent_id)
-    }) {
+    if arena_id == "vault" && !crate::rules::room_open(now, "vault") {
         return fail(
-            409,
-            "invalid_state_transition",
-            "You are already in a live match in this arena.",
+            403,
+            "outside_window",
+            "Vault is open 19:00-20:00 Africa/Lagos. Read /v1/schedule.",
         );
     }
-    if !state
+    if state
+        .book
+        .matches
+        .iter()
+        .any(|play| play.status == "live" && play.seats.iter().any(|seat| seat == &agent_id))
+    {
+        return fail(
+            409,
+            "already_in_match",
+            "Leave the active match before joining another.",
+        );
+    }
+    if state
         .book
         .queue
         .iter()
         .any(|seat| seat.arena_id == arena_id && seat.agent_id == agent_id)
     {
-        let mine = receipt_wins(state, &agent_id);
-        let ahead: Vec<u64> = state
-            .book
-            .queue
-            .iter()
-            .map(|seat| {
-                if seat.arena_id == arena_id {
-                    receipt_wins(state, &seat.agent_id)
-                } else {
-                    u64::MAX
-                }
-            })
-            .collect();
-        let insert_at = ahead
-            .iter()
-            .position(|wins| *wins < mine)
-            .unwrap_or(state.book.queue.len());
-        state.book.queue.insert(
-            insert_at,
-            Queued {
-                arena_id: arena_id.to_string(),
-                agent_id: agent_id.clone(),
-                queued_unix: now,
-            },
-        );
+        return fail(409, "already_queued", "You are already in this queue.");
     }
+    let mine = receipt_wins(state, &agent_id);
+    let ahead: Vec<u64> = state
+        .book
+        .queue
+        .iter()
+        .map(|seat| {
+            if seat.arena_id == arena_id {
+                receipt_wins(state, &seat.agent_id)
+            } else {
+                u64::MAX
+            }
+        })
+        .collect();
+    let insert_at = ahead
+        .iter()
+        .position(|wins| *wins < mine)
+        .unwrap_or(state.book.queue.len());
+    state.book.queue.insert(
+        insert_at,
+        Queued {
+            arena_id: arena_id.to_string(),
+            agent_id: agent_id.clone(),
+            queued_unix: now,
+        },
+    );
     pair_queue(state, arena_id, now);
     json(
         200,
@@ -2159,7 +2386,13 @@ fn vault_act(
             );
         };
         if let Err(message) = vault.submit(agent_id, &chosen, target_id.as_deref(), intent, now) {
-            return fail(400, "illegal_action", message);
+            let code = if message.contains("already submitted") {
+                "already_acted"
+            } else {
+                "illegal_action"
+            };
+            let status = if code == "already_acted" { 409 } else { 400 };
+            return fail(status, code, message);
         }
         if vault.ready() {
             let rows = vault.resolve(now);
@@ -2301,6 +2534,9 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
     if state.book.matches[index].status != "live" {
         return fail(409, "match_over", "This match is over.");
     }
+    if now >= state.book.matches[index].deadline_unix {
+        return fail(409, "turn_expired", "The turn timer has passed.");
+    }
     let seat = state.book.matches[index]
         .seats
         .iter()
@@ -2415,6 +2651,21 @@ fn act(state: &mut ArenaState, incoming: &Incoming<'_>, match_id: &str, now: u64
 }
 
 fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
+    if arena_id == "vault" && !crate::rules::room_open(now, "vault") {
+        return;
+    }
+    let ready: Vec<String> = state
+        .book
+        .queue
+        .iter()
+        .filter(|seat| {
+            seat.arena_id == arena_id && crate::passport::active_for_agent(state, &seat.agent_id)
+        })
+        .map(|seat| seat.agent_id.clone())
+        .collect();
+    state.book.queue.retain(|seat| {
+        seat.arena_id != arena_id || ready.iter().any(|agent| agent == &seat.agent_id)
+    });
     loop {
         let waiting: Vec<usize> = state
             .book
@@ -2430,6 +2681,9 @@ fn pair_queue(state: &mut ArenaState, arena_id: &str, now: u64) {
         }
         let second = state.book.queue.remove(waiting[1]);
         let first = state.book.queue.remove(waiting[0]);
+        if first.agent_id == second.agent_id {
+            continue;
+        }
         let seats = vec![first.agent_id, second.agent_id];
         let vault = if arena_id == "vault" {
             Some(VaultMatch::start(&seats))
@@ -3014,6 +3268,9 @@ fn referee_solve(state: &ArenaState, incoming: &Incoming<'_>) -> Outcome {
         Ok(id) => id,
         Err(outcome) => return outcome,
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
     let Some(secret) = configured_war_secret() else {
         return fail(
             503,
@@ -3228,7 +3485,8 @@ fn openapi() -> String {
             }
         },
         "paths": {
-            "/v1/agents/register": { "post": { "operationId": "register" } },
+            "/v1/agents/register/nonce": { "get": { "operationId": "registerNonce" } },
+            "/v1/agents/register": { "post": { "operationId": "register", "description": "Requires a NEAR testnet account, a passport token that account owns, and a NEP-413 signature over a server nonce. Mint is closed. Buy a listed passport first." } },
             "/v1/agents/me": { "get": { "operationId": "me", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/rotate-token": { "post": { "operationId": "rotateToken", "security": [{ "bearer": [] }] } },
             "/v1/agents/me/wallet": { "post": { "operationId": "linkWallet", "security": [{ "bearer": [] }] } },
@@ -3558,7 +3816,7 @@ mod tests {
     use super::*;
     use crate::logic::{dispatch, Incoming, Outcome};
 
-    const NOW: u64 = 1_790_900_000;
+    const NOW: u64 = 1_791_051_000;
 
     fn call<'a>(
         state: &mut ArenaState,
@@ -3593,6 +3851,19 @@ mod tests {
         let path = format!("/v1/agents/register?now={NOW}");
         let (status, json) = call(state, "POST", &path, &body, None);
         assert_eq!(status, 201, "{json}");
+        let agent_id = json["agentId"].as_str().unwrap().to_string();
+        state.book.passports.push(Passport {
+            passport_id: format!("ppt_{handle}"),
+            token_id: Some(format!("test_{handle}")),
+            agent_id,
+            owner_near: String::new(),
+            creator_near: String::new(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 0,
+            career: None,
+        });
         assert_eq!(json["points"], 0);
         assert!(json["apiToken"].as_str().unwrap().starts_with("fe2_"));
         assert!(!json
@@ -4914,6 +5185,18 @@ mod tests {
     }
 
     fn seat_passport(state: &mut ArenaState, agent_id: &str, token_id: &str) {
+        if let Some(passport) = state
+            .book
+            .passports
+            .iter_mut()
+            .find(|passport| passport.agent_id == agent_id)
+        {
+            passport.token_id = Some(token_id.to_string());
+            passport.owner_near = "ann.testnet".into();
+            passport.creator_near = "ann.testnet".into();
+            passport.status = "active".into();
+            return;
+        }
         state.book.passports.push(Passport {
             passport_id: format!("ppt_{token_id}"),
             token_id: Some(token_id.to_string()),
@@ -5244,20 +5527,15 @@ mod tests {
             .unwrap()
             .agent_id
             .clone();
-        state.book.passports.push(Passport {
-            passport_id: "ppt_vet".into(),
-            token_id: Some("disp_vet".into()),
-            agent_id: alpha_id,
-            owner_near: "ann.testnet".into(),
-            creator_near: "ann.testnet".into(),
-            status: "active".into(),
-            created_unix: NOW,
-            updated_unix: NOW,
-            last_sync_seq: 1,
-            career: Some(serde_json::json!({
-                "vaultReceipts": { "wins": 1, "source": "settled-receipts" }
-            })),
-        });
+        let veteran = state
+            .book
+            .passports
+            .iter_mut()
+            .find(|passport| passport.agent_id == alpha_id)
+            .unwrap();
+        veteran.career = Some(serde_json::json!({
+            "vaultReceipts": { "wins": 1, "source": "settled-receipts" }
+        }));
         let queue = format!("/v1/arenas/vault/queue?now={NOW}");
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
         assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);

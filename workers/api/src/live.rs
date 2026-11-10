@@ -387,6 +387,16 @@ fn challenge(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outco
             "Send Authorization: Bearer fe2_ and your token.",
         );
     };
+    if let Some(outcome) = crate::passport::require_active(state, &agent_id) {
+        return outcome;
+    }
+    if state.live.link(&agent_id).is_none() && incoming.path.contains("/village/") {
+        return fail(
+            403,
+            "link_required",
+            "Link a Hyperliquid account before playing the Village.",
+        );
+    }
     let body: Body = match serde_json::from_str(incoming.body) {
         Ok(body) => body,
         Err(_) => {
@@ -809,7 +819,7 @@ fn join(state: &mut ArenaState, incoming: &Incoming<'_>, round_id: &str, now: u6
         );
     }
     if round.seats.len() >= MAX_CUP_SEATS {
-        return fail(409, "round_full", "That Cup round is full.");
+        return fail(409, "seats_full", "That Cup round is full.");
     }
     if round.seats.iter().any(|seat| seat.agent_id == agent_id) {
         return json(
@@ -1916,6 +1926,26 @@ mod tests {
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         };
+        let linker = state
+            .book
+            .players
+            .iter()
+            .find(|player| player.handle == "linker")
+            .unwrap()
+            .agent_id
+            .clone();
+        state.book.passports.push(crate::agents::Passport {
+            passport_id: "ppt_linker".into(),
+            token_id: Some("test_linker".into()),
+            agent_id: linker,
+            owner_near: String::new(),
+            creator_near: String::new(),
+            status: "active".into(),
+            created_unix: now,
+            updated_unix: now,
+            last_sync_seq: 0,
+            career: None,
+        });
         let auth = format!("Bearer {token}");
         let near_intents_agent_id = "a".repeat(64);
         let challenge = dispatch(
@@ -2176,10 +2206,20 @@ mod tests {
         };
         assert_eq!(status, 201, "{body}");
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
-        (
-            value["agentId"].as_str().unwrap().to_string(),
-            value["apiToken"].as_str().unwrap().to_string(),
-        )
+        let agent_id = value["agentId"].as_str().unwrap().to_string();
+        state.book.passports.push(crate::agents::Passport {
+            passport_id: format!("ppt_{handle}"),
+            token_id: Some(format!("test_{handle}")),
+            agent_id: agent_id.clone(),
+            owner_near: String::new(),
+            creator_near: String::new(),
+            status: "active".into(),
+            created_unix: now,
+            updated_unix: now,
+            last_sync_seq: 0,
+            career: None,
+        });
+        (agent_id, value["apiToken"].as_str().unwrap().to_string())
     }
 
     fn join_with_policy(

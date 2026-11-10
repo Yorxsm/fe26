@@ -762,7 +762,7 @@ mod tests {
     use crate::logic::{dispatch, Incoming};
     use crate::passport::reconcile_passport;
 
-    const NOW: u64 = 1_790_900_000;
+    const NOW: u64 = 1_791_051_000;
     const TOKEN: &str = "disp_strategy";
 
     struct Guard;
@@ -1111,6 +1111,18 @@ mod tests {
         let (seller_id, seller) = register(&mut state, "seller", "seller.testnet");
         let (_other_id, other) = register(&mut state, "seated", "seated.testnet");
         bind_book(&mut state, &seller_id, "seller.testnet");
+        state.book.passports.push(agents::Passport {
+            passport_id: "ppt_seated".into(),
+            token_id: Some("test_seated".into()),
+            agent_id: _other_id.clone(),
+            owner_near: "seated.testnet".into(),
+            creator_near: "seated.testnet".into(),
+            status: "active".into(),
+            created_unix: NOW,
+            updated_unix: NOW,
+            last_sync_seq: 0,
+            career: None,
+        });
         let wrote = call(
             &mut state,
             "POST",
