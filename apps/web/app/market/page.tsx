@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AgentPortrait } from "@/components/SkinPreview";
+import { PortraitStill } from "@/components/PortraitStill";
 import {
   accountFromStorage,
   listedOffer,
@@ -165,7 +165,7 @@ export default function MarketPage() {
               <article key={`${row.contract}:${row.tokenId}`} className="market-card" style={{ borderColor: frame }}>
                 <a href={`/passports/${encodeURIComponent(row.tokenId)}`}>
                   <span className="passport-frame" style={{ borderColor: frame }}>
-                    <AgentPortrait traits={defaultSkin(row.tokenId)} />
+                    <PortraitStill traits={defaultSkin(row.tokenId)} />
                   </span>
                   <span className="market-foot">
                     <strong>{row.tokenId}</strong>
