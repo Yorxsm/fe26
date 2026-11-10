@@ -2150,9 +2150,37 @@ button.pronounce:focus-visible {
 .passport-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .passport-tabs button { min-height: 44px; }
 .passport-tabs button[aria-selected="true"] { outline: 2px solid var(--line); }
-.passport-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
-.passport-card { color: inherit; text-decoration: none; display: grid; gap: 6px; }
-.passport-card h2 { overflow-wrap: anywhere; }
+.market-board { align-content: start; }
+.market-head h1 { margin-bottom: 0; }
+.market-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: var(--space-sm); }
+.market-stats p { margin: 0; display: grid; gap: 2px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.market-filters { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: flex-end; }
+.market-filters select { min-height: 44px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.market-grid { display: grid; gap: var(--space-md); grid-template-columns: 1fr; }
+.market-card { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.market-card:hover { border-color: var(--ink-secondary); }
+.market-card > a { color: inherit; text-decoration: none; display: grid; gap: 8px; }
+.market-foot { display: grid; gap: 4px; }
+.tier-badge { justify-self: start; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.passport-frame { display: block; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; border: 2px solid var(--line); background: #0a0a0b; }
+.passport-frame.hero { width: min(22rem, 100%); }
+.passport-portrait { width: 100%; height: 100%; display: block; pointer-events: none; }
+.market-skel { display: block; background: var(--surface-raised); border-radius: 8px; }
+.market-skel.art { aspect-ratio: 3 / 4; }
+.market-skel.line { height: 14px; margin: 12px; }
+.market-skel.stat { height: 64px; }
+@media (min-width: 720px) {
+  .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .market-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1400px) {
+  .market-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.passport-detail { justify-items: center; }
+.passport-facts { width: min(40rem, 100%); }
+.passport-facts a { overflow-wrap: anywhere; }
 .nav-toggle { display: none; }
 .site-foot {
   margin-top: var(--space-xl);

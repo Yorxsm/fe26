@@ -1,83 +1,79 @@
+import { AgentPortrait } from "@/components/SkinPreview";
+import { passportDetail, tierFrame, type CareerNumbers } from "@/lib/passports";
+import { defaultSkin } from "@/lib/skin";
+
 export const dynamic = "force-dynamic";
 
-type PublicRecord = {
-  status: string | null;
-  ownerNear: string | null;
-  count: number | null;
-  updated: string | null;
-  tier: string | null;
-  hash: string | null;
-  version: number | null;
-  contract: string | null;
-  xp: number | null;
-};
-
-const EMPTY: PublicRecord = {
-  status: null,
-  ownerNear: null,
-  count: null,
-  updated: null,
-  tier: null,
-  hash: null,
-  version: null,
-  contract: null,
-  xp: null,
-};
-
-function publicRecord(body: unknown): PublicRecord {
-  if (!body || typeof body !== "object") return EMPTY;
-  const passport = (body as { passport?: unknown }).passport;
-  if (!passport || typeof passport !== "object") return EMPTY;
-  const row = passport as Record<string, unknown>;
-  return {
-    status: typeof row.status === "string" ? row.status : null,
-    ownerNear: typeof row.ownerNear === "string" ? row.ownerNear : null,
-    count: typeof row.strategyVersionCount === "number" ? row.strategyVersionCount : null,
-    updated: typeof row.strategyUpdatedAt === "string" ? row.strategyUpdatedAt : null,
-    tier: typeof row.tier === "string" ? row.tier : null,
-    hash: typeof row.strategyHash === "string" ? row.strategyHash : null,
-    version: typeof row.strategyVersion === "number" ? row.strategyVersion : null,
-    contract: typeof (body as { contract?: unknown }).contract === "string" ? (body as { contract: string }).contract : null,
-    xp: typeof (row.onchainCareer as { xp?: unknown } | undefined)?.xp === "number" ? (row.onchainCareer as { xp: number }).xp : null,
-  };
+function careerBits(career: CareerNumbers | null): Array<[string, number]> {
+  if (!career) return [];
+  const fields: Array<[string, number | undefined]> = [
+    ["XP", career.xp],
+    ["Wins", career.wins],
+    ["Draws", career.draws],
+    ["Losses", career.losses],
+    ["Matches", career.matches],
+  ];
+  return fields.filter((entry): entry is [string, number] => typeof entry[1] === "number");
 }
 
 export default async function PassportPage({ params }: { params: Promise<{ tokenId: string }> }) {
   const { tokenId } = await params;
   const base = process.env.NEXT_PUBLIC_FE2VI_API_URL?.replace(/\/$/, "") || "https://api.fe2vi.space";
-  let record = EMPTY;
+  let record = passportDetail(null);
   let note = "The public passport record did not load.";
   try {
     const response = await fetch(`${base}/v1/passports/${encodeURIComponent(tokenId)}`, { cache: "no-store" });
     if (response.ok) {
-      record = publicRecord(await response.json());
-      note = "This page shows the public count only. The playbook stays with the bound owner.";
+      record = passportDetail(await response.json());
+      note = "Public passport record. The playbook stays with the bound owner.";
     } else if (response.status === 404) {
       note = "No passport with that token id is in the arena book.";
     }
   } catch {
     note = "The public passport record did not load.";
   }
+  const career = careerBits(record.career);
+  const onchain = careerBits(record.onchainCareer);
 
   return (
-    <main className="board">
+    <main className="board passport-detail">
       <h1>{tokenId}</h1>
       <p className="lede">{note}</p>
-      <section className="card">
-        <h2>Strategy</h2>
-        <p>{record.count === null ? "No strategy version count is on this record." : `${record.count} versions.`}</p>
-        <p className="meta">{record.updated ? `Last updated ${record.updated}.` : "No strategy update is recorded."}</p>
-        <p className="meta">
-          {record.status ?? "Status unavailable"}
-          {record.ownerNear ? ` · ${record.ownerNear}` : ""}
-          {record.tier ? ` · ${record.tier}` : ""}
-          {record.xp === null ? "" : ` · ${record.xp} xp`}
-        </p>
-        <p className="meta">
-          {record.version === null ? "No on-chain playbook version." : `On-chain playbook v${record.version}.`}
-          {record.hash ? ` ${record.hash}` : ""}
-        </p>
-        {record.contract ? <p className="meta">{record.contract}</p> : null}
+      <span className="passport-frame hero" style={{ borderColor: tierFrame(record.tier) }}>
+        <AgentPortrait traits={defaultSkin(tokenId)} large />
+      </span>
+      <section className="card passport-facts">
+        {record.owner ? <p>Owner {record.owner}</p> : null}
+        {record.contract ? (
+          <p>
+            Contract{" "}
+            {record.contractUrl ? (
+              <a href={record.contractUrl}>{record.contract}</a>
+            ) : (
+              record.contract
+            )}
+          </p>
+        ) : null}
+        {record.boundAgent ? <p>Bound agent {record.boundAgent}</p> : null}
+        {record.tier ? <p>Tier {record.tier}</p> : null}
+        {career.map(([label, value]) => (
+          <p key={label}>
+            {label} {value}
+          </p>
+        ))}
+        {onchain.length ? (
+          <div>
+            <h2>On-chain career</h2>
+            {onchain.map(([label, value]) => (
+              <p key={`chain-${label}`}>
+                {label} {value}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        {record.strategyVersionCount !== null ? <p>Strategy versions {record.strategyVersionCount}</p> : null}
+        {record.strategyHash ? <p className="meta">Playbook hash {record.strategyHash}</p> : null}
+        {record.strategyUpdatedAt ? <p className="meta">Updated {record.strategyUpdatedAt}</p> : null}
       </section>
     </main>
   );

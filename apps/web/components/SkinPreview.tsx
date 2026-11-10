@@ -1,7 +1,7 @@
 "use client";
 
 import { OrbitControls, PerformanceMonitor, useGLTF } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
@@ -21,7 +21,46 @@ function sourceName(node: Object3D): string {
 
 useGLTF.preload("/models/agent.glb", false, true);
 
-function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
+function fitCamera(camera: THREE.PerspectiveCamera, root: THREE.Object3D, aspect: number) {
+  const box = new THREE.Box3();
+  let found = false;
+  root.updateWorldMatrix(true, true);
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.visible) return;
+    box.expandByObject(mesh);
+    found = true;
+  });
+  if (!found || box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const fov = (camera.fov * Math.PI) / 180;
+  const distY = size.y / 2 / Math.tan(fov / 2);
+  const distX = size.x / 2 / Math.tan(fov / 2) / Math.max(aspect, 0.2);
+  const dist = Math.max(distY, distX, 0.4) * 1.28;
+  camera.position.set(center.x, center.y, center.z + dist);
+  camera.near = Math.max(0.01, dist / 80);
+  camera.far = dist * 24;
+  camera.lookAt(center);
+  camera.updateProjectionMatrix();
+}
+
+function FitCamera({ root }: { root: THREE.Object3D }) {
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const fitted = useRef(0);
+  useLayoutEffect(() => {
+    fitted.current = 0;
+  }, [root, size]);
+  useFrame(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera) || fitted.current > 2) return;
+    fitCamera(camera, root, size.width / Math.max(size.height, 1));
+    fitted.current += 1;
+  });
+  return null;
+}
+
+function PreviewMesh({ traits, mood, fit }: { traits: SkinTraits; mood: Mood; fit?: boolean }) {
   const gltf = useGLTF("/models/agent.glb", false, true);
   const scene = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
@@ -85,7 +124,38 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
     });
   });
 
-  return <primitive object={scene} />;
+  return (
+    <>
+      <primitive object={scene} />
+      {fit ? <FitCamera root={scene} /> : null}
+    </>
+  );
+}
+
+export function AgentPortrait({ traits, large }: { traits: SkinTraits; large?: boolean }) {
+  const [ready, setReady] = useState(true);
+  if (!ready) return <p className="meta">WebGL is unavailable in this browser.</p>;
+  return (
+    <Canvas
+      className={large ? "passport-portrait hero" : "passport-portrait"}
+      dpr={1}
+      camera={{ position: [0.9, 0.72, 2.35], fov: 26, near: 0.08, far: 24 }}
+      gl={{ antialias: false, alpha: false, powerPreference: "default", failIfMajorPerformanceCaveat: false }}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener("webglcontextlost", (event) => {
+          event.preventDefault();
+          setReady(false);
+        });
+      }}
+    >
+      <color attach="background" args={["#0a0a0b"]} />
+      <hemisphereLight args={["#8ea0d4", "#2a2018", 0.55]} />
+      <ambientLight intensity={0.2} color="#4a4036" />
+      <directionalLight position={[2.2, 2.4, 2.4]} intensity={1.1} color="#ffc49a" />
+      <pointLight position={[0.4, 1.2, 1.4]} color="#ffb060" intensity={6} distance={6} decay={2} />
+      <PreviewMesh traits={traits} mood="trait" fit />
+    </Canvas>
+  );
 }
 
 export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mood?: Mood }) {
