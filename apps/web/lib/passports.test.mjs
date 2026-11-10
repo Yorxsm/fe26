@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accountFromStorage, listedOffer, passportDetail, priceFor, recordLine, splitByOwner, testnetAccountUrl, tierFrame } from "./passports.ts";
+import { accountFromStorage, listedOffer, marketStats, passportDetail, priceFor, recordLine, sortMarket, splitByOwner, testnetAccountUrl, tierFrame } from "./passports.ts";
 import { defaultSkin } from "./skin.ts";
 
 test("a connected testnet account is read from wallet storage", () => {
@@ -31,6 +31,18 @@ test("a token keeps one map skin and a tier uses the map palette", () => {
   assert.equal(tierFrame("Silver"), "#d5d8de");
   assert.equal(tierFrame("Rookie"), "#3a3a3e");
   assert.equal(tierFrame(null), "#3a3a3e");
+});
+
+test("market stats and sort use only real asks", () => {
+  const rows = [
+    { tokenId: "rec_001", career: { xp: 30 } },
+    { tokenId: "disp_001", career: { xp: 0 } },
+  ];
+  const listings = [{ tokenId: "disp_001", priceNear: "1", priceYocto: "1", listed: true }];
+  assert.deepEqual(marketStats(rows, []), { total: 2, listed: 0, floor: null });
+  assert.deepEqual(marketStats(rows, listings), { total: 2, listed: 1, floor: "1" });
+  assert.deepEqual(sortMarket(rows, listings, "xp").map((row) => row.tokenId), ["rec_001", "disp_001"]);
+  assert.deepEqual(sortMarket(rows, listings, "price").map((row) => row.tokenId), ["disp_001", "rec_001"]);
 });
 
 test("a price is attached only from a real market ask", () => {

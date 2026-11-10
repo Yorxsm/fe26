@@ -43,6 +43,48 @@ export function listedOffer(
   return { priceNear: row.priceNear, priceYocto: row.priceYocto ?? null };
 }
 
+export function marketStats(
+  rows: Array<{ tokenId: string }>,
+  listings: Array<{ tokenId?: string; priceNear?: string | null; priceYocto?: string | null; listed?: boolean }>,
+): { total: number; listed: number; floor: string | null } {
+  let listed = 0;
+  let floor: string | null = null;
+  let floorValue = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    const offer = listedOffer(row.tokenId, listings);
+    if (!offer) continue;
+    listed += 1;
+    const value = Number(offer.priceNear);
+    if (!Number.isFinite(value) || value >= floorValue) continue;
+    floorValue = value;
+    floor = offer.priceNear;
+  }
+  return { total: rows.length, listed, floor: listed > 0 ? floor : null };
+}
+
+export type MarketSort = "id" | "xp" | "price";
+
+export function sortMarket<T extends { tokenId: string; career?: CareerNumbers | null }>(
+  rows: T[],
+  listings: Array<{ tokenId?: string; priceNear?: string | null; priceYocto?: string | null; listed?: boolean }>,
+  sort: MarketSort,
+): T[] {
+  return [...rows].sort((left, right) => {
+    if (sort === "xp") {
+      const delta = (right.career?.xp ?? -1) - (left.career?.xp ?? -1);
+      if (delta !== 0) return delta;
+    }
+    if (sort === "price") {
+      const leftOffer = listedOffer(left.tokenId, listings);
+      const rightOffer = listedOffer(right.tokenId, listings);
+      const leftValue = leftOffer ? Number(leftOffer.priceNear) : Number.POSITIVE_INFINITY;
+      const rightValue = rightOffer ? Number(rightOffer.priceNear) : Number.POSITIVE_INFINITY;
+      if (leftValue !== rightValue) return leftValue - rightValue;
+    }
+    return left.tokenId.localeCompare(right.tokenId);
+  });
+}
+
 export function recordLine(career: CareerNumbers | null | undefined): string | null {
   if (!career) return null;
   const parts: string[] = [];
