@@ -47,7 +47,7 @@ test("market stats and sort use only real asks", () => {
 
 test("a price is attached only from a real market ask", () => {
   const listings = [{ tokenId: "disp_001", priceNear: "1", priceYocto: "1000000000000000000000000", listed: true }];
-  assert.deepEqual(listedOffer("disp_001", listings), { priceNear: "1", priceYocto: "1000000000000000000000000" });
+  assert.deepEqual(listedOffer("disp_001", listings), { priceNear: "1", priceYocto: "1000000000000000000000000", market: null });
   assert.equal(listedOffer("rec_001", listings), null);
   assert.equal(listedOffer("disp_001", [{ tokenId: "disp_001", priceNear: "1", listed: false }]), null);
 });

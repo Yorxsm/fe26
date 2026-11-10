@@ -59,6 +59,9 @@ pub struct ArenaState {
     /// Worker var `FE2VI_ESCROW_ID`.
     #[serde(skip)]
     pub escrow_contract: String,
+    /// Persisted settle, career, and playbook jobs. One row per match step.
+    #[serde(default)]
+    pub chain_jobs: Vec<crate::auto_settle::ChainJob>,
 }
 
 impl Default for ArenaState {
@@ -81,6 +84,7 @@ impl Default for ArenaState {
             passport_contract: String::new(),
             market_contract: String::new(),
             escrow_contract: String::new(),
+            chain_jobs: Vec::new(),
         }
     }
 }

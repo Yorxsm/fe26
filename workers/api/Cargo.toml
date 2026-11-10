@@ -20,6 +20,12 @@ aes-gcm = { version = "0.10", default-features = false, features = ["aes", "allo
 k256 = { version = "0.13", features = ["ecdsa"] }
 sha3 = "0.10"
 base64 = "0.22"
+bs58 = "0.5"
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+near-crypto = "=0.28.0"
+near-primitives = "=0.28.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = { version = "=0.8.6", default-features = false }
