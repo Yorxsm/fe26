@@ -3278,6 +3278,7 @@ fn openapi() -> String {
                 "get": { "operationId": "readPassportStrategy", "security": [{ "bearer": [] }] },
                 "post": { "operationId": "appendPassportStrategy", "security": [{ "bearer": [] }] }
             },
+            "/v1/passports": { "get": { "operationId": "passports" } },
             "/v1/passports/{tokenId}": { "get": { "operationId": "passport" } },
             "/v1/arenas": { "get": { "operationId": "arenas" } },
             "/v1/arenas/{arenaId}": { "get": { "operationId": "arena" } },

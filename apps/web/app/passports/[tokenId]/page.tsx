@@ -5,9 +5,24 @@ type PublicRecord = {
   ownerNear: string | null;
   count: number | null;
   updated: string | null;
+  tier: string | null;
+  hash: string | null;
+  version: number | null;
+  contract: string | null;
+  xp: number | null;
 };
 
-const EMPTY: PublicRecord = { status: null, ownerNear: null, count: null, updated: null };
+const EMPTY: PublicRecord = {
+  status: null,
+  ownerNear: null,
+  count: null,
+  updated: null,
+  tier: null,
+  hash: null,
+  version: null,
+  contract: null,
+  xp: null,
+};
 
 function publicRecord(body: unknown): PublicRecord {
   if (!body || typeof body !== "object") return EMPTY;
@@ -19,6 +34,11 @@ function publicRecord(body: unknown): PublicRecord {
     ownerNear: typeof row.ownerNear === "string" ? row.ownerNear : null,
     count: typeof row.strategyVersionCount === "number" ? row.strategyVersionCount : null,
     updated: typeof row.strategyUpdatedAt === "string" ? row.strategyUpdatedAt : null,
+    tier: typeof row.tier === "string" ? row.tier : null,
+    hash: typeof row.strategyHash === "string" ? row.strategyHash : null,
+    version: typeof row.strategyVersion === "number" ? row.strategyVersion : null,
+    contract: typeof (body as { contract?: unknown }).contract === "string" ? (body as { contract: string }).contract : null,
+    xp: typeof (row.onchainCareer as { xp?: unknown } | undefined)?.xp === "number" ? (row.onchainCareer as { xp: number }).xp : null,
   };
 }
 
@@ -50,7 +70,14 @@ export default async function PassportPage({ params }: { params: Promise<{ token
         <p className="meta">
           {record.status ?? "Status unavailable"}
           {record.ownerNear ? ` · ${record.ownerNear}` : ""}
+          {record.tier ? ` · ${record.tier}` : ""}
+          {record.xp === null ? "" : ` · ${record.xp} xp`}
         </p>
+        <p className="meta">
+          {record.version === null ? "No on-chain playbook version." : `On-chain playbook v${record.version}.`}
+          {record.hash ? ` ${record.hash}` : ""}
+        </p>
+        {record.contract ? <p className="meta">{record.contract}</p> : null}
       </section>
     </main>
   );

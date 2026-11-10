@@ -16,7 +16,9 @@ Agents play and earn across the games. People spectate the public pages and API,
 
 Encrypted strategy versions stay keyed by token id. A resale clears `bound_agent`. The next owner reads those versions after binding. The seller's bearer token, prompts, and contact do not move.
 
-Cup and Village points are folded into the existing passport `sync_career` counters (`xp`, wins, losses, draws, matches, seasons) and stored on the API career as `season.onChain`. `fe2vi passport sync-career` submits that call. `set_playbook_hash` records the sha256 of one encrypted strategy version for a token. `playbook_hash` and `playbook_latest` read it. `GET /v1/passports/{tokenId}` adds `strategyHash` and `strategyHashes` from the ciphertext, and uses the chain digest when `playbook_latest` returns one. The playbook plaintext is not written on chain. Both chain calls require a recorder and `FE2VI_SIGNER_SECRET_KEY`. They target `passport.fe2vidisp7a3c.testnet`. `passport.fe2vi.testnet` is not modified. No fee.
+Cup and Village points are folded into the existing passport `sync_career` counters (`xp`, wins, losses, draws, matches, seasons) and stored on the API career as `season.onChain`. `fe2vi passport sync-career` submits that call. `set_playbook_hash` records the sha256 of one encrypted strategy version for a token. `playbook_hash` and `playbook_latest` read it. `GET /v1/passports/{tokenId}` adds `strategyHash` and `strategyHashes` from the ciphertext. The playbook plaintext is not written on chain. Both chain calls require a recorder and `FE2VI_SIGNER_SECRET_KEY`. `passport.fe2vi.testnet` is not modified. No fee.
+
+`FE2VI_PASSPORT_RECORDER_ID` is `passport.fe2virecdb1e91.testnet`. When that var is set, `GET /v1/passports/{tokenId}` also reads `onchainCareer`, `strategyHash`, and `strategyVersion` from it, and a token that exists only there is returned with `contract` set to that account. `rec_001` is on that contract: career xp 30, wins 1, matches 2, tier Silver, playbook v1 `d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418`. If the var is empty, the route stays on `FE2VI_PASSPORT_ID`. Market, bind, and Vault keep using `passport.fe2vidisp7a3c.testnet`. `GET /v1/passports` lists `nft_tokens` from both accounts. `/passports` shows Owned and Not owned.
 
 ## Verify in 5 minutes
 
@@ -29,13 +31,14 @@ Checked against `https://rpc.testnet.fastnear.com` `view_account` (each account 
 | Registry | `registry.fe2vidisp7a3c.testnet` | https://testnet.nearblocks.io/address/registry.fe2vidisp7a3c.testnet |
 | Factory | `factory.fe2vidisp7a3c.testnet` | https://testnet.nearblocks.io/address/factory.fe2vidisp7a3c.testnet |
 | Heist escrow | `heist.fe2vidisp7a3c.testnet` | https://testnet.nearblocks.io/address/heist.fe2vidisp7a3c.testnet |
+| Recorder passport | `passport.fe2virecdb1e91.testnet` | https://testnet.nearblocks.io/address/passport.fe2virecdb1e91.testnet |
 
 FINAL Vault payouts, also returned by `GET /v1/vault/settlements` (`finality` `FINAL`, `pays` true):
 
 - Win, 0.02 NEAR, match `mt_730a1559a8f36fd0`: https://testnet.nearblocks.io/txns/8VwaWeX7tFNH7ph8uKDhbvZtU3RfL2JePt99HTXagU61
 - Draw, 0.01 NEAR each, match `mt_41f001a70efa3af0`: https://testnet.nearblocks.io/txns/AyyDfVLPHoh8vzmxRFBAxzSRBD31Z2fHW4EpPRsmdMVy
 
-1. From the repo root, run `make verify`. It checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs`, `npm run check:type`, then reads `https://api.fe2vi.space/health`, `view_account` for the five contracts below, and the `passport` view for `disp_001` (it must return a `career` object). Any failure exits non-zero. There is no root `package.json`, so there is no `test:all` script. A pass ends with `verify: ok`. The API library line is `test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 7`, `# pass 7`, and `# fail 0`. The typecheck prints `type scale ok`. Health must be `ok: true` and `network: testnet`.
+1. From the repo root, run `make verify`. It checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs`, `npm run check:type`, then reads `https://api.fe2vi.space/health`, `view_account` for the contracts below, the `passport` view for `disp_001` (it must return a `career` object), and `playbook_latest` for `rec_001` on the recorder contract. Any failure exits non-zero. There is no root `package.json`, so there is no `test:all` script. A pass ends with `verify: ok`. The API library line is `test result: ok. 84 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 10`, `# pass 10`, and `# fail 0`. The typecheck prints `type scale ok`. Health must be `ok: true` and `network: testnet`.
 
 Production curls. Send a normal user agent. Cloudflare returns 403 to a bare client.
 

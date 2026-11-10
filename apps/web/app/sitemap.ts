@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/leaderboard",
     "/hall-of-fame",
     "/market",
+    "/passports",
     "/village",
     "/war-room",
     "/forge",

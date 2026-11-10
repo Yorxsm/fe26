@@ -1102,6 +1102,107 @@ pub fn chain_passport_json(token_id: &str, view: &serde_json::Value) -> serde_js
     })
 }
 
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+fn digest_hex(value: &str) -> Option<String> {
+    let hash = value.trim();
+    if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(hash.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// Copy career and the playbook digest from a recorder-contract view.
+/// A missing or non-hex hash is left alone. Plaintext is not stored.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn merge_recorder(
+    body: &mut serde_json::Value,
+    contract_id: &str,
+    view: &serde_json::Value,
+    playbook: Option<&serde_json::Value>,
+) {
+    let career = view
+        .get("career")
+        .filter(|value| value.is_object())
+        .cloned();
+    if let Some(career) = career {
+        body["onchainCareer"] = career.clone();
+        if let Some(object) = body
+            .get_mut("passport")
+            .and_then(|value| value.as_object_mut())
+        {
+            object.insert("onchainCareer".into(), career);
+            if let Some(tier) = view.get("tier").filter(|value| value.is_string()) {
+                object.insert("tier".into(), tier.clone());
+            }
+        }
+    }
+    if let Some(playbook) = playbook {
+        let hash = playbook
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .and_then(digest_hex);
+        let version = playbook.get("version").and_then(serde_json::Value::as_u64);
+        if let Some(object) = body
+            .get_mut("passport")
+            .and_then(|value| value.as_object_mut())
+        {
+            if let Some(hash) = hash {
+                object.insert("strategyHash".into(), serde_json::json!(hash));
+            }
+            if let Some(version) = version {
+                object.insert("strategyVersion".into(), serde_json::json!(version));
+            }
+        }
+    }
+    body["contract"] = serde_json::json!(contract_id);
+}
+
+/// One row of `GET /v1/passports`, from an `nft_tokens` element.
+/// Career and tier come from the token metadata extra. The playbook is optional.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn passport_list_row(
+    contract_id: &str,
+    token: &serde_json::Value,
+    playbook: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let token_id = token.get("token_id").and_then(serde_json::Value::as_str)?;
+    if token_id.is_empty() {
+        return None;
+    }
+    let owner = token
+        .get("owner_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let extra = token
+        .pointer("/metadata/extra")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let mut row = serde_json::json!({
+        "tokenId": token_id,
+        "owner": owner,
+        "contract": contract_id,
+        "tier": extra.get("tier").cloned().unwrap_or(serde_json::Value::Null),
+        "career": extra.get("career").cloned().unwrap_or(serde_json::Value::Null),
+        "strategyHash": serde_json::Value::Null,
+        "strategyVersion": serde_json::Value::Null,
+    });
+    if let Some(playbook) = playbook {
+        if let Some(hash) = playbook
+            .get("hash")
+            .and_then(serde_json::Value::as_str)
+            .and_then(digest_hex)
+        {
+            row["strategyHash"] = serde_json::json!(hash);
+        }
+        if let Some(version) = playbook.get("version").and_then(serde_json::Value::as_u64) {
+            row["strategyVersion"] = serde_json::json!(version);
+        }
+    }
+    Some(row)
+}
+
 fn passport_json(passport: &Passport) -> serde_json::Value {
     serde_json::json!({
         "passportId": passport.passport_id,
@@ -2149,6 +2250,75 @@ mod tests {
         assert_eq!(body["passport"]["status"], "active");
         assert_eq!(body["passport"]["agentId"], "buyer.near");
         assert_eq!(body["passport"]["lastSyncSeq"], 3);
+    }
+
+    #[test]
+    fn recorder_view_adds_career_and_the_playbook_digest() {
+        let view = serde_json::json!({
+            "owner_id": "fe2virecdb1e91.testnet",
+            "career": { "xp": 30, "wins": 1, "matches": 2 },
+            "tier": "Silver"
+        });
+        let mut body = chain_passport_json("rec_001", &view);
+        body["passport"]["strategyHash"] = serde_json::json!("local");
+        merge_recorder(
+            &mut body,
+            "passport.fe2virecdb1e91.testnet",
+            &view,
+            Some(&serde_json::json!({
+                "version": 1,
+                "hash": "d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418"
+            })),
+        );
+        assert_eq!(body["onchainCareer"]["xp"], 30);
+        assert_eq!(body["passport"]["tier"], "Silver");
+        assert_eq!(body["passport"]["strategyVersion"], 1);
+        assert_eq!(
+            body["passport"]["strategyHash"],
+            "d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418"
+        );
+        assert_eq!(body["contract"], "passport.fe2virecdb1e91.testnet");
+        let mut plain = body.clone();
+        merge_recorder(
+            &mut plain,
+            "passport.fe2virecdb1e91.testnet",
+            &view,
+            Some(&serde_json::json!({"version": 2, "hash": "hold the east door"})),
+        );
+        assert_eq!(
+            plain["passport"]["strategyHash"],
+            "d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418"
+        );
+        assert_eq!(plain["passport"]["strategyVersion"], 2);
+    }
+
+    #[test]
+    fn passport_list_reads_nft_extra_and_skips_a_bad_hash() {
+        let token = serde_json::json!({
+            "token_id": "rec_001",
+            "owner_id": "fe2virecdb1e91.testnet",
+            "metadata": {
+                "extra": "{\"tier\":\"Silver\",\"career\":{\"xp\":30,\"wins\":1,\"matches\":2}}"
+            }
+        });
+        let row = passport_list_row(
+            "passport.fe2virecdb1e91.testnet",
+            &token,
+            Some(&serde_json::json!({"version": 1, "hash": "not-a-digest"})),
+        )
+        .unwrap();
+        assert_eq!(row["tokenId"], "rec_001");
+        assert_eq!(row["owner"], "fe2virecdb1e91.testnet");
+        assert_eq!(row["tier"], "Silver");
+        assert_eq!(row["career"]["xp"], 30);
+        assert!(row["strategyHash"].is_null());
+        assert_eq!(row["strategyVersion"], 1);
+        assert!(passport_list_row(
+            "passport.fe2virecdb1e91.testnet",
+            &serde_json::json!({}),
+            None
+        )
+        .is_none());
     }
 
     #[test]
