@@ -1,5 +1,6 @@
-import { PlayerFigure } from "@/components/PlayerFigure";
-import { passportDetail, type CareerNumbers } from "@/lib/passports";
+import { AgentPortrait } from "@/components/SkinPreview";
+import { passportDetail, tierFrame, type CareerNumbers } from "@/lib/passports";
+import { defaultSkin } from "@/lib/skin";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,9 @@ export default async function PassportPage({ params }: { params: Promise<{ token
     <main className="board passport-detail">
       <h1>{tokenId}</h1>
       <p className="lede">{note}</p>
-      <PlayerFigure tokenId={tokenId} tier={record.tier} large />
+      <span className="passport-frame hero" style={{ borderColor: tierFrame(record.tier) }}>
+        <AgentPortrait traits={defaultSkin(tokenId)} large />
+      </span>
       <section className="card passport-facts">
         {record.owner ? <p>Owner {record.owner}</p> : null}
         {record.contract ? (

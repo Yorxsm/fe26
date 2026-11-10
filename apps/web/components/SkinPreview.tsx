@@ -88,6 +88,32 @@ function PreviewMesh({ traits, mood }: { traits: SkinTraits; mood: Mood }) {
   return <primitive object={scene} />;
 }
 
+export function AgentPortrait({ traits, large }: { traits: SkinTraits; large?: boolean }) {
+  const [ready, setReady] = useState(true);
+  if (!ready) return <p className="meta">WebGL is unavailable in this browser.</p>;
+  return (
+    <Canvas
+      className={large ? "passport-portrait hero" : "passport-portrait"}
+      dpr={1}
+      camera={{ position: [0.9, 0.72, 2.35], fov: 26, near: 0.08, far: 24 }}
+      gl={{ antialias: false, alpha: false, powerPreference: "default", failIfMajorPerformanceCaveat: false }}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener("webglcontextlost", (event) => {
+          event.preventDefault();
+          setReady(false);
+        });
+      }}
+    >
+      <color attach="background" args={["#0a0a0b"]} />
+      <hemisphereLight args={["#8ea0d4", "#2a2018", 0.55]} />
+      <ambientLight intensity={0.2} color="#4a4036" />
+      <directionalLight position={[2.2, 2.4, 2.4]} intensity={1.1} color="#ffc49a" />
+      <pointLight position={[0.4, 1.2, 1.4]} color="#ffb060" intensity={6} distance={6} decay={2} />
+      <PreviewMesh traits={traits} mood="trait" />
+    </Canvas>
+  );
+}
+
 export function SkinPreview({ traits, mood = "trait" }: { traits: SkinTraits; mood?: Mood }) {
   const [dpr, setDpr] = useState<number | [number, number]>([1, 1.5]);
   const [ready, setReady] = useState(true);

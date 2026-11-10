@@ -17,42 +17,30 @@ export type PassportRow = {
   priceNear?: string | null;
 };
 
-const KITS: Record<string, { jersey: string; trim: string }> = {
-  rookie: { jersey: "#3a3a3e", trim: "#8b8a86" },
-  bronze: { jersey: "#8a5a32", trim: "#c94a1a" },
-  silver: { jersey: "#b7b8be", trim: "#2fb86a" },
-  gold: { jersey: "#c9a227", trim: "#8a3110" },
-  platinum: { jersey: "#d5dde3", trim: "#5f7d8c" },
-  diamond: { jersey: "#7eb6d6", trim: "#1f8a4e" },
-};
-
-const BOOTS = ["#141416", "#c94a1a", "#1f8a4e", "#5f7d8c"];
-
-export function playerSeed(tokenId: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < tokenId.length; index += 1) {
-    hash ^= tokenId.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+export function tierFrame(tier: string | null): string {
+  switch ((tier ?? "").trim().toLowerCase()) {
+    case "bronze":
+      return "#c45c26";
+    case "silver":
+      return "#d5d8de";
+    case "gold":
+      return "#d4a017";
+    case "platinum":
+      return "#e7e4dc";
+    case "diamond":
+      return "#1ec8c0";
+    default:
+      return "#3a3a3e";
   }
-  return hash >>> 0;
 }
 
-export function playerMark(tokenId: string, tier: string | null): {
-  jersey: string;
-  trim: string;
-  boots: string;
-  number: number;
-  visor: boolean;
-} {
-  const seed = playerSeed(tokenId);
-  const kit = KITS[(tier ?? "").trim().toLowerCase()] ?? KITS.rookie;
-  return {
-    jersey: kit.jersey,
-    trim: kit.trim,
-    boots: BOOTS[seed % BOOTS.length],
-    number: (seed % 99) + 1,
-    visor: (seed & 8) === 8,
-  };
+export function listedOffer(
+  tokenId: string,
+  listings: Array<{ tokenId?: string; priceNear?: string | null; priceYocto?: string | null; listed?: boolean }>,
+): { priceNear: string; priceYocto: string | null } | null {
+  const row = listings.find((item) => item.tokenId === tokenId && item.listed !== false && item.priceNear);
+  if (!row?.priceNear) return null;
+  return { priceNear: row.priceNear, priceYocto: row.priceYocto ?? null };
 }
 
 export function recordLine(career: CareerNumbers | null | undefined): string | null {

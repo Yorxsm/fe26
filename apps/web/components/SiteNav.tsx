@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { BookOpen, Crown, DoorOpen, Hammer, Home, IdCard, Map, Menu, Store, Trophy, Users, X, type LucideIcon } from "lucide-react";
+import { BookOpen, Crown, DoorOpen, Hammer, Home, Map, Menu, Store, Trophy, Users, X, type LucideIcon } from "lucide-react";
 
 const LINKS: Array<readonly [string, string, LucideIcon]> = [
   ["/#title", "Home", Home],
   ["/leaderboard", "Board", Trophy],
   ["/hall-of-fame", "Hall", Crown],
   ["/market", "Market", Store],
-  ["/passports", "Passports", IdCard],
   ["/forge", "Forge", Hammer],
   ["/village", "Village", Map],
   ["/lobby", "Lobby", DoorOpen],
@@ -27,7 +26,7 @@ export function SiteNav() {
       </button>
       <nav className={open ? "site-nav open" : "site-nav"} aria-label="Primary">
         {LINKS.map(([href, label, Icon]) => {
-          const current = href === "/#title" ? path === "/" : href.startsWith("/agents") ? path.startsWith("/agents") : path === href || path.startsWith(`${href}/`);
+          const current = href === "/#title" ? path === "/" : href === "/market" ? path === "/market" || path.startsWith("/passports") : href.startsWith("/agents") ? path.startsWith("/agents") : path === href || path.startsWith(`${href}/`);
           return (
             <a
               key={href}

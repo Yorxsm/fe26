@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accountFromStorage, passportDetail, playerMark, priceFor, recordLine, splitByOwner, testnetAccountUrl } from "./passports.ts";
+import { accountFromStorage, listedOffer, passportDetail, priceFor, recordLine, splitByOwner, testnetAccountUrl, tierFrame } from "./passports.ts";
+import { defaultSkin } from "./skin.ts";
 
 test("a connected testnet account is read from wallet storage", () => {
   const account = accountFromStorage([
@@ -24,12 +25,19 @@ test("with no account every passport stays visible in Not owned", () => {
   assert.deepEqual(claimed.other.map((row) => row.tokenId), ["disp_001"]);
 });
 
-test("the player mark is stable for a token and follows the tier", () => {
-  const first = playerMark("rec_001", "Silver");
-  assert.deepEqual(playerMark("rec_001", "Silver"), first);
-  assert.equal(first.jersey, "#b7b8be");
-  assert.equal(playerMark("rec_001", "Rookie").jersey, "#3a3a3e");
-  assert.notEqual(playerMark("disp_001", "Silver").number, first.number);
+test("a token keeps one map skin and a tier uses the map palette", () => {
+  assert.deepEqual(defaultSkin("rec_001"), defaultSkin("rec_001"));
+  assert.notDeepEqual(defaultSkin("rec_001"), defaultSkin("disp_001"));
+  assert.equal(tierFrame("Silver"), "#d5d8de");
+  assert.equal(tierFrame("Rookie"), "#3a3a3e");
+  assert.equal(tierFrame(null), "#3a3a3e");
+});
+
+test("a price is attached only from a real market ask", () => {
+  const listings = [{ tokenId: "disp_001", priceNear: "1", priceYocto: "1000000000000000000000000", listed: true }];
+  assert.deepEqual(listedOffer("disp_001", listings), { priceNear: "1", priceYocto: "1000000000000000000000000" });
+  assert.equal(listedOffer("rec_001", listings), null);
+  assert.equal(listedOffer("disp_001", [{ tokenId: "disp_001", priceNear: "1", listed: false }]), null);
 });
 
 test("a card record line uses only numbers that are present", () => {
