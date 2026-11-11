@@ -1,26 +1,35 @@
 #!/bin/sh
-# Upgrade one passport contract without resetting state, then store each
-# passport still from assets/passport-stills. The signer key is read from a
-# file path. This script never prints the key and never deploys *.fe2vi.testnet.
+# Upgrade passport.fe2virecdb1e91.testnet without resetting state.
+# The signer key is read from a file path. This script never prints the key.
+# It refuses *.fe2vi.testnet and the disposable passport.
 #
 # Required:
 #   FE2VI_SIGNER_KEY_FILE   credentials json, or a file whose first line is ed25519:...
 #   FE2VI_ACCOUNT_ID        account that is a recorder on the passport
-#   FE2VI_PASSPORT_ID       passport contract to upgrade
-#   FE2VI_MEDIA_TOKENS      gen_001..gen_050 or a comma list such as disp_001
+#   FE2VI_PASSPORT_ID       passport.fe2virecdb1e91.testnet
+#   FE2VI_MEDIA_TOKENS      gen_001..gen_050, or the tokens to upload in set mode
 # Deploy signer, when it is not the recorder (the contract account deploys its own code):
 #   FE2VI_DEPLOY_ACCOUNT    defaults to FE2VI_PASSPORT_ID
 #   FE2VI_DEPLOY_KEY_FILE   defaults to FE2VI_SIGNER_KEY_FILE when the accounts match
 # Optional:
-#   FE2VI_MEDIA_DEPOSIT     attached NEAR for every token. When unset, each call
-#                           attaches the storage cost of that still plus 0.001 NEAR.
-#                           Unused deposit is refunded. Stills are assets/passport-stills/<token>.webp.
+#   FE2VI_MEDIA_MODE        rehash (default) or set
+#                           rehash deploys code and calls rehash_token_media. No image bytes
+#                           are uploaded and no storage is written.
+#                           set uploads assets/passport-stills/<token>.webp
+#   FE2VI_SET_TOKENS        after rehash, also upload these stills (for example rec_001)
+#   FE2VI_MEDIA_DEPOSIT     attached NEAR for each set_token_media. When unset, each call
+#                           attaches that still's storage cost plus 0.001 NEAR. Excess is refunded.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 KEY_FILE=${FE2VI_SIGNER_KEY_FILE:?Set FE2VI_SIGNER_KEY_FILE to the signer key path}
 ACCOUNT=${FE2VI_ACCOUNT_ID:?Set FE2VI_ACCOUNT_ID}
 PASSPORT=${FE2VI_PASSPORT_ID:?Set FE2VI_PASSPORT_ID}
 TOKENS=${FE2VI_MEDIA_TOKENS:?Set FE2VI_MEDIA_TOKENS}
+MODE=${FE2VI_MEDIA_MODE:-rehash}
+case "$MODE" in
+  rehash|set) ;;
+  *) echo "FE2VI_MEDIA_MODE must be rehash or set" >&2; exit 1 ;;
+esac
 DEPLOY_ACCOUNT=${FE2VI_DEPLOY_ACCOUNT:-$PASSPORT}
 if [ "$DEPLOY_ACCOUNT" = "$ACCOUNT" ]; then
   DEPLOY_KEY_FILE=${FE2VI_DEPLOY_KEY_FILE:-$KEY_FILE}
@@ -47,7 +56,7 @@ home=$(mktemp -d)
 trap 'rm -rf "$home"' EXIT
 umask 077
 mkdir -p "$home/.near-credentials/testnet"
-export HOME_DIR="$home" ROOT ACCOUNT PASSPORT DEPLOY_ACCOUNT KEY_FILE DEPLOY_KEY_FILE TOKENS
+export HOME_DIR="$home" ROOT ACCOUNT PASSPORT DEPLOY_ACCOUNT KEY_FILE DEPLOY_KEY_FILE TOKENS MODE
 python3 - << 'PY'
 import os, re, sys
 accounts = [os.environ["ACCOUNT"], os.environ["PASSPORT"], os.environ["DEPLOY_ACCOUNT"]]
@@ -75,8 +84,8 @@ if not ids:
     sys.exit("no tokens")
 original = re.compile(r"(^|\.)fe2vi\.testnet$")
 for account in accounts:
-    if original.search(account):
-        sys.exit("refusing an original *.fe2vi.testnet account")
+    if original.search(account) or "fe2vidisp" in account:
+        sys.exit("refusing an original or disposable passport account")
 for token in ids:
     if not re.fullmatch(r"[A-Za-z0-9_-]{3,64}", token):
         sys.exit("bad token id")
@@ -128,19 +137,18 @@ WASM="$ROOT/target/wasm32-unknown-unknown/release/passport.wasm"
 echo "Deploying code to $PASSPORT without init. State stays."
 near contract deploy "$PASSPORT" use-file "$WASM" without-init-call network-config testnet sign-as "$DEPLOY_ACCOUNT" sign-with-keychain send
 
-STILLS="$ROOT/assets/passport-stills"
-while IFS= read -r token; do
-  [ -n "$token" ] || continue
-  still="$STILLS/$token.webp"
+set_one() {
+  token=$1
+  still="$ROOT/assets/passport-stills/$token.webp"
   [ -f "$still" ] || { echo "Missing still $still" >&2; exit 1; }
   arg="$home/$token.json"
   TOKEN_ID="$token" STILL="$still" ARG="$arg" python3 - << 'PY'
 import base64, hashlib, json, os
 raw = open(os.environ["STILL"], "rb").read()
-if not (8 * 1024 <= len(raw) <= 15 * 1024):
-    raise SystemExit(f"still {os.environ['TOKEN_ID']} is {len(raw)} bytes, expected 8-15 KB")
+if not (8 * 1024 <= len(raw) <= 20 * 1024):
+    raise SystemExit(f"still {os.environ['TOKEN_ID']} is {len(raw)} bytes, expected 8-20 KB")
 media = "data:image/webp;base64," + base64.b64encode(raw).decode("ascii")
-digest = base64.b64encode(hashlib.sha256(media.encode("ascii")).digest()).decode("ascii")
+digest = base64.b64encode(hashlib.sha256(raw).digest()).decode("ascii")
 with open(os.environ["ARG"], "w") as handle:
     json.dump(
         {"token_id": os.environ["TOKEN_ID"], "media": media, "media_hash": digest},
@@ -157,7 +165,6 @@ import sys
 media = open(sys.argv[1], "r").read()
 token = sys.argv[2]
 record = 1 + 4 + len(token) + 4 + len(media) + 40
-# One extra thousandth of a NEAR covers the trie record and is refunded if unused.
 print(f"{record / 100000 + 0.001:.5f}")
 PY
 )
@@ -167,5 +174,33 @@ PY
   near contract call-function as-transaction "$PASSPORT" set_token_media \
     json-args "$(cat "$arg")" prepaid-gas '120 Tgas' attached-deposit "$deposit NEAR" \
     sign-as "$ACCOUNT" network-config testnet sign-with-keychain send
-done < "$home/tokens"
-echo "Media stored on $PASSPORT."
+}
+
+if [ "$MODE" = "rehash" ]; then
+  python3 - "$home/tokens" "$home/rehash.json" << 'PY'
+import json, sys
+ids = [line.strip() for line in open(sys.argv[1]) if line.strip()]
+with open(sys.argv[2], "w") as handle:
+    json.dump({"token_ids": ids}, handle, separators=(",", ":"))
+print(f"rehash {len(ids)} tokens, no storage write")
+PY
+  near contract call-function as-transaction "$PASSPORT" rehash_token_media \
+    json-args "$(cat "$home/rehash.json")" prepaid-gas '250 Tgas' attached-deposit '0 NEAR' \
+    sign-as "$ACCOUNT" network-config testnet sign-with-keychain send
+  if [ -n "${FE2VI_SET_TOKENS:-}" ]; then
+    old=$IFS
+    IFS=,
+    for token in $FE2VI_SET_TOKENS; do
+      token=$(printf '%s' "$token" | tr -d ' ')
+      [ -n "$token" ] || continue
+      set_one "$token"
+    done
+    IFS=$old
+  fi
+else
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    set_one "$token"
+  done < "$home/tokens"
+fi
+echo "Done on $PASSPORT."

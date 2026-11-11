@@ -456,14 +456,17 @@ impl Passport {
         }
     }
 
-    /// Store a recorder-supplied still. The hash is sha256 of the media
-    /// string, base64, as NEP-177 requires. Extra deposit is returned.
+    /// Store a recorder-supplied still. `media_hash` is the base64 sha256 of
+    /// the decoded image bytes, per NEP-177. Extra deposit is returned.
     #[payable]
     pub fn set_token_media(&mut self, token_id: String, media: String, media_hash: Base64VecU8) {
         self.only_recorder();
         let _ = self.token_or_panic(&token_id);
         require!(valid_raster_media(&media), "media");
-        require!(env::sha256(media.as_bytes()) == media_hash.0, "media hash");
+        require!(
+            env::sha256(&image_bytes(&media)) == media_hash.0,
+            "media hash"
+        );
         let before = env::storage_usage();
         store_media(&token_id, &media);
         let grew = env::storage_usage().saturating_sub(before);
@@ -474,6 +477,27 @@ impl Passport {
         if refund > 0 {
             Promise::new(env::predecessor_account_id()).transfer(NearToken::from_yoctonear(refund));
         }
+    }
+
+    /// Recompute NEP-177 hashes from media already stored. Writes nothing.
+    pub fn rehash_token_media(&mut self, token_ids: Vec<String>) -> Vec<Base64VecU8> {
+        self.only_recorder();
+        require!(!token_ids.is_empty(), "empty batch");
+        require!(token_ids.len() <= MAX_UPDATE_BATCH, "batch too large");
+        let mut hashes = Vec::with_capacity(token_ids.len());
+        for token_id in token_ids {
+            let _ = self.token_or_panic(&token_id);
+            let Some(media) = stored_media(&token_id) else {
+                env::panic_str("media");
+            };
+            let digest = env::sha256(&image_bytes(&media));
+            env::log_str(&passport_event(
+                "media_rehash",
+                &near_sdk::serde_json::json!({ "token_id": token_id }),
+            ));
+            hashes.push(Base64VecU8(digest));
+        }
+        hashes
     }
 
     /// Record the sha256 of one encrypted strategy version. The argument is a
@@ -592,7 +616,8 @@ impl Passport {
 
     pub fn token_reference(&self, token_id: String) -> String {
         let token = self.token_or_panic(&token_id);
-        reference_json(&token_id, &token, stored_media(&token_id).as_deref())
+        let image = stored_media(&token_id).unwrap_or_else(|| format!("{token_id}.png"));
+        reference_json(&token_id, &token, Some(image.as_str()))
     }
 
     pub fn nft_payout(&self, token_id: String, balance: U128, max_len_payout: u32) -> Payout {
@@ -952,11 +977,17 @@ impl Passport {
     }
 
     fn metadata_for(&self, token_id: &str, token: &PassportToken) -> TokenMetadata {
-        let media = stored_media(token_id);
-        let document = reference_json(token_id, token, media.as_deref());
-        let media_hash = media
-            .as_ref()
-            .map(|value| Base64VecU8(env::sha256(value.as_bytes())));
+        let (media, media_hash, image) = if let Some(stored) = stored_media(token_id) {
+            let hash = Base64VecU8(env::sha256(&image_bytes(&stored)));
+            (Some(stored.clone()), Some(hash), stored)
+        } else {
+            (
+                Some(format!("{token_id}.png")),
+                None,
+                format!("{token_id}.png"),
+            )
+        };
+        let document = reference_json(token_id, token, Some(image.as_str()));
         TokenMetadata {
             title: Some(format!("fe2VI passport {token_id}")),
             description: Some(
@@ -1048,6 +1079,55 @@ fn valid_raster_media(media: &str) -> bool {
     }
     let decoded = payload.len() / 4 * 3 - pad;
     (1..=MAX_IMAGE_BYTES).contains(&decoded)
+}
+
+fn image_bytes(media: &str) -> Vec<u8> {
+    let payload = media
+        .strip_prefix("data:image/webp;base64,")
+        .or_else(|| media.strip_prefix("data:image/jpeg;base64,"))
+        .or_else(|| media.strip_prefix("data:image/png;base64,"))
+        .unwrap_or_else(|| env::panic_str("media"));
+    decode_base64(payload)
+}
+
+fn decode_base64(payload: &str) -> Vec<u8> {
+    fn value(byte: u8) -> u8 {
+        match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => 0xff,
+        }
+    }
+    let body = payload.trim_end_matches('=');
+    let bytes = body.as_bytes();
+    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
+    let mut index = 0;
+    while index + 4 <= bytes.len() {
+        let word = (u32::from(value(bytes[index])) << 18)
+            | (u32::from(value(bytes[index + 1])) << 12)
+            | (u32::from(value(bytes[index + 2])) << 6)
+            | u32::from(value(bytes[index + 3]));
+        out.push((word >> 16) as u8);
+        out.push((word >> 8) as u8);
+        out.push(word as u8);
+        index += 4;
+    }
+    let rest = bytes.len() - index;
+    if rest == 2 {
+        let word =
+            (u32::from(value(bytes[index])) << 18) | (u32::from(value(bytes[index + 1])) << 12);
+        out.push((word >> 16) as u8);
+    } else if rest == 3 {
+        let word = (u32::from(value(bytes[index])) << 18)
+            | (u32::from(value(bytes[index + 1])) << 12)
+            | (u32::from(value(bytes[index + 2])) << 6);
+        out.push((word >> 16) as u8);
+        out.push((word >> 8) as u8);
+    }
+    out
 }
 
 fn reference_json(token_id: &str, token: &PassportToken, image: Option<&str>) -> String {
@@ -1577,7 +1657,7 @@ mod tests {
         career.rank_epoch = 3;
         passport.sync_career(token.clone(), career);
         let token_view = passport.nft_token(token.clone()).unwrap();
-        assert!(token_view.metadata.media.is_none());
+        assert_eq!(token_view.metadata.media.as_deref(), Some("p_alpha.png"));
         assert!(token_view.metadata.media_hash.is_none());
         assert_eq!(
             token_view.metadata.reference.as_deref(),
@@ -1587,7 +1667,7 @@ mod tests {
         assert!(document.contains("\"tier\":\"Platinum\""));
         assert!(document.contains("\"agent\":\"agent_alpha\""));
         assert!(document.contains("\"xp\":150"));
-        assert!(!document.contains("\"image\""));
+        assert!(document.contains("\"image\":\"p_alpha.png\""));
         let view = passport.passport(token);
         assert_eq!(view.tier, "Platinum");
         assert!(view.media.is_none());
@@ -1597,7 +1677,8 @@ mod tests {
     fn recorder_stores_a_raster_still_and_checks_the_hash() {
         let (mut passport, token) = minted();
         let media = "data:image/webp;base64,AAAA".to_string();
-        let digest = env::sha256(media.as_bytes());
+        let digest = env::sha256(&[0, 0, 0]);
+        assert_ne!(digest, env::sha256(media.as_bytes()));
         let hash = Base64VecU8(digest.clone());
 
         context("owner.fe2vi.testnet", "owner.fe2vi.testnet", ONE_NEAR, 8);
@@ -1666,8 +1747,32 @@ mod tests {
         );
         assert!(passport.token_reference(token.clone()).contains(&media));
         assert_eq!(
-            passport.passport(token).media.as_deref(),
+            passport.passport(token.clone()).media.as_deref(),
             Some(media.as_str())
         );
+
+        let before = env::storage_usage();
+        let hashes = passport.rehash_token_media(vec![token.clone()]);
+        assert_eq!(env::storage_usage(), before);
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, digest);
+
+        context("owner.fe2vi.testnet", "owner.fe2vi.testnet", 0, 9);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.rehash_token_media(vec![token]);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("recorder"));
+    }
+
+    #[test]
+    fn rehash_requires_stored_media() {
+        let (mut passport, token) = minted();
+        context("recorder.fe2vi.testnet", "recorder.fe2vi.testnet", 0, 8);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.rehash_token_media(vec![token]);
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("media"));
     }
 }
