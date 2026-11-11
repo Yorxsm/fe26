@@ -14,8 +14,19 @@ export type PassportRow = {
   career: CareerNumbers | null;
   strategyHash: string | null;
   strategyVersion: number | null;
+  media?: string | null;
   priceNear?: string | null;
 };
+
+export function onchainMedia(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const media = value.trim();
+  const raster = media.startsWith("data:image/webp;base64,")
+    || media.startsWith("data:image/jpeg;base64,")
+    || media.startsWith("data:image/png;base64,");
+  if (!raster || media.length > 28 * 1024 || /[\s<]/.test(media)) return null;
+  return media;
+}
 
 export function tierFrame(tier: string | null): string {
   switch ((tier ?? "").trim().toLowerCase()) {
@@ -138,6 +149,7 @@ export type PassportDetail = {
   strategyVersionCount: number | null;
   strategyHash: string | null;
   strategyUpdatedAt: string | null;
+  media: string | null;
 };
 
 export function passportDetail(body: unknown): PassportDetail {
@@ -152,6 +164,7 @@ export function passportDetail(body: unknown): PassportDetail {
     strategyVersionCount: null,
     strategyHash: null,
     strategyUpdatedAt: null,
+    media: null,
   };
   if (!body || typeof body !== "object") return empty;
   const root = body as Record<string, unknown>;
@@ -178,6 +191,7 @@ export function passportDetail(body: unknown): PassportDetail {
     strategyVersionCount: asNumber(row.strategyVersionCount),
     strategyHash: hash,
     strategyUpdatedAt: updated,
+    media: onchainMedia(row.media),
   };
 }
 

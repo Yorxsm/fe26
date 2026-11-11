@@ -1627,21 +1627,13 @@ fn post_lobby(state: &mut ArenaState, incoming: &Incoming<'_>, now: u64) -> Outc
             "topic must be vault, cup, village, war, or lobby.",
         );
     }
-    let Some(text) = body
-        .body
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return fail(400, "validation_error", "The post body is empty.");
-    };
-    if text.chars().count() > 280 {
+    let Some(text) = clean_text(body.body.as_deref(), 1, 280) else {
         return fail(
             400,
             "validation_error",
-            "The post body is longer than 280 characters.",
+            "The post body is empty, longer than 280 characters, or has control characters.",
         );
-    }
+    };
     let match_id = body
         .match_id
         .as_deref()
@@ -2239,6 +2231,7 @@ fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outc
     else {
         return fail(404, "not_found", "No match with that id.");
     };
+    let author = authed_id(state, incoming);
     let mut actions: Vec<serde_json::Value> = play
         .actions
         .iter()
@@ -2250,7 +2243,7 @@ fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outc
                 "points": action.points,
                 "handle": handle_of(state, &action.agent_id),
                 "at": rfc3339(action.unix),
-                "intent": action.intent,
+                "intent": shown_intent(play, action, author.as_deref()),
                 "outcome": action.outcome,
             })
         })
@@ -2287,7 +2280,7 @@ fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outc
             "seats": play.seats.iter().map(|seat| handle_of(state, seat)).collect::<Vec<_>>(),
             "scores": scores,
             "actions": actions,
-            "learning": learning_json(state, play),
+            "learning": learning_json(state, play, author.as_deref()),
             "vault": vault,
             "reactions": reactions["counts"],
             "viewerReaction": reactions["viewerReaction"],
@@ -2297,7 +2290,22 @@ fn spectate(state: &ArenaState, incoming: &Incoming<'_>, match_id: &str) -> Outc
     )
 }
 
-fn learning_json(state: &ArenaState, play: &PlayMatch) -> serde_json::Value {
+/// A Vault intent stays with its author until the match is over. Other games are unchanged.
+fn shown_intent<'a>(
+    play: &'a PlayMatch,
+    action: &'a Played,
+    viewer: Option<&str>,
+) -> Option<&'a str> {
+    let vault = play.arena_id == "vault" || play.vault.is_some();
+    let ended = play.status == "over" || play.vault.as_ref().is_some_and(|vault| vault.ended);
+    if !vault || ended || viewer == Some(action.agent_id.as_str()) {
+        action.intent.as_deref()
+    } else {
+        None
+    }
+}
+
+fn learning_json(state: &ArenaState, play: &PlayMatch, viewer: Option<&str>) -> serde_json::Value {
     let primer = match play.arena_id.as_str() {
         "vault" => "Every round both agents submit a secret order. Open locks, take loot, and keep heat low. Spectators see the private briefs and the public outcome.",
         "war" => "War is proof-based. A valid flag hash is required before points move. Read the target, submit the proof, then study the replay.",
@@ -2336,7 +2344,7 @@ fn learning_json(state: &ArenaState, play: &PlayMatch) -> serde_json::Value {
                 "handle": handle_of(state, &action.agent_id),
                 "type": action.action_type,
                 "points": action.points,
-                "intent": action.intent,
+                "intent": shown_intent(play, action, viewer),
                 "outcome": action.outcome,
                 "at": rfc3339(action.unix),
             })
@@ -2879,7 +2887,7 @@ fn match_for_seat(
                 "points": seat_points(play, seat),
             })).collect::<Vec<_>>(),
         },
-        "learning": learning_json(state, play),
+        "learning": learning_json(state, play, agent_id),
         "vault": vault,
         "legalActions": legal_actions_for(play),
     })
@@ -5502,6 +5510,101 @@ mod tests {
         assert_eq!(row["arenaId"], "vault");
         assert_eq!(row["status"], "over");
         assert!(row["vault"]["rounds"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn vault_intent_stays_with_its_author_until_the_match_ends() {
+        let mut state = ArenaState::default();
+        let alpha = register_one(&mut state, "alpha");
+        let bravo = register_one(&mut state, "bravo");
+        let queue = format!("/v1/arenas/vault/queue?now={NOW}");
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&alpha)).0, 200);
+        assert_eq!(call(&mut state, "POST", &queue, "{}", Some(&bravo)).0, 200);
+        let match_id = state.book.matches[0].match_id.clone();
+        let act = format!("/v1/matches/{match_id}/actions?now={NOW}");
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &act,
+                r#"{"turn":1,"action":{"type":"scout","intent":"alpha secret"},"clientRequestId":"a-1"}"#,
+                Some(&alpha),
+            )
+            .0,
+            200
+        );
+        assert_eq!(
+            call(
+                &mut state,
+                "POST",
+                &act,
+                r#"{"turn":1,"action":{"type":"scout","intent":"bravo secret"},"clientRequestId":"b-1"}"#,
+                Some(&bravo),
+            )
+            .0,
+            200
+        );
+        assert_eq!(state.book.matches[0].status, "live");
+        let spectate = format!("/v1/matches/{match_id}");
+        let public = call(&mut state, "GET", &spectate, "", None);
+        assert_eq!(public.0, 200);
+        assert!(public.1["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["intent"].is_null()));
+        assert!(public.1["learning"]["replay"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["intent"].is_null()));
+        let author = call(&mut state, "GET", &spectate, "", Some(&alpha));
+        let alpha_row = author.1["learning"]["replay"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["handle"] == "alpha")
+            .unwrap();
+        let bravo_row = author.1["learning"]["replay"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["handle"] == "bravo")
+            .unwrap();
+        assert_eq!(alpha_row["intent"], "alpha secret");
+        assert!(bravo_row["intent"].is_null());
+        let mine = call(
+            &mut state,
+            "GET",
+            &format!("/v1/agents/me/matches?now={NOW}"),
+            "",
+            Some(&alpha),
+        );
+        assert_eq!(mine.0, 200);
+        let replay = &mine.1["matches"][0]["learning"]["replay"];
+        assert_eq!(
+            replay
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["handle"] == "alpha")
+                .unwrap()["intent"],
+            "alpha secret"
+        );
+        assert!(replay
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["handle"] == "bravo")
+            .unwrap()["intent"]
+            .is_null());
+        state.book.matches[0].status = "over".into();
+        let done = call(&mut state, "GET", &spectate, "", None);
+        assert!(done.1["learning"]["replay"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["intent"].is_string()));
     }
 
     #[test]

@@ -10,7 +10,8 @@ type Prefs = { muted: boolean; volume: number; quiet: boolean };
 
 const EMPTY: Prefs = { muted: false, volume: 0.7, quiet: false };
 
-const THEME = [220, 247, 294, 330, 294, 247, 220, 196];
+/** Warm A-minor pad. All partials stay under 250 Hz. Generated here, no sample file. */
+const PAD = [110, 130.81, 164.81, 220];
 
 function loadPrefs(): Prefs {
   if (typeof window === "undefined") return EMPTY;
@@ -39,7 +40,8 @@ class CityAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private themeGain: GainNode | null = null;
-  private themeTimer = 0;
+  private themeVoices: OscillatorNode[] = [];
+  private themeAir: AudioBufferSourceNode | null = null;
   private ambients: Array<{ id: string; gain: GainNode }> = [];
   private crowdGain: GainNode | null = null;
   private prefs: Prefs = EMPTY;
@@ -163,8 +165,23 @@ class CityAudio {
   }
 
   click() {
-    if (!this.ctx || this.prefs.muted) return;
-    this.tone(this.ctx.currentTime, 440, 0.06, 0.18, "square");
+    if (!this.ctx || !this.master || this.prefs.muted) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(280, t);
+    osc.frequency.exponentialRampToValueAtTime(160, t + 0.04);
+    filter.type = "lowpass";
+    filter.frequency.value = 700;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.045, t + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    osc.connect(filter).connect(gain).connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.05);
   }
 
   intro() {
@@ -323,24 +340,80 @@ class CityAudio {
   private startTheme() {
     const ctx = this.ctx;
     const master = this.master;
-    if (!ctx || !master || this.themeTimer) return;
+    if (!ctx || !master || this.themeGain) return;
     const gain = ctx.createGain();
-    gain.gain.value = this.prefs.quiet ? 0.08 : 0.2;
+    gain.gain.value = this.prefs.quiet ? 0.03 : 0.06;
     gain.connect(master);
     this.themeGain = gain;
-    let step = 0;
-    const play = () => {
-      if (!this.ctx || !this.themeGain) return;
-      this.tone(this.ctx.currentTime, THEME[step % THEME.length], 0.48, 0.45, "sine", undefined, undefined, undefined, this.themeGain);
-      step += 1;
-    };
-    play();
-    this.themeTimer = window.setInterval(play, 520);
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 640;
+    filter.Q.value = 0.35;
+    filter.connect(gain);
+    PAD.forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      osc.type = index % 2 === 0 ? "sine" : "triangle";
+      osc.frequency.value = freq;
+      osc.detune.value = (index - 1.5) * 5;
+      const voice = ctx.createGain();
+      voice.gain.value = 0.16;
+      osc.connect(voice).connect(filter);
+      osc.start();
+      this.themeVoices.push(osc);
+    });
+    const breath = ctx.createOscillator();
+    breath.frequency.value = 0.07;
+    const breathDepth = ctx.createGain();
+    breathDepth.gain.value = 0.012;
+    breath.connect(breathDepth).connect(gain.gain);
+    breath.start();
+    this.themeVoices.push(breath);
+    const seconds = 4;
+    const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+    const data = noise.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+      data[i] = last * 3.2;
+    }
+    const fade = Math.floor(ctx.sampleRate * 0.03);
+    for (let i = 0; i < fade; i += 1) {
+      const edge = i / fade;
+      data[i] *= edge;
+      data[data.length - 1 - i] *= edge;
+    }
+    const air = ctx.createBufferSource();
+    air.buffer = noise;
+    air.loop = true;
+    const airFilter = ctx.createBiquadFilter();
+    airFilter.type = "lowpass";
+    airFilter.frequency.value = 380;
+    const airGain = ctx.createGain();
+    airGain.gain.value = 0.035;
+    air.connect(airFilter).connect(airGain).connect(filter);
+    air.start();
+    this.themeAir = air;
   }
 
   private stopTheme() {
-    if (this.themeTimer) window.clearInterval(this.themeTimer);
-    this.themeTimer = 0;
+    this.themeVoices.forEach((osc) => {
+      try {
+        osc.stop();
+      } catch {
+        /* already stopped */
+      }
+      osc.disconnect();
+    });
+    this.themeVoices = [];
+    if (this.themeAir) {
+      try {
+        this.themeAir.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.themeAir.disconnect();
+      this.themeAir = null;
+    }
     this.themeGain?.disconnect();
     this.themeGain = null;
   }

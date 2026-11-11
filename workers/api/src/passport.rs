@@ -1095,7 +1095,7 @@ pub fn chain_passport_json(token_id: &str, view: &serde_json::Value) -> serde_js
         .get("creator")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(owner);
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "passport": {
             "passportId": serde_json::Value::Null,
             "tokenId": token_id,
@@ -1114,10 +1114,37 @@ pub fn chain_passport_json(token_id: &str, view: &serde_json::Value) -> serde_js
         },
         "marketUrl": "https://fe2vi.space/passports",
         "source": "chain",
-    })
+    });
+    stamp_media(&mut body, view.get("media"));
+    body
 }
 
 #[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+fn stamp_media(body: &mut serde_json::Value, media: Option<&serde_json::Value>) {
+    let Some(media) = onchain_media(media) else {
+        return;
+    };
+    if let Some(object) = body
+        .get_mut("passport")
+        .and_then(|value| value.as_object_mut())
+    {
+        object.insert("media".into(), serde_json::json!(media));
+    }
+}
+
+fn onchain_media(value: Option<&serde_json::Value>) -> Option<&str> {
+    let media = value.and_then(serde_json::Value::as_str)?;
+    let raster = media.starts_with("data:image/webp;base64,")
+        || media.starts_with("data:image/jpeg;base64,")
+        || media.starts_with("data:image/png;base64,");
+    if raster && media.len() <= 28 * 1024 && !media.bytes().any(|byte| byte == b' ' || byte == b'<')
+    {
+        Some(media)
+    } else {
+        None
+    }
+}
+
 fn digest_hex(value: &str) -> Option<String> {
     let hash = value.trim();
     if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1150,6 +1177,14 @@ pub fn merge_recorder(
             if let Some(tier) = view.get("tier").filter(|value| value.is_string()) {
                 object.insert("tier".into(), tier.clone());
             }
+        }
+    }
+    if let Some(media) = onchain_media(view.get("media")) {
+        if let Some(object) = body
+            .get_mut("passport")
+            .and_then(|value| value.as_object_mut())
+        {
+            object.insert("media".into(), serde_json::json!(media));
         }
     }
     if let Some(playbook) = playbook {
@@ -1203,6 +1238,9 @@ pub fn passport_list_row(
         "strategyHash": serde_json::Value::Null,
         "strategyVersion": serde_json::Value::Null,
     });
+    if let Some(media) = onchain_media(token.pointer("/metadata/media")) {
+        row["media"] = serde_json::json!(media);
+    }
     if let Some(playbook) = playbook {
         if let Some(hash) = playbook
             .get("hash")
@@ -2328,6 +2366,28 @@ mod tests {
         assert_eq!(row["career"]["xp"], 30);
         assert!(row["strategyHash"].is_null());
         assert_eq!(row["strategyVersion"], 1);
+        assert!(row.get("media").is_none());
+        let painted = serde_json::json!({
+            "token_id": "gen_005",
+            "owner_id": "fe2virecdb1e91.testnet",
+            "metadata": {
+                "media": "data:image/webp;base64,AAAA",
+                "extra": "{\"tier\":\"Rookie\"}"
+            }
+        });
+        let painted = passport_list_row("passport.fe2virecdb1e91.testnet", &painted, None).unwrap();
+        assert_eq!(painted["media"], "data:image/webp;base64,AAAA");
+        let filename = serde_json::json!({
+            "token_id": "gen_006",
+            "owner_id": "fe2virecdb1e91.testnet",
+            "metadata": { "media": "gen_006.png" }
+        });
+        assert!(
+            passport_list_row("passport.fe2virecdb1e91.testnet", &filename, None)
+                .unwrap()
+                .get("media")
+                .is_none()
+        );
         assert!(passport_list_row(
             "passport.fe2virecdb1e91.testnet",
             &serde_json::json!({}),

@@ -7,6 +7,7 @@ import {
   listedOffer,
   marketStats,
   recordLine,
+  onchainMedia,
   sortMarket,
   splitByOwner,
   tierFrame,
@@ -161,11 +162,12 @@ export default function MarketPage() {
                 )
               : null;
             const frame = tierFrame(row.tier);
+            const media = onchainMedia(row.media);
             return (
               <article key={`${row.contract}:${row.tokenId}`} className="market-card" style={{ borderColor: frame }}>
                 <a href={`/passports/${encodeURIComponent(row.tokenId)}`}>
                   <span className="passport-frame" style={{ borderColor: frame }}>
-                    <PortraitStill traits={defaultSkin(row.tokenId)} />
+                    <PortraitStill traits={defaultSkin(row.tokenId)} fallback={media} />
                   </span>
                   <span className="market-foot">
                     <strong>{row.tokenId}</strong>

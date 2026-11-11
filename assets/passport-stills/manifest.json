@@ -1,0 +1,472 @@
+{
+  "widthNote": "WebP width is chosen per token so the file lands near 8-15 KB.",
+  "storageByteCostYocto": "10000000000000000000",
+  "totalStorageBytes": 905114,
+  "totalNear": "9.05114",
+  "sideBySide": [
+    "gen_001",
+    "gen_002",
+    "gen_003"
+  ],
+  "tokens": [
+    {
+      "tokenId": "gen_001",
+      "fileBytes": 13240,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 17679,
+      "storageBytes": 17735,
+      "near": "0.17735"
+    },
+    {
+      "tokenId": "gen_002",
+      "fileBytes": 10830,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 14463,
+      "storageBytes": 14519,
+      "near": "0.14519"
+    },
+    {
+      "tokenId": "gen_003",
+      "fileBytes": 11366,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15179,
+      "storageBytes": 15235,
+      "near": "0.15235"
+    },
+    {
+      "tokenId": "gen_004",
+      "fileBytes": 14456,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19299,
+      "storageBytes": 19355,
+      "near": "0.19355"
+    },
+    {
+      "tokenId": "gen_005",
+      "fileBytes": 15032,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20067,
+      "storageBytes": 20123,
+      "near": "0.20123"
+    },
+    {
+      "tokenId": "gen_006",
+      "fileBytes": 11520,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15383,
+      "storageBytes": 15439,
+      "near": "0.15439"
+    },
+    {
+      "tokenId": "gen_007",
+      "fileBytes": 14116,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18847,
+      "storageBytes": 18903,
+      "near": "0.18903"
+    },
+    {
+      "tokenId": "gen_008",
+      "fileBytes": 12308,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 16435,
+      "storageBytes": 16491,
+      "near": "0.16491"
+    },
+    {
+      "tokenId": "gen_009",
+      "fileBytes": 11918,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15915,
+      "storageBytes": 15971,
+      "near": "0.15971"
+    },
+    {
+      "tokenId": "gen_010",
+      "fileBytes": 11248,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15023,
+      "storageBytes": 15079,
+      "near": "0.15079"
+    },
+    {
+      "tokenId": "gen_011",
+      "fileBytes": 13658,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18235,
+      "storageBytes": 18291,
+      "near": "0.18291"
+    },
+    {
+      "tokenId": "gen_012",
+      "fileBytes": 14780,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19731,
+      "storageBytes": 19787,
+      "near": "0.19787"
+    },
+    {
+      "tokenId": "gen_013",
+      "fileBytes": 12006,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 16031,
+      "storageBytes": 16087,
+      "near": "0.16087"
+    },
+    {
+      "tokenId": "gen_014",
+      "fileBytes": 11352,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15159,
+      "storageBytes": 15215,
+      "near": "0.15215"
+    },
+    {
+      "tokenId": "gen_015",
+      "fileBytes": 14728,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19663,
+      "storageBytes": 19719,
+      "near": "0.19719"
+    },
+    {
+      "tokenId": "gen_016",
+      "fileBytes": 13600,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18159,
+      "storageBytes": 18215,
+      "near": "0.18215"
+    },
+    {
+      "tokenId": "gen_017",
+      "fileBytes": 13980,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18663,
+      "storageBytes": 18719,
+      "near": "0.18719"
+    },
+    {
+      "tokenId": "gen_018",
+      "fileBytes": 12964,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 17311,
+      "storageBytes": 17367,
+      "near": "0.17367"
+    },
+    {
+      "tokenId": "gen_019",
+      "fileBytes": 14858,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19835,
+      "storageBytes": 19891,
+      "near": "0.19891"
+    },
+    {
+      "tokenId": "gen_020",
+      "fileBytes": 11228,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 14995,
+      "storageBytes": 15051,
+      "near": "0.15051"
+    },
+    {
+      "tokenId": "gen_021",
+      "fileBytes": 11346,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15151,
+      "storageBytes": 15207,
+      "near": "0.15207"
+    },
+    {
+      "tokenId": "gen_022",
+      "fileBytes": 10730,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 14331,
+      "storageBytes": 14387,
+      "near": "0.14387"
+    },
+    {
+      "tokenId": "gen_023",
+      "fileBytes": 15026,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20059,
+      "storageBytes": 20115,
+      "near": "0.20115"
+    },
+    {
+      "tokenId": "gen_024",
+      "fileBytes": 11400,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15223,
+      "storageBytes": 15279,
+      "near": "0.15279"
+    },
+    {
+      "tokenId": "gen_025",
+      "fileBytes": 12072,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 16119,
+      "storageBytes": 16175,
+      "near": "0.16175"
+    },
+    {
+      "tokenId": "gen_026",
+      "fileBytes": 11662,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15575,
+      "storageBytes": 15631,
+      "near": "0.15631"
+    },
+    {
+      "tokenId": "gen_027",
+      "fileBytes": 11440,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15279,
+      "storageBytes": 15335,
+      "near": "0.15335"
+    },
+    {
+      "tokenId": "gen_028",
+      "fileBytes": 10976,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 14659,
+      "storageBytes": 14715,
+      "near": "0.14715"
+    },
+    {
+      "tokenId": "gen_029",
+      "fileBytes": 15342,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20479,
+      "storageBytes": 20535,
+      "near": "0.20535"
+    },
+    {
+      "tokenId": "gen_030",
+      "fileBytes": 12530,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 16731,
+      "storageBytes": 16787,
+      "near": "0.16787"
+    },
+    {
+      "tokenId": "gen_031",
+      "fileBytes": 13584,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18135,
+      "storageBytes": 18191,
+      "near": "0.18191"
+    },
+    {
+      "tokenId": "gen_032",
+      "fileBytes": 15266,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20379,
+      "storageBytes": 20435,
+      "near": "0.20435"
+    },
+    {
+      "tokenId": "gen_033",
+      "fileBytes": 11948,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15955,
+      "storageBytes": 16011,
+      "near": "0.16011"
+    },
+    {
+      "tokenId": "gen_034",
+      "fileBytes": 15262,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20375,
+      "storageBytes": 20431,
+      "near": "0.20431"
+    },
+    {
+      "tokenId": "gen_035",
+      "fileBytes": 14372,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19187,
+      "storageBytes": 19243,
+      "near": "0.19243"
+    },
+    {
+      "tokenId": "gen_036",
+      "fileBytes": 14612,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19507,
+      "storageBytes": 19563,
+      "near": "0.19563"
+    },
+    {
+      "tokenId": "gen_037",
+      "fileBytes": 13318,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 17783,
+      "storageBytes": 17839,
+      "near": "0.17839"
+    },
+    {
+      "tokenId": "gen_038",
+      "fileBytes": 14644,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19551,
+      "storageBytes": 19607,
+      "near": "0.19607"
+    },
+    {
+      "tokenId": "gen_039",
+      "fileBytes": 13030,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 17399,
+      "storageBytes": 17455,
+      "near": "0.17455"
+    },
+    {
+      "tokenId": "gen_040",
+      "fileBytes": 14784,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19735,
+      "storageBytes": 19791,
+      "near": "0.19791"
+    },
+    {
+      "tokenId": "gen_041",
+      "fileBytes": 15016,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20047,
+      "storageBytes": 20103,
+      "near": "0.20103"
+    },
+    {
+      "tokenId": "gen_042",
+      "fileBytes": 13960,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18639,
+      "storageBytes": 18695,
+      "near": "0.18695"
+    },
+    {
+      "tokenId": "gen_043",
+      "fileBytes": 12614,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 16843,
+      "storageBytes": 16899,
+      "near": "0.16899"
+    },
+    {
+      "tokenId": "gen_044",
+      "fileBytes": 15142,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20215,
+      "storageBytes": 20271,
+      "near": "0.20271"
+    },
+    {
+      "tokenId": "gen_045",
+      "fileBytes": 13534,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18071,
+      "storageBytes": 18127,
+      "near": "0.18127"
+    },
+    {
+      "tokenId": "gen_046",
+      "fileBytes": 14928,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 19927,
+      "storageBytes": 19983,
+      "near": "0.19983"
+    },
+    {
+      "tokenId": "gen_047",
+      "fileBytes": 15310,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20439,
+      "storageBytes": 20495,
+      "near": "0.20495"
+    },
+    {
+      "tokenId": "gen_048",
+      "fileBytes": 13928,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18595,
+      "storageBytes": 18651,
+      "near": "0.18651"
+    },
+    {
+      "tokenId": "gen_049",
+      "fileBytes": 11632,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15535,
+      "storageBytes": 15591,
+      "near": "0.15591"
+    },
+    {
+      "tokenId": "gen_050",
+      "fileBytes": 15200,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 20291,
+      "storageBytes": 20347,
+      "near": "0.20347"
+    },
+    {
+      "tokenId": "disp_001",
+      "fileBytes": 11960,
+      "width": 300,
+      "quality": 95,
+      "mediaBytes": 15971,
+      "storageBytes": 16028,
+      "near": "0.16028"
+    }
+  ]
+}
