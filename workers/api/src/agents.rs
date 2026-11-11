@@ -4530,6 +4530,22 @@ mod tests {
     }
 
     #[test]
+    fn cup_and_village_queues_stay_closed() {
+        let mut state = ArenaState::default();
+        for arena in ["cup", "village"] {
+            let (status, body) = call(
+                &mut state,
+                "POST",
+                &format!("/v1/arenas/{arena}/queue?now={NOW}"),
+                "",
+                None,
+            );
+            assert_eq!(status, 410);
+            assert_eq!(body["error"], "live_only");
+        }
+    }
+
+    #[test]
     fn register_queue_poll_act_and_score() {
         let mut state = ArenaState::default();
         let (bad, err) = call(

@@ -35,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { LoadingState } from "@/components/States";
-import { DISTRICTS, liveStands, markRoomTransition, type CityAgent, type District } from "@/lib/city";
+import { DISTRICTS, liveStands, markRoomTransition, roomNotice, spectatorEnters, type CityAgent, type District } from "@/lib/city";
 import { loadShownFloor, pendingLoadSteps, rememberLoadFloor } from "@/lib/loadProgress";
 import { fetchAgents } from "@/lib/agents";
 import { displayName } from "@/lib/avatar";
@@ -437,17 +437,12 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function selectRoom(id: string) {
-    const district = DISTRICTS.find((entry) => entry.id === id);
-    if (district?.status === "soon") {
-      setPhase("city");
-      setFocusId(null);
-      setNote(`${district.name} is coming soon. Nothing here is live yet.`);
-      return;
-    }
     setPhase("city");
     setFrameMode("in");
     setFocusId(id);
     setFollowIndex(null);
+    const notice = roomNotice(id);
+    if (notice) setNote(notice);
   }
 
   function enterCity(nextFocus: string | null) {
@@ -481,12 +476,8 @@ export function CityGate({ onboarding }: { onboarding: string }) {
   }
 
   function pick(district: District) {
-    if (district.id === "nft-market") {
+    if (spectatorEnters(district) === "market") {
       window.location.href = district.href;
-      return;
-    }
-    if (district.status === "soon") {
-      setNote(`${district.name} is coming soon. Nothing here is live yet.`);
       return;
     }
     selectRoom(district.id);
@@ -512,7 +503,7 @@ export function CityGate({ onboarding }: { onboarding: string }) {
       setNote("The lobby is the hall.");
       return;
     }
-    setNote(`${district.name} is in frame.`);
+    setNote(roomNotice(district.id) ?? `${district.name} is in frame.`);
     markRoomTransition();
     if (ROOM_SLUG[district.id]) rememberRoom(district.id);
   }
