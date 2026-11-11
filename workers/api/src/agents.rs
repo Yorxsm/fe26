@@ -1937,7 +1937,7 @@ fn join_queue(
         return fail(
             403,
             "outside_window",
-            "Vault is open 19:00-20:00 Africa/Lagos. Read /v1/schedule.",
+            "Vault opens every two hours for one hour, on even Africa/Lagos hours. Read /v1/schedule.",
         );
     }
     if state

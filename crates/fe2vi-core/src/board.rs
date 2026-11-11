@@ -8,7 +8,11 @@ pub const SEASON_START: u64 = 1_790_812_800;
 pub const SEASON_END: u64 = 1_798_761_600;
 const DAY: u64 = 86_400;
 const DAILY_OPEN: u64 = 18 * 3600;
-const DAILY_LEN: u64 = 3600;
+/// The Vault opens every two hours for one hour, on even Africa/Lagos hours
+/// (00:00, 02:00, ... 22:00 WAT). WAT is UTC+1, so slots start on odd UTC hours.
+pub const VAULT_EVERY: u64 = 2 * 3600;
+pub const VAULT_OFFSET: u64 = 3600;
+pub const VAULT_LEN: u64 = 3600;
 const WEEKLY_LEN: u64 = 2 * 3600;
 const SEASONAL_LEN: u64 = 3 * 3600;
 
@@ -100,14 +104,16 @@ fn slot_from(kind: SlotKind, start: u64, len: u64) -> Slot {
     }
 }
 
+/// The Vault's recurring slot: the one open now, or the next one.
 pub fn daily_slot(now: u64) -> Slot {
-    let today = day_start(now) + DAILY_OPEN;
-    let start = if now < today + DAILY_LEN {
-        today
+    let shifted = now.saturating_sub(VAULT_OFFSET);
+    let current = shifted - (shifted % VAULT_EVERY) + VAULT_OFFSET;
+    let start = if now < current + VAULT_LEN {
+        current
     } else {
-        today + DAY
+        current + VAULT_EVERY
     };
-    slot_from(SlotKind::Daily, start, DAILY_LEN)
+    slot_from(SlotKind::Daily, start, VAULT_LEN)
 }
 
 fn next_weekly(now: u64) -> Slot {
@@ -793,7 +799,7 @@ caps in the rules above.
 - season: {season}
 - season_open_utc: 2026-10-01T00:00:00Z
 - season_close_utc: 2027-01-01T00:00:00Z
-- daily: 18:00Z for 60 minutes
+- daily: every 2 hours at odd UTC hours (01:00Z, 03:00Z, ... 23:00Z; even hours in Africa/Lagos) for 60 minutes
 - weekly: Monday 18:00Z for 120 minutes
 - seasonal: the first Saturday of the season, 18:00Z for 180 minutes
 "#,
@@ -884,10 +890,28 @@ mod tests {
     fn tuesday_afternoon_counts_down_to_the_daily_slot() {
         let slot = next_heist(TUESDAY_AFTERNOON);
         assert_eq!(slot.kind, SlotKind::Daily);
-        assert_eq!(countdown_secs(TUESDAY_AFTERNOON), 7200);
+        assert_eq!(countdown_secs(TUESDAY_AFTERNOON), 3600);
         assert!(!heist_live(TUESDAY_AFTERNOON));
         assert!(heist_live(slot.start_unix));
         assert_eq!(countdown_secs(slot.start_unix), 0);
+    }
+
+    #[test]
+    fn vault_opens_every_two_hours_on_even_lagos_hours() {
+        let day = day_start(TUESDAY_AFTERNOON);
+        for hour in 0..24u64 {
+            let at = day + hour * 3600 + 30 * 60;
+            let open = daily_slot(at);
+            let lagos_hour = (hour + 1) % 24;
+            assert_eq!(slot_open(at, open), lagos_hour % 2 == 0, "UTC hour {hour}");
+            assert_eq!((open.start_unix / 3600 + 1) % 2, 0);
+            assert_eq!(open.end_unix - open.start_unix, 3600);
+        }
+        // 23:00 UTC is 00:00 WAT the next day.
+        let late = day + 23 * 3600 + 10;
+        assert_eq!(daily_slot(late).start_unix, day + 23 * 3600);
+        let closed = day + 22 * 3600 + 10;
+        assert_eq!(daily_slot(closed).start_unix, day + 23 * 3600);
     }
 
     #[test]
@@ -993,7 +1017,7 @@ mod tests {
 
     #[test]
     fn monday_evening_opens_the_daily_and_weekly_slots() {
-        let monday_evening = 4 * super::DAY + 18 * 3600 + 30 * 60;
+        let monday_evening = 4 * super::DAY + 19 * 3600 + 30 * 60;
         let open = open_slots(monday_evening);
         assert_eq!(open.len(), 2);
         assert!(open.iter().any(|slot| slot.kind == SlotKind::Daily));
