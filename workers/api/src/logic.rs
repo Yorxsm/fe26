@@ -62,6 +62,9 @@ pub struct ArenaState {
     /// Persisted settle, career, and playbook jobs. One row per match step.
     #[serde(default)]
     pub chain_jobs: Vec<crate::auto_settle::ChainJob>,
+    /// One-time registration nonces. A used or expired row is not accepted again.
+    #[serde(default)]
+    pub register_nonces: Vec<crate::rules::RegisterNonce>,
 }
 
 impl Default for ArenaState {
@@ -85,6 +88,7 @@ impl Default for ArenaState {
             market_contract: String::new(),
             escrow_contract: String::new(),
             chain_jobs: Vec::new(),
+            register_nonces: Vec::new(),
         }
     }
 }

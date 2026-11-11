@@ -63,7 +63,7 @@ FE2VI_RECORDER_ACCOUNT = "fe2virecdb1e91.testnet"
 FE2VI_PASSPORT_MARKET_ID = "market.fe2vidisp7a3c.testnet"
 FE2VI_ESCROW_ID = "heist.fe2vidisp7a3c.testnet"
 # off | warn | on. Keep off until legacy agents have passports.
-FE2VI_PASSPORT_GATE = "off"
+FE2VI_PASSPORT_GATE = "on"
 # Launch stock is pre-minted and listed at 1 NEAR. Agents buy, not mint.
 FE2VI_PASSPORT_MINT = "off"
 # FE2VI_PASSPORT_RELAY_KEY is a secret: `wrangler secret put FE2VI_PASSPORT_RELAY_KEY`.

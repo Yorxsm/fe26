@@ -9,18 +9,18 @@ use crate::logic::{json, query_now, ArenaState, Incoming, Outcome};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PassportGate {
-    #[default]
     Off,
     Warn,
+    #[default]
     On,
 }
 
 impl PassportGate {
     pub fn parse(value: Option<&str>) -> Self {
         match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-            Some("on") => Self::On,
+            Some("off") | Some("false") | Some("0") => Self::Off,
             Some("warn") => Self::Warn,
-            _ => Self::Off,
+            _ => Self::On,
         }
     }
 }
@@ -87,11 +87,26 @@ pub fn seats_pending_chain_read(
 }
 
 pub fn active_for_agent(state: &ArenaState, agent_id: &str) -> bool {
-    state
+    let Some(passport) = state
         .book
         .passports
         .iter()
-        .any(|passport| passport.agent_id == agent_id && passport.status == "active")
+        .find(|passport| passport.agent_id == agent_id && passport.status == "active")
+    else {
+        return false;
+    };
+    let Some(player) = state
+        .book
+        .players
+        .iter()
+        .find(|player| player.agent_id == agent_id)
+    else {
+        return true;
+    };
+    match player.wallets.near_account.as_deref() {
+        Some(near) if !passport.owner_near.is_empty() => passport.owner_near == near,
+        _ => true,
+    }
 }
 
 pub fn scored(state: &ArenaState, agent_id: &str) -> bool {
@@ -105,7 +120,7 @@ pub fn require_active(state: &ArenaState, agent_id: &str) -> Option<Outcome> {
     Some(fail(
         403,
         "passport_required",
-        "Mint or buy a passport before entering a scored arena.",
+        "Buy a listed passport and bind it before playing.",
     ))
 }
 
@@ -1512,7 +1527,7 @@ mod tests {
     use super::*;
     use crate::logic::dispatch;
 
-    const NOW: u64 = 1_790_900_000;
+    const NOW: u64 = 1_791_051_000;
 
     fn call<'a>(
         state: &mut ArenaState,
