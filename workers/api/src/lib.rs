@@ -1769,22 +1769,7 @@ mod edge {
             match heist_game_present(env, &arena.chain_jobs[index].match_id).await {
                 Ok(false) => {
                     let match_id = arena.chain_jobs[index].match_id.clone();
-                    if let Some(play) = arena
-                        .book
-                        .matches
-                        .iter_mut()
-                        .find(|play| play.match_id == match_id)
-                    {
-                        if let Some(pot) = play.vault.as_mut().and_then(|vault| vault.pot.as_mut())
-                        {
-                            if !pot.settled && !pot.pays {
-                                pot.no_pot = true;
-                                pot.reason = "No on-chain pot was opened for this match, so settle_vault was not sent and nothing was paid.".to_string();
-                            }
-                        }
-                    }
-                    crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
-                    crate::auto_settle::sync_vault_jobs(arena);
+                    crate::auto_settle::record_missing_pot(arena, &match_id);
                     return;
                 }
                 Err(()) => {
