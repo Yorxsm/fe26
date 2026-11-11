@@ -148,7 +148,72 @@ pub fn queue_unbound_book_binds(state: &mut ArenaState, contract: &str) {
     }
 }
 
+/// A settle row with no transaction hash has not paid. A failed, exhausted, or
+/// legacy row is claimable again so the cron can read `get_heist`. A FINAL
+/// receipt and any stored hash stay where they are.
+pub fn reopen_unpaid_settle_jobs(state: &mut ArenaState) {
+    let pots: std::collections::HashMap<String, (bool, bool)> = state
+        .book
+        .matches
+        .iter()
+        .filter_map(|play| {
+            let pot = play.vault.as_ref()?.pot.as_ref()?;
+            let paid = pot.settled
+                || pot.pays
+                || pot.finality == "FINAL"
+                || !pot.tx_hash.trim().is_empty();
+            Some((play.match_id.clone(), (paid, pot.no_pot)))
+        })
+        .collect();
+    for job in &mut state.chain_jobs {
+        if job.kind != "settle" || !job.tx_hash.trim().is_empty() {
+            continue;
+        }
+        let Some((paid, no_pot)) = pots.get(&job.match_id) else {
+            continue;
+        };
+        if *paid || (*no_pot && job.status == "done") {
+            continue;
+        }
+        if job.status == "pending" && job.attempts < MAX_ATTEMPTS {
+            continue;
+        }
+        job.status = "pending".into();
+        job.attempts = 0;
+        job.tx_hash.clear();
+    }
+}
+
+/// `get_heist` returned null. Nothing was paid. Careers queue once the seat
+/// tokens are present. A FINAL receipt is not rewritten.
+pub fn record_missing_pot(state: &mut ArenaState, match_id: &str) {
+    let mut paid = false;
+    if let Some(pot) = state
+        .book
+        .matches
+        .iter_mut()
+        .find(|play| play.match_id == match_id)
+        .and_then(|play| play.vault.as_mut())
+        .and_then(|vault| vault.pot.as_mut())
+    {
+        paid = pot.settled || pot.pays || pot.finality == "FINAL" || !pot.tx_hash.trim().is_empty();
+        if !paid {
+            pot.no_pot = true;
+            pot.reason = "No on-chain pot was opened for this match, so settle_vault was not sent and nothing was paid.".to_string();
+        }
+    }
+    if let Some(job) = state.chain_jobs.iter_mut().find(|job| {
+        job.kind == "settle" && job.match_id == match_id && job.tx_hash.trim().is_empty()
+    }) {
+        mark_done(job);
+    }
+    if !paid {
+        sync_vault_jobs(state);
+    }
+}
+
 pub fn sync_vault_jobs(state: &mut ArenaState) {
+    reopen_unpaid_settle_jobs(state);
     correct_open_results(state);
     let snaps: Vec<Snap> = state
         .book
@@ -926,6 +991,221 @@ mod tests {
             .iter()
             .filter(|job| job.kind == "career" && job.match_id == "mt_797")
             .all(|job| job.args["seatResult"] == "draw"));
+    }
+
+    #[test]
+    fn a_failed_settle_without_a_hash_is_rechecked_and_does_not_pay_twice() {
+        let account = "fe2virecdb1e91.testnet";
+        let mut win = VaultMatch::start(&["juno".into(), "rook".into()]);
+        win.ended = true;
+        for seat in &mut win.seats {
+            seat.points = if seat.agent_id == "juno" { 5 } else { 3 };
+        }
+        win.seal_vault_result(
+            "mt_2b2d",
+            &[
+                ("juno".into(), 5, Some(account.into())),
+                ("rook".into(), 3, Some(account.into())),
+            ],
+        );
+        {
+            let pot = win.pot.as_mut().unwrap();
+            pot.seat_links = vec![
+                link("juno", "gen_007", "seat-at-match-end"),
+                link("rook", "gen_008", "seat-at-match-end"),
+            ];
+        }
+        let mut state = ArenaState::default();
+        state.book.players = vec![player("juno", account), player("rook", account)];
+        state.book.matches = vec![
+            finished("mt_2b2d", win),
+            bare_match("mt_hash"),
+            bare_match("mt_final"),
+            bare_match("mt_stale"),
+            bare_match("mt_live"),
+        ];
+        {
+            let pot = state.book.matches[2]
+                .vault
+                .as_mut()
+                .unwrap()
+                .pot
+                .as_mut()
+                .unwrap();
+            pot.settled = true;
+            pot.pays = true;
+            pot.finality = "FINAL".into();
+            pot.tx_hash = "final_receipt".into();
+        }
+        state.chain_jobs = vec![
+            settle_job("mt_2b2d", "failed", 5, ""),
+            settle_job("mt_hash", "failed", 5, "abc"),
+            settle_job("mt_final", "failed", 5, ""),
+            settle_job("mt_stale", "broadcasting", 5, ""),
+            settle_job("mt_live", "pending", 2, ""),
+        ];
+        state.chain_jobs[0].status = "error".into();
+        sync_vault_jobs(&mut state);
+        let reopened = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_2b2d")
+            .unwrap();
+        assert_eq!(reopened.status, "pending");
+        assert_eq!(reopened.attempts, 0);
+        assert!(reopened.tx_hash.is_empty());
+        assert!(state.chain_jobs.iter().all(|job| job.kind != "career"));
+        assert!(
+            !state.book.matches[0]
+                .vault
+                .as_ref()
+                .unwrap()
+                .pot
+                .as_ref()
+                .unwrap()
+                .no_pot
+        );
+        let hashed = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_hash")
+            .unwrap();
+        assert_eq!(hashed.status, "failed");
+        assert_eq!(hashed.tx_hash, "abc");
+        let final_job = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_final")
+            .unwrap();
+        assert_eq!(final_job.status, "failed");
+        assert_eq!(final_job.attempts, 5);
+        let stale = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_stale")
+            .unwrap();
+        assert_eq!(stale.status, "pending");
+        assert_eq!(stale.attempts, 0);
+        let live = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_live")
+            .unwrap();
+        assert_eq!(live.status, "pending");
+        assert_eq!(live.attempts, 2);
+        record_missing_pot(&mut state, "mt_2b2d");
+        record_missing_pot(&mut state, "mt_2b2d");
+        record_missing_pot(&mut state, "mt_final");
+        let pot = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap();
+        assert!(pot.no_pot);
+        assert!(!pot.settled);
+        assert!(!pot.pays);
+        assert!(pot.tx_hash.is_empty());
+        assert_ne!(pot.finality, "FINAL");
+        let final_pot = state.book.matches[2]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap();
+        assert!(!final_pot.no_pot);
+        assert!(final_pot.settled && final_pot.pays);
+        assert_eq!(final_pot.tx_hash, "final_receipt");
+        let done = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.match_id == "mt_2b2d")
+            .unwrap();
+        assert_eq!(done.status, "done");
+        assert!(done.tx_hash.is_empty());
+        let careers: Vec<_> = state
+            .chain_jobs
+            .iter()
+            .filter(|job| job.kind == "career" && job.match_id == "mt_2b2d")
+            .collect();
+        assert_eq!(careers.len(), 2);
+        assert_eq!(
+            careers
+                .iter()
+                .find(|job| job.token_id == "gen_007")
+                .unwrap()
+                .args["seatResult"],
+            "win"
+        );
+        assert_eq!(
+            careers
+                .iter()
+                .find(|job| job.token_id == "gen_008")
+                .unwrap()
+                .args["seatResult"],
+            "loss"
+        );
+        assert_eq!(
+            state
+                .chain_jobs
+                .iter()
+                .filter(|job| job.kind == "settle" && job.match_id == "mt_2b2d")
+                .count(),
+            1
+        );
+        let view = serde_json::json!({
+            "last_sync_seq": 1,
+            "career": {"xp": 3, "wins": 1, "losses": 0, "draws": 0, "matches": 1, "heists": 0, "seasons": 0, "season_titles": 0, "best_rank": 0, "rank": 0, "rank_epoch": 0}
+        });
+        assert!(career_already_applied(&view, 1));
+        assert!(
+            career_sync_args(&view, "gen_007", "win", account, account, "win",)
+                .is_some_and(|body| body["update"]["seq"] == 2 && body["update"]["matches"] == 2)
+        );
+        let already = serde_json::json!({"last_sync_seq": 2});
+        assert!(career_already_applied(
+            &already,
+            view["last_sync_seq"].as_u64().unwrap() + 1
+        ));
+    }
+
+    fn settle_job(match_id: &str, status: &str, attempts: u32, tx_hash: &str) -> ChainJob {
+        ChainJob {
+            id: format!("settle:{match_id}"),
+            match_id: match_id.into(),
+            kind: "settle".into(),
+            token_id: String::new(),
+            status: status.into(),
+            tx_hash: tx_hash.into(),
+            attempts,
+            args: serde_json::json!({
+                "game_id": match_id,
+                "outcome": "win",
+                "winner": "fe2virecdb1e91.testnet",
+            }),
+        }
+    }
+
+    fn bare_match(match_id: &str) -> PlayMatch {
+        let mut vault = VaultMatch::start(&["juno".into()]);
+        vault.ended = true;
+        vault.seal_vault_result(
+            match_id,
+            &[("juno".into(), 1, Some("fe2virecdb1e91.testnet".into()))],
+        );
+        PlayMatch {
+            match_id: match_id.into(),
+            arena_id: "vault".into(),
+            status: "over".into(),
+            turn: 1,
+            deadline_unix: 0,
+            seats: vec!["juno".into()],
+            actions: Vec::new(),
+            created_unix: 0,
+            vault: Some(vault),
+        }
     }
 
     fn link(agent: &str, token: &str, source: &str) -> SeatTokenLink {
