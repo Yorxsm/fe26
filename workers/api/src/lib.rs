@@ -854,6 +854,9 @@ mod edge {
                     reconciled += 1;
                 }
             }
+            refresh_unbound_seat_links(&self.env, &mut arena).await;
+            let recorder = env_string(&self.env, "FE2VI_PASSPORT_RECORDER_ID");
+            crate::auto_settle::queue_unbound_book_binds(&mut arena, &recorder);
             crate::auto_settle::sync_vault_jobs(&mut arena);
             crate::auto_settle::attach_playbook_hashes(&mut arena);
             drive_chain_jobs(self, &mut arena).await;
@@ -1707,8 +1710,90 @@ mod edge {
         let method = match kind.as_str() {
             "settle" => "settle_vault",
             "playbook" => "set_playbook_hash",
+            "bind" => "bind",
             _ => "sync_career",
         };
+        if kind == "bind" {
+            let contract = arena.chain_jobs[index]
+                .args
+                .get("contract")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            if contract != receiver
+                || contract.contains("fe2vidisp")
+                || contract.ends_with(".fe2vi.testnet")
+            {
+                crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
+                return;
+            }
+            let token = arena.chain_jobs[index]
+                .args
+                .get("token_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            let agent = arena.chain_jobs[index]
+                .args
+                .get("agent_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            let rpc = env_string(env, "FE2VI_RPC_URL");
+            match rpc_view(
+                &rpc,
+                &contract,
+                "agent_token",
+                serde_json::json!({ "agent_id": agent }),
+            )
+            .await
+            {
+                Ok(value) => {
+                    let current = value.as_str().unwrap_or("").trim();
+                    if current == token {
+                        crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                        return;
+                    }
+                    if !current.is_empty() {
+                        crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
+                        return;
+                    }
+                }
+                Err(_) => {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+            }
+        }
+        if kind == "settle" {
+            match heist_game_present(env, &arena.chain_jobs[index].match_id).await {
+                Ok(false) => {
+                    let match_id = arena.chain_jobs[index].match_id.clone();
+                    if let Some(play) = arena
+                        .book
+                        .matches
+                        .iter_mut()
+                        .find(|play| play.match_id == match_id)
+                    {
+                        if let Some(pot) = play.vault.as_mut().and_then(|vault| vault.pot.as_mut())
+                        {
+                            if !pot.settled && !pot.pays {
+                                pot.no_pot = true;
+                                pot.reason = "No on-chain pot was opened for this match, so settle_vault was not sent and nothing was paid.".to_string();
+                            }
+                        }
+                    }
+                    crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);
+                    crate::auto_settle::sync_vault_jobs(arena);
+                    return;
+                }
+                Err(()) => {
+                    crate::auto_settle::mark_retry(&mut arena.chain_jobs[index]);
+                    return;
+                }
+                Ok(true) => {}
+            }
+        }
         let args = if kind == "career" {
             match crate::auto_settle::career_call_body(&arena.chain_jobs[index]) {
                 Some(body) => body.to_string().into_bytes(),
@@ -1717,6 +1802,13 @@ mod edge {
                     return;
                 }
             }
+        } else if kind == "bind" {
+            serde_json::json!({
+                "token_id": arena.chain_jobs[index].args.get("token_id").cloned().unwrap_or(serde_json::Value::Null),
+                "agent_id": arena.chain_jobs[index].args.get("agent_id").cloned().unwrap_or(serde_json::Value::Null),
+            })
+            .to_string()
+            .into_bytes()
         } else {
             arena.chain_jobs[index].args.to_string().into_bytes()
         };
@@ -2101,6 +2193,35 @@ mod edge {
         pot_yocto: u128,
     }
 
+    async fn heist_game_present(env: &Env, match_id: &str) -> Result<bool, ()> {
+        let heist = env_string(env, "FE2VI_HEIST_ID");
+        let rpc = env_string(env, "FE2VI_RPC_URL");
+        if heist.is_empty() || rpc.is_empty() {
+            return Err(());
+        }
+        let args = serde_json::json!({ "game_id": match_id });
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&args).map_err(|_| ())?);
+        let (status, text) = rpc_exchange(
+            &rpc,
+            "query",
+            serde_json::json!({
+                "request_type": "call_function",
+                "finality": "final",
+                "account_id": heist,
+                "method_name": "get_heist",
+                "args_base64": encoded,
+            }),
+        )
+        .await
+        .map_err(|_| ())?;
+        if status >= 400 {
+            return Err(());
+        }
+        let view = contract_result_text(&text).map_err(|_| ())?;
+        Ok(view.trim() != "null")
+    }
+
     async fn heist_pot_facts(feed: &SpectatorFeed, match_id: &str) -> Result<PotFacts, ()> {
         let heist = env_string(&feed.env, "FE2VI_HEIST_ID");
         let rpc = env_string(&feed.env, "FE2VI_RPC_URL");
@@ -2219,6 +2340,39 @@ mod edge {
         crate::vault::contract_pot(match_id, &view, now_ns)
     }
 
+    async fn refresh_unbound_seat_links(env: &Env, arena: &mut ArenaState) {
+        let mut agents = Vec::new();
+        for play in &arena.book.matches {
+            if play.arena_id != "vault" {
+                continue;
+            }
+            let Some(pot) = play.vault.as_ref().and_then(|vault| vault.pot.as_ref()) else {
+                continue;
+            };
+            if pot.settled || pot.pays {
+                continue;
+            }
+            for link in &pot.seat_links {
+                if link.token_id.is_empty() && !agents.iter().any(|id| id == &link.agent_id) {
+                    agents.push(link.agent_id.clone());
+                }
+            }
+        }
+        if agents.is_empty() {
+            return;
+        }
+        let reads = read_match_end_bindings(env, &agents).await;
+        for play in &mut arena.book.matches {
+            let Some(pot) = play.vault.as_mut().and_then(|vault| vault.pot.as_mut()) else {
+                continue;
+            };
+            if pot.settled || pot.pays {
+                continue;
+            }
+            crate::passport::refresh_unbound_links(&mut pot.seat_links, &reads);
+        }
+    }
+
     async fn read_match_end_bindings(
         env: &Env,
         agent_ids: &[String],
@@ -2227,7 +2381,15 @@ mod edge {
         let network = env_string(env, "FE2VI_NETWORK");
         let rpc = env_string(env, "FE2VI_RPC_URL");
         let passport = env_string(env, "FE2VI_PASSPORT_ID");
-        let blocked = passport.is_empty()
+        let recorder = env_string(env, "FE2VI_PASSPORT_RECORDER_ID");
+        let mut contracts = Vec::new();
+        if !recorder.is_empty() {
+            contracts.push(recorder);
+        }
+        if !passport.is_empty() && !contracts.iter().any(|account| account == &passport) {
+            contracts.push(passport);
+        }
+        let blocked = contracts.is_empty()
             || rpc.is_empty()
             || indexer::allow_chain_rpc(&network, &rpc).is_err();
         for agent_id in agent_ids {
@@ -2238,28 +2400,32 @@ mod edge {
                 );
                 continue;
             }
-            match rpc_view(
-                &rpc,
-                &passport,
-                "agent_token",
-                serde_json::json!({ "agent_id": agent_id }),
-            )
-            .await
-            {
-                Ok(value) => {
-                    let token = value.as_str().map(str::trim).unwrap_or("").to_string();
-                    out.insert(
-                        agent_id.clone(),
-                        crate::passport::ChainSeatBinding::Token(token),
-                    );
-                }
-                Err(_) => {
-                    out.insert(
-                        agent_id.clone(),
-                        crate::passport::ChainSeatBinding::Unverified,
-                    );
+            let mut reads = Vec::new();
+            for contract in &contracts {
+                match rpc_view(
+                    &rpc,
+                    contract,
+                    "agent_token",
+                    serde_json::json!({ "agent_id": agent_id }),
+                )
+                .await
+                {
+                    Ok(value) => {
+                        let token = value.as_str().map(str::trim).unwrap_or("").to_string();
+                        reads.push(crate::passport::AgentTokenRead::Token(token));
+                        if reads.iter().any(|read| {
+                            matches!(read, crate::passport::AgentTokenRead::Token(token) if !token.is_empty())
+                        }) {
+                            break;
+                        }
+                    }
+                    Err(_) => reads.push(crate::passport::AgentTokenRead::Failed),
                 }
             }
+            out.insert(
+                agent_id.clone(),
+                crate::passport::merge_agent_token_reads(&reads),
+            );
         }
         out
     }

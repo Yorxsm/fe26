@@ -25,14 +25,71 @@ impl PassportGate {
     }
 }
 
-/// What `agent_token` on the disposable testnet passport contract returned
-/// for one seated agent. `Token("")` means the chain shows no binding.
+/// What `agent_token` returned for one seated agent. `Token("")` means every
+/// contract that answered has no binding. A read of the wrong contract is not
+/// enough on its own.
 #[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainSeatBinding {
     Token(String),
     /// The Fastnear read failed. This seat gets no credit.
     Unverified,
+}
+
+/// One contract's `agent_token` answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub enum AgentTokenRead {
+    /// The call succeeded. An empty string is a real "not bound here".
+    Token(String),
+    Failed,
+}
+
+/// Recorder first, then the other passport contract. The first non-empty token
+/// wins. Empty answers are not a binding. Failure is unverified only when no
+/// contract answered.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn merge_agent_token_reads(reads: &[AgentTokenRead]) -> ChainSeatBinding {
+    let mut answered = false;
+    for read in reads {
+        match read {
+            AgentTokenRead::Token(token) if !token.trim().is_empty() => {
+                return ChainSeatBinding::Token(token.trim().to_string());
+            }
+            AgentTokenRead::Token(_) => answered = true,
+            AgentTokenRead::Failed => {}
+        }
+    }
+    if answered {
+        ChainSeatBinding::Token(String::new())
+    } else {
+        ChainSeatBinding::Unverified
+    }
+}
+
+/// Fill token ids that were missing at match end once `agent_token` has them.
+/// A settled pot is not rewritten.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn refresh_unbound_links(
+    links: &mut [crate::vault::SeatTokenLink],
+    reads: &std::collections::HashMap<String, ChainSeatBinding>,
+) -> bool {
+    let mut changed = false;
+    for link in links.iter_mut() {
+        if link.source == "seat-at-match-end" && !link.token_id.is_empty() {
+            continue;
+        }
+        let Some(ChainSeatBinding::Token(token)) = reads.get(&link.agent_id) else {
+            continue;
+        };
+        if token.is_empty() {
+            continue;
+        }
+        link.token_id = token.clone();
+        link.source = "seat-at-match-end".to_string();
+        changed = true;
+    }
+    changed
 }
 
 thread_local! {
@@ -953,6 +1010,7 @@ pub fn seat_links_from_chain(
                 near_account,
                 token_id,
                 source: source.to_string(),
+                result: String::new(),
             }
         })
         .collect()
@@ -991,6 +1049,7 @@ pub fn seat_token_links(
                 } else {
                     "unbound-at-match-end".to_string()
                 },
+                result: String::new(),
             }
         })
         .collect()
@@ -1015,7 +1074,8 @@ pub fn credit_passports(passports: &mut [Passport], pot: &crate::vault::PotAutho
             .career
             .clone()
             .unwrap_or_else(|| serde_json::json!({}));
-        if crate::vault::apply_receipt_to_career(&mut career, &link.near_account, pot) {
+        if crate::vault::apply_receipt_to_career(&mut career, &link.near_account, pot, &link.result)
+        {
             passport.career = Some(career);
         }
     }
@@ -2435,6 +2495,7 @@ mod tests {
                 &[("agt".into(), "ann.testnet".into())].into_iter().collect(),
                 std::slice::from_ref(&passport),
             ),
+            no_pot: false,
         };
         let stranger = Passport {
             passport_id: "other".into(),
@@ -2528,6 +2589,7 @@ mod tests {
                 amount: "9".into(),
             }],
             seat_links: links,
+            no_pot: false,
         };
         let mut book = vec![moved, rebound];
         credit_passports(&mut book, &pot);
@@ -2595,6 +2657,24 @@ mod tests {
             )])),
         );
         assert_eq!(bound[0].source, "seat-at-match-end");
+        let merged = merge_agent_token_reads(&[
+            AgentTokenRead::Token(String::new()),
+            AgentTokenRead::Token("gen_007".into()),
+        ]);
+        assert_eq!(merged, ChainSeatBinding::Token("gen_007".into()));
+        let missing = merge_agent_token_reads(&[
+            AgentTokenRead::Token(String::new()),
+            AgentTokenRead::Token(String::new()),
+        ]);
+        assert_eq!(missing, ChainSeatBinding::Token(String::new()));
+        let failed = merge_agent_token_reads(&[AgentTokenRead::Failed, AgentTokenRead::Failed]);
+        assert_eq!(failed, ChainSeatBinding::Unverified);
+        let mut links = unbound.clone();
+        let mut reads = std::collections::HashMap::new();
+        reads.insert("agt".into(), ChainSeatBinding::Token("gen_007".into()));
+        assert!(refresh_unbound_links(&mut links, &reads));
+        assert_eq!(links[0].token_id, "gen_007");
+        assert_eq!(links[0].source, "seat-at-match-end");
         assert_eq!(bound[0].token_id, "disp_ok");
         let mut state = ArenaState::default();
         state.book.matches.push(crate::agents::PlayMatch {

@@ -111,6 +111,9 @@ pub struct PotAuthorization {
     /// Token bound to each seated agent when the match ended. Empty means no credit.
     #[serde(default)]
     pub seat_links: Vec<SeatTokenLink>,
+    /// The heist contract has no game for this match, so nothing was paid.
+    #[serde(default)]
+    pub no_pot: bool,
 }
 
 /// The agent who held a seat, and the token the chain showed bound then.
@@ -123,6 +126,9 @@ pub struct SeatTokenLink {
     pub near_account: String,
     pub token_id: String,
     pub source: String,
+    /// `win`, `loss`, or `draw` for this seat. Empty on older rows.
+    #[serde(default)]
+    pub result: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -622,31 +628,25 @@ impl VaultMatch {
             self.pot = Some(pot);
             return;
         }
-        let scores: Vec<(String, i64)> = seats
-            .iter()
-            .map(|(_, score, near)| (near.clone().unwrap_or_default(), *score))
-            .collect();
-        pot.participants = scores.iter().map(|(account, _)| account.clone()).collect();
-        match fe2vi_core::vault_result_call(&scores) {
-            Ok(fe2vi_core::VaultPotCall::Win { winner }) => {
-                pot.outcome = "win".to_string();
-                pot.winner = winner;
-                pot.rule = "winner-takes-all".to_string();
-                pot.pay_rule = pot.rule.clone();
-                pot.reason = "The unique high score takes the whole testnet pot through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
-            }
-            Ok(fe2vi_core::VaultPotCall::Draw) => {
-                pot.outcome = "draw".to_string();
-                pot.rule = "equal-split".to_string();
-                pot.pay_rule = pot.rule.clone();
-                pot.reason = "Tied scores split the testnet pot equally through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
-            }
-            Ok(fe2vi_core::VaultPotCall::Cancel) | Err(_) => {
-                pot.outcome = "unmapped".to_string();
-                pot.reason = "This match has no seated result to settle.".to_string();
-            }
-        }
+        apply_seat_result(&mut pot, seats);
         self.pot = Some(pot);
+    }
+
+    /// Rewrite an unpaid result from the seat scores. A FINAL receipt is left alone.
+    pub fn correct_unsettled_result(&mut self, seats: &[(String, i64, Option<String>)]) {
+        let Some(pot) = self.pot.as_mut() else {
+            return;
+        };
+        if pot.settled || pot.pays || pot.finality == "FINAL" || pot.no_pot {
+            return;
+        }
+        if pot.settlement_method != "settle_vault" {
+            return;
+        }
+        if seats.is_empty() || seats.iter().any(|(_, _, near)| near.is_none()) {
+            return;
+        }
+        apply_seat_result(pot, seats);
     }
 
     pub fn private_json(
@@ -675,6 +675,62 @@ impl VaultMatch {
     }
 }
 
+/// A tie is a draw even when both seats share one NEAR account.
+/// The winner of a unique high score is that seat's account, not a collapsed duplicate.
+fn apply_seat_result(pot: &mut PotAuthorization, seats: &[(String, i64, Option<String>)]) {
+    let mapped = seats.iter().all(|(_, _, near)| near.is_some());
+    if seats.is_empty() || !mapped {
+        pot.outcome = "unmapped".to_string();
+        pot.winner.clear();
+        pot.reason = "A seat has no linked NEAR account, so no payee was invented.".to_string();
+        return;
+    }
+    let scores: Vec<(String, i64)> = seats
+        .iter()
+        .map(|(agent, score, _)| (agent.clone(), *score))
+        .collect();
+    pot.participants = seats
+        .iter()
+        .filter_map(|(_, _, near)| near.clone())
+        .collect();
+    match fe2vi_core::vault_result_call(&scores) {
+        Ok(fe2vi_core::VaultPotCall::Win { winner }) => {
+            let account = seats
+                .iter()
+                .find(|(agent, _, _)| agent == &winner)
+                .and_then(|(_, _, near)| near.clone())
+                .unwrap_or_default();
+            pot.outcome = "win".to_string();
+            pot.winner = account;
+            pot.rule = "winner-takes-all".to_string();
+            pot.pay_rule = pot.rule.clone();
+            pot.reason = "The unique high score takes the whole testnet pot through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
+        }
+        Ok(fe2vi_core::VaultPotCall::Draw) => {
+            pot.outcome = "draw".to_string();
+            pot.winner.clear();
+            pot.rule = "equal-split".to_string();
+            pot.pay_rule = pot.rule.clone();
+            pot.reason = "Tied scores split the testnet pot equally through factory settle_vault. Arena points are not NEAR. settled stays false until a FINAL receipt matches.".to_string();
+        }
+        Ok(fe2vi_core::VaultPotCall::Cancel) | Err(_) => {
+            pot.outcome = "unmapped".to_string();
+            pot.winner.clear();
+            pot.reason = "This match has no seated result to settle.".to_string();
+        }
+    }
+}
+
+pub fn seat_result_label(score: i64, best: i64, tied: bool) -> &'static str {
+    if tied {
+        "draw"
+    } else if score == best {
+        "win"
+    } else {
+        "loss"
+    }
+}
+
 fn stored_pot(match_id: &str) -> PotAuthorization {
     PotAuthorization {
         idempotency_key: format!("pot:{match_id}"),
@@ -694,6 +750,7 @@ fn stored_pot(match_id: &str) -> PotAuthorization {
         creator: String::new(),
         payouts: Vec::new(),
         seat_links: Vec::new(),
+        no_pot: false,
     }
 }
 
@@ -965,6 +1022,7 @@ pub fn apply_receipt_to_career(
     career: &mut serde_json::Value,
     near: &str,
     pot: &PotAuthorization,
+    seat_result: &str,
 ) -> bool {
     let near = near.trim();
     if near.is_empty()
@@ -985,11 +1043,16 @@ pub fn apply_receipt_to_career(
     if match_id.is_empty() {
         return false;
     }
-    let (wins, draws, losses) = match pot.outcome.as_str() {
-        "win" if pot.winner == near => (1_u64, 0, 0),
-        "win" => (0, 0, 1),
+    let (wins, draws, losses) = match seat_result {
+        "win" => (1_u64, 0, 0),
+        "loss" => (0, 0, 1),
         "draw" => (0, 1, 0),
-        _ => return false,
+        _ => match pot.outcome.as_str() {
+            "win" if pot.winner == near => (1_u64, 0, 0),
+            "win" => (0, 0, 1),
+            "draw" => (0, 1, 0),
+            _ => return false,
+        },
     };
     if !career.is_object() {
         *career = serde_json::json!({});
@@ -1267,6 +1330,61 @@ mod tests {
         ids.iter()
             .map(|id| ((*id).to_string(), (*id).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn a_tie_stays_a_draw_when_both_seats_share_one_account() {
+        let mut game = VaultMatch::start(&["juno".into(), "rook".into()]);
+        game.ended = true;
+        game.seal_vault_result(
+            "mt_draw",
+            &[
+                ("juno".into(), 0, Some("fe2virecdb1e91.testnet".into())),
+                ("rook".into(), 0, Some("fe2virecdb1e91.testnet".into())),
+            ],
+        );
+        let pot = game.pot.unwrap();
+        assert_eq!(pot.outcome, "draw");
+        assert!(pot.winner.is_empty());
+
+        let mut game = VaultMatch::start(&["juno".into(), "rook".into()]);
+        game.ended = true;
+        game.seal_vault_result(
+            "mt_win",
+            &[
+                ("juno".into(), 5, Some("fe2virecdb1e91.testnet".into())),
+                ("rook".into(), 3, Some("fe2virecdb1e91.testnet".into())),
+            ],
+        );
+        let pot = game.pot.unwrap();
+        assert_eq!(pot.outcome, "win");
+        assert_eq!(pot.winner, "fe2virecdb1e91.testnet");
+        assert_eq!(seat_result_label(5, 5, false), "win");
+        assert_eq!(seat_result_label(3, 5, false), "loss");
+
+        let mut game = VaultMatch::start(&["juno".into(), "rook".into()]);
+        game.ended = true;
+        let account = Some("fe2virecdb1e91.testnet".into());
+        game.seal_vault_result(
+            "mt_797",
+            &[
+                ("juno".into(), 0, account.clone()),
+                ("rook".into(), 0, account),
+            ],
+        );
+        {
+            let pot = game.pot.as_mut().unwrap();
+            pot.outcome = "win".to_string();
+            pot.winner = "fe2virecdb1e91.testnet".to_string();
+        }
+        game.correct_unsettled_result(&[
+            ("juno".into(), 0, Some("fe2virecdb1e91.testnet".into())),
+            ("rook".into(), 0, Some("fe2virecdb1e91.testnet".into())),
+        ]);
+        let pot = game.pot.unwrap();
+        assert_eq!(pot.outcome, "draw");
+        assert!(pot.winner.is_empty());
+        assert_eq!(pot.rule, "equal-split");
     }
 
     #[test]
@@ -1870,7 +1988,8 @@ mod tests {
         assert!(apply_receipt_to_career(
             &mut career,
             "ann.testnet",
-            &settled
+            &settled,
+            ""
         ));
         assert_eq!(career["vaultReceipts"]["wins"], 1);
         assert_eq!(career["vaultReceipts"]["losses"], 0);
@@ -1882,7 +2001,8 @@ mod tests {
         assert!(!apply_receipt_to_career(
             &mut career,
             "ann.testnet",
-            &settled
+            &settled,
+            ""
         ));
         assert_eq!(career["vaultReceipts"]["wins"], 1);
         let restored: serde_json::Value =
@@ -1891,17 +2011,28 @@ mod tests {
         assert!(!apply_receipt_to_career(
             &mut restarted,
             "ann.testnet",
-            &settled
+            &settled,
+            ""
         ));
         assert_eq!(restarted["vaultReceipts"]["wins"], 1);
         let mut loser = serde_json::json!({});
-        assert!(apply_receipt_to_career(&mut loser, "bob.testnet", &settled));
+        assert!(apply_receipt_to_career(
+            &mut loser,
+            "bob.testnet",
+            &settled,
+            ""
+        ));
         assert_eq!(loser["vaultReceipts"]["losses"], 1);
         assert_eq!(loser["vaultReceipts"]["payoutYocto"], "0");
         let mut open = settled.clone();
         open.settled = false;
         let mut ignored = serde_json::json!({});
-        assert!(!apply_receipt_to_career(&mut ignored, "ann.testnet", &open));
+        assert!(!apply_receipt_to_career(
+            &mut ignored,
+            "ann.testnet",
+            &open,
+            ""
+        ));
         assert!(ignored.get("vaultReceipts").is_none());
     }
 

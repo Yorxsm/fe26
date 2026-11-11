@@ -317,6 +317,9 @@ mod tests {
         let (status, json) = http(created);
         assert_eq!(status, 201, "{json}");
         assert_eq!(json["passport"]["status"], "active");
+        assert!(state.chain_jobs.iter().any(|job| {
+            job.kind == "bind" && job.token_id == "gen_001" && job.args["agent_id"].is_string()
+        }));
         set_chain(Some(ChainPassport {
             contract: "passport.fe2virecdb1e91.testnet".into(),
             owner_id: "other.testnet".into(),

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Activity } from "lucide-react";
 import { Reactions } from "@/components/Reactions";
 import { fetchMatch, fetchMatchFeed, type ArenaId, type ArenaMatch, type ArenaMatchDetail, type WarClaim } from "@/lib/arena";
+import { settlementLine } from "@/lib/settlementLine";
 import { getViewerId } from "@/lib/viewer";
 
 const LABELS: Record<ArenaId, string> = {
@@ -121,11 +122,9 @@ export function LiveMatches({ arena }: { arena: ArenaId }) {
                 <>
                   <p className="meta">
                     Result: {detail.vault.winner ? detail.vault.winner : "draw"}.{" "}
-                    {detail.vault.pot?.settled && detail.vault.pot.finality === "FINAL" && detail.vault.pot.txHash
-                      ? `Settled ${detail.vault.pot.rule || detail.vault.pot.outcome || ""}. Receipt ${detail.vault.pot.txHash}.`
-                      : detail.vault.pot
-                        ? `Not settled${detail.vault.pot.outcome ? ` (${detail.vault.pot.outcome})` : ""}. Waiting for a FINAL settle_vault receipt.`
-                        : "No settlement row on this match."}
+                    {detail.vault.pot
+                      ? settlementLine(detail.vault.pot, true)
+                      : "No settlement row on this match."}
                   </p>
                   {detail.vault.pot?.payouts && detail.vault.pot.payouts.length > 0 ? (
                     <ul className="feed">
