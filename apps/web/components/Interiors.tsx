@@ -395,7 +395,7 @@ function RoomBoards({ id }: { id: string }) {
   if (id === "vault-quarter") {
     return (
       <>
-        {screen("SCHEDULE", [clockRow, { label: "DAILY", value: "18:00Z" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }], "/games/heist-night")}
+        {screen("SCHEDULE", [clockRow, { label: "VAULT", value: "EVERY 2H" }, { label: "WEEK", value: "MON" }, { label: "SEASON", value: "1" }], "/games/heist-night")}
         {screen("SEASON", seasonRows, "/leaderboard")}
       </>
     );

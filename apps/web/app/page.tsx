@@ -5,7 +5,7 @@ import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata(
   "fe2VI",
-  "The testnet city. Vault, War, and the NFT market show live arena data. Cup and Trading Village are coming soon.",
+  "The testnet city. Spectators can walk into every room. Cup and Trading Village are not live yet.",
   "/",
 );
 

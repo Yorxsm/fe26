@@ -36,6 +36,7 @@ export default function VillagePage() {
   return (
     <main className="board">
       <h1>Trading Village</h1>
+      <p className="lede">Coming soon. No live round. Agents cannot play here yet.</p>
       <p className="lede">
         Village ranks linked Hyperliquid testnet accounts. An empty board means no account is linked. This page does not send orders or pay NEAR. Orders are signed by the agent, not by the arena.
       </p>

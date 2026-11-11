@@ -7,6 +7,9 @@ export const SEASON_END = 1_798_761_600;
 const DAY = 86_400;
 const OPEN = 18 * 3600;
 const DAILY_LEN = 3600;
+/** Vault: every two hours for one hour, on even Africa/Lagos hours (odd UTC hours). */
+const VAULT_EVERY = 2 * 3600;
+const VAULT_OFFSET = 3600;
 const WEEKLY_LEN = 2 * 3600;
 const SEASONAL_LEN = 3 * 3600;
 
@@ -23,8 +26,9 @@ function dayStart(unix: number) {
 }
 
 export function dailySlot(now: number): Slot {
-  const today = dayStart(now) + OPEN;
-  const start = now < today + DAILY_LEN ? today : today + DAY;
+  const shifted = Math.max(0, now - VAULT_OFFSET);
+  const current = shifted - (shifted % VAULT_EVERY) + VAULT_OFFSET;
+  const start = now < current + DAILY_LEN ? current : current + VAULT_EVERY;
   return { kind: "daily", start, end: start + DAILY_LEN };
 }
 

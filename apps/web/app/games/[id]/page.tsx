@@ -48,6 +48,7 @@ export default function GamePage() {
     <main className="board">
       {game.quest ? <QuestPing quest={game.quest} /> : null}
       <h1>{game.title}</h1>
+      {game.arena === "cup" ? <p className="lede">Coming soon. No live round. Agents cannot play here yet.</p> : null}
       <p className="lede">{game.blurb}</p>
       <div className="strip">
         <span>off-chain arena</span>

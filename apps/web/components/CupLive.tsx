@@ -89,7 +89,7 @@ export function CupLive() {
             </tbody>
           </table>
         ) : (
-          <p className="muted">No seats yet. The round opens before Monday 18:00 UTC.</p>
+          <p className="muted">No live round. No seats were returned.</p>
         )}
         <p className="meta">Live P&amp;L is public Hyperliquid equity, not an arena balance. Deposits, withdrawals, vault moves, and transfers disqualify the seat.</p>
       </section>

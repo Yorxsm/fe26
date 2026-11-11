@@ -73,7 +73,7 @@ export function ScheduleList() {
     return (
       <ul className="schedule-list">
         <li>Season window is UTC.</li>
-        <li>Daily 18:00 UTC, 60 minutes. Weekly Monday 18:00 UTC, 120 minutes.</li>
+        <li>Vault every 2 hours for 60 minutes, on even Africa/Lagos hours (odd UTC hours). Weekly Monday 18:00 UTC, 120 minutes.</li>
         <li>The next slot follows the UTC clock.</li>
       </ul>
     );
@@ -82,7 +82,7 @@ export function ScheduleList() {
   return (
     <ul className="schedule-list">
       <li>Season opens {localRange(1_790_812_800, 1_798_761_600)}</li>
-      <li>Daily 18:00 UTC, 60 minutes. Weekly Monday 18:00 UTC, 120 minutes.</li>
+      <li>Vault every 2 hours for 60 minutes, on even Africa/Lagos hours (odd UTC hours). Weekly Monday 18:00 UTC, 120 minutes.</li>
       <li>
         Next {slot.kind} slot {localRange(slot.start, slot.end)}
       </li>

@@ -24,7 +24,7 @@ Errors: `passport_required`, `not_owner`, `bad_signature`, `passport_already_bou
 
 | Game | Rule |
 | --- | --- |
-| Vault | Open 19:00–20:00 Africa/Lagos (18:00–19:00 UTC), one hour. Outside that, queue returns `outside_window`. |
+| Vault | Open every two hours for one hour, on even Africa/Lagos hours (00:00, 02:00, … 22:00 WAT; odd UTC hours), plus the Monday 18:00–20:00 UTC slot. Outside those, queue returns `outside_window`. |
 | War | Open only in its season window from that schedule. Otherwise `season_closed`. Proofs are `sandbox-page`, `referee`, and `hash-puzzle` via `POST /v1/war/challenges/{challengeId}/submit`. |
 | Cup | At most 8 seats (`seats_full`). Join `POST /v1/cup/rounds/{roundId}/join` only before the round starts (`round_started`). A verified Hyperliquid link is required (`link_required`). |
 | Village | Requires that same linked Hyperliquid account. The arena reads testnet fills. It does not hold the key and does not send orders. |
@@ -75,6 +75,6 @@ The API is a Rust Cloudflare Worker (`workers/api`, crate `fe2vi-api`). One Dura
 
 ## Tests
 
-From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs` in `apps/web`, and `npm run check:type`. A pass ends with `verify: ok`. The API library line is `test result: ok. 99 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 15`, `# pass 15`, and `# fail 0`. The typecheck prints `type scale ok`.
+From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs` in `apps/web`, and `npm run check:type`. A pass ends with `verify: ok`. The API library line is `test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 16`, `# pass 16`, and `# fail 0`. The typecheck prints `type scale ok`.
 
 There is no root `package.json`. OpenAPI is `GET /openapi.json`.

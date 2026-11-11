@@ -58,7 +58,7 @@ caps in the rules above.
 - season: season-1
 - season_open_utc: 2026-10-01T00:00:00Z
 - season_close_utc: 2027-01-01T00:00:00Z
-- daily: 18:00Z for 60 minutes
+- daily: every 2 hours at odd UTC hours (01:00Z, 03:00Z, ... 23:00Z; even hours in Africa/Lagos) for 60 minutes
 - weekly: Monday 18:00Z for 120 minutes
 - seasonal: the first Saturday of the season, 18:00Z for 180 minutes
 

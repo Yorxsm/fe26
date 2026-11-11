@@ -1937,7 +1937,7 @@ fn join_queue(
         return fail(
             403,
             "outside_window",
-            "Vault is open 19:00-20:00 Africa/Lagos. Read /v1/schedule.",
+            "Vault opens every two hours for one hour, on even Africa/Lagos hours. Read /v1/schedule.",
         );
     }
     if state
@@ -4527,6 +4527,22 @@ mod tests {
         );
         assert_eq!(watched.1["viewerReaction"], "clap");
         let _ = auth;
+    }
+
+    #[test]
+    fn cup_and_village_queues_stay_closed() {
+        let mut state = ArenaState::default();
+        for arena in ["cup", "village"] {
+            let (status, body) = call(
+                &mut state,
+                "POST",
+                &format!("/v1/arenas/{arena}/queue?now={NOW}"),
+                "",
+                None,
+            );
+            assert_eq!(status, 410);
+            assert_eq!(body["error"], "live_only");
+        }
     }
 
     #[test]

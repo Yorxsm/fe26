@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Info, Store, Trophy } from "lucide-react";
 import { useRoomClocks } from "@/lib/clock";
+import { roomNotice } from "@/lib/city";
 import { apiBase } from "@/lib/protocol";
 import { formatCountdown } from "@/lib/schedule";
 
@@ -383,6 +384,7 @@ export function RoomHud({
         <Info aria-hidden="true" strokeWidth={1.75} />
         {about.title}
       </button>
+      {roomNotice(roomId) ? <p className="room-goal">{roomNotice(roomId)}</p> : null}
       <p className="room-goal">{about.works}</p>
       <section className={full ? `room-board is-full${boardOpen ? "" : " is-collapsed"}` : `room-board${boardOpen ? "" : " is-collapsed"}`} aria-label={`${about.title} leaderboard`}>
         <header className="room-board-head">

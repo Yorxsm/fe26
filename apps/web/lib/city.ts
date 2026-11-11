@@ -1,5 +1,8 @@
 import { displayName } from "./avatar";
+import { roomNotice, spectatorEnters } from "./roomEntry";
 import { defaultSkin, type SkinTraits } from "./skin";
+
+export { roomNotice, spectatorEnters };
 
 export type QualityTier = "low" | "medium" | "high";
 
