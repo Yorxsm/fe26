@@ -9,20 +9,11 @@ description = "Tradable fe2VI career passports. NEP-171 ownership, NEP-199 royal
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "passport-media"
-path = "src/bin/media.rs"
-required-features = ["media-cli"]
-
-[features]
-media-cli = []
-
 [dependencies]
 borsh.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 near-sdk = { version = "=5.7.0", features = ["unit-testing"] }
-sha2.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 near-sdk = { version = "=5.7.0" }

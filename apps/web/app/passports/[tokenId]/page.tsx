@@ -1,5 +1,5 @@
 import { AgentPortrait } from "@/components/SkinPreview";
-import { onchainMedia, passportDetail, tierFrame, type CareerNumbers } from "@/lib/passports";
+import { passportDetail, tierFrame, type CareerNumbers } from "@/lib/passports";
 import { defaultSkin } from "@/lib/skin";
 
 export const dynamic = "force-dynamic";
@@ -34,18 +34,13 @@ export default async function PassportPage({ params }: { params: Promise<{ token
   }
   const career = careerBits(record.career);
   const onchain = careerBits(record.onchainCareer);
-  const media = onchainMedia(record.media);
 
   return (
     <main className="board passport-detail">
       <h1>{tokenId}</h1>
       <p className="lede">{note}</p>
       <span className="passport-frame hero" style={{ borderColor: tierFrame(record.tier) }}>
-        {media ? (
-          <img className="passport-portrait" alt={tokenId} src={media} />
-        ) : (
-          <AgentPortrait traits={defaultSkin(tokenId)} large />
-        )}
+        <AgentPortrait traits={defaultSkin(tokenId)} large />
       </span>
       <section className="card passport-facts">
         {record.owner ? <p>Owner {record.owner}</p> : null}

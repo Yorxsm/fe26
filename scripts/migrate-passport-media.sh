@@ -1,7 +1,7 @@
 #!/bin/sh
-# Upgrade one passport contract without resetting state, then store the
-# canonical SVG on gen or disp tokens. The signer key is read from a file
-# path. This script never prints the key and never deploys *.fe2vi.testnet.
+# Upgrade one passport contract without resetting state, then store each
+# passport still from assets/passport-stills. The signer key is read from a
+# file path. This script never prints the key and never deploys *.fe2vi.testnet.
 #
 # Required:
 #   FE2VI_SIGNER_KEY_FILE   credentials json, or a file whose first line is ed25519:...
@@ -12,9 +12,9 @@
 #   FE2VI_DEPLOY_ACCOUNT    defaults to FE2VI_PASSPORT_ID
 #   FE2VI_DEPLOY_KEY_FILE   defaults to FE2VI_SIGNER_KEY_FILE when the accounts match
 # Optional:
-#   FE2VI_MEDIA_DEPOSIT     attached per token, default 0.01 NEAR.
-#                           The largest token stores 874 bytes (0.00874 NEAR).
-#                           51 tokens store 39167 bytes (0.39167 NEAR). Excess is refunded.
+#   FE2VI_MEDIA_DEPOSIT     attached NEAR for every token. When unset, each call
+#                           attaches the storage cost of that still plus 0.001 NEAR.
+#                           Unused deposit is refunded. Stills are assets/passport-stills/<token>.webp.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 KEY_FILE=${FE2VI_SIGNER_KEY_FILE:?Set FE2VI_SIGNER_KEY_FILE to the signer key path}
@@ -22,15 +22,16 @@ ACCOUNT=${FE2VI_ACCOUNT_ID:?Set FE2VI_ACCOUNT_ID}
 PASSPORT=${FE2VI_PASSPORT_ID:?Set FE2VI_PASSPORT_ID}
 TOKENS=${FE2VI_MEDIA_TOKENS:?Set FE2VI_MEDIA_TOKENS}
 DEPLOY_ACCOUNT=${FE2VI_DEPLOY_ACCOUNT:-$PASSPORT}
-DEPOSIT=${FE2VI_MEDIA_DEPOSIT:-0.01}
 if [ "$DEPLOY_ACCOUNT" = "$ACCOUNT" ]; then
   DEPLOY_KEY_FILE=${FE2VI_DEPLOY_KEY_FILE:-$KEY_FILE}
 else
   DEPLOY_KEY_FILE=${FE2VI_DEPLOY_KEY_FILE:?Set FE2VI_DEPLOY_KEY_FILE for the contract account}
 fi
-case "$DEPOSIT" in
-  *[!0-9.]*) echo "FE2VI_MEDIA_DEPOSIT must be a NEAR amount" >&2; exit 1 ;;
-esac
+if [ -n "${FE2VI_MEDIA_DEPOSIT:-}" ]; then
+  case "$FE2VI_MEDIA_DEPOSIT" in
+    *[!0-9.]*) echo "FE2VI_MEDIA_DEPOSIT must be a NEAR amount" >&2; exit 1 ;;
+  esac
+fi
 command -v near >/dev/null 2>&1 || {
   echo "near-cli-rs is required. The key stays in the file you named." >&2
   exit 1
@@ -127,35 +128,44 @@ WASM="$ROOT/target/wasm32-unknown-unknown/release/passport.wasm"
 echo "Deploying code to $PASSPORT without init. State stays."
 near contract deploy "$PASSPORT" use-file "$WASM" without-init-call network-config testnet sign-as "$DEPLOY_ACCOUNT" sign-with-keychain send
 
-cargo build -p passport --bin passport-media --features media-cli --manifest-path "$ROOT/Cargo.toml"
-MEDIA_BIN="$ROOT/target/debug/passport-media"
-
+STILLS="$ROOT/assets/passport-stills"
 while IFS= read -r token; do
   [ -n "$token" ] || continue
-  pair=$("$MEDIA_BIN" "$token")
-  media=$(printf '%s\n' "$pair" | sed -n '1p')
-  hash=$(printf '%s\n' "$pair" | sed -n '2p')
-  case "$media" in
-    data:image/svg+xml\;base64,*) ;;
-    *) echo "media tool did not return a data URI for $token" >&2; exit 1 ;;
-  esac
+  still="$STILLS/$token.webp"
+  [ -f "$still" ] || { echo "Missing still $still" >&2; exit 1; }
   arg="$home/$token.json"
-  TOKEN_ID="$token" MEDIA="$media" MEDIA_HASH="$hash" ARG="$arg" python3 - << 'PY'
-import json, os
+  TOKEN_ID="$token" STILL="$still" ARG="$arg" python3 - << 'PY'
+import base64, hashlib, json, os
+raw = open(os.environ["STILL"], "rb").read()
+if not (8 * 1024 <= len(raw) <= 15 * 1024):
+    raise SystemExit(f"still {os.environ['TOKEN_ID']} is {len(raw)} bytes, expected 8-15 KB")
+media = "data:image/webp;base64," + base64.b64encode(raw).decode("ascii")
+digest = base64.b64encode(hashlib.sha256(media.encode("ascii")).digest()).decode("ascii")
 with open(os.environ["ARG"], "w") as handle:
     json.dump(
-        {
-            "token_id": os.environ["TOKEN_ID"],
-            "media": os.environ["MEDIA"],
-            "media_hash": os.environ["MEDIA_HASH"],
-        },
+        {"token_id": os.environ["TOKEN_ID"], "media": media, "media_hash": digest},
         handle,
         separators=(",", ":"),
     )
+open(os.environ["ARG"] + ".near", "w").write(media)
 PY
-  echo "Setting media on $token"
+  if [ -n "${FE2VI_MEDIA_DEPOSIT:-}" ]; then
+    deposit="$FE2VI_MEDIA_DEPOSIT"
+  else
+    deposit=$(python3 - "$arg.near" "$token" << 'PY'
+import sys
+media = open(sys.argv[1], "r").read()
+token = sys.argv[2]
+record = 1 + 4 + len(token) + 4 + len(media) + 40
+# One extra thousandth of a NEAR covers the trie record and is refunded if unused.
+print(f"{record / 100000 + 0.001:.5f}")
+PY
+)
+  fi
+  rm -f "$arg.near"
+  echo "Setting media on $token with $deposit NEAR attached"
   near contract call-function as-transaction "$PASSPORT" set_token_media \
-    json-args "$(cat "$arg")" prepaid-gas '40 Tgas' attached-deposit "$DEPOSIT NEAR" \
+    json-args "$(cat "$arg")" prepaid-gas '120 Tgas' attached-deposit "$deposit NEAR" \
     sign-as "$ACCOUNT" network-config testnet sign-with-keychain send
 done < "$home/tokens"
 echo "Media stored on $PASSPORT."

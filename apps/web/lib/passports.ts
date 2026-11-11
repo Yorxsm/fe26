@@ -21,8 +21,10 @@ export type PassportRow = {
 export function onchainMedia(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const media = value.trim();
-  if (!media.startsWith("data:image/svg+xml;base64,")) return null;
-  if (media.length > 2048 || /[\s<]/.test(media)) return null;
+  const raster = media.startsWith("data:image/webp;base64,")
+    || media.startsWith("data:image/jpeg;base64,")
+    || media.startsWith("data:image/png;base64,");
+  if (!raster || media.length > 28 * 1024 || /[\s<]/.test(media)) return null;
   return media;
 }
 

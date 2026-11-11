@@ -83,10 +83,11 @@ test("passport detail hides missing fields and keeps the recorder career", () =>
   assert.equal(detail.media, null);
   assert.equal(detail.contractUrl, "https://testnet.nearblocks.io/address/passport.fe2virecdb1e91.testnet");
   const painted = passportDetail({
-    passport: { media: "data:image/svg+xml;base64,AAAA", ownerNear: "fe2virecdb1e91.testnet" },
+    passport: { media: "data:image/webp;base64,AAAA", ownerNear: "fe2virecdb1e91.testnet" },
   });
-  assert.equal(painted.media, "data:image/svg+xml;base64,AAAA");
+  assert.equal(painted.media, "data:image/webp;base64,AAAA");
   assert.equal(passportDetail({ passport: { media: "gen_005.png" } }).media, null);
+  assert.equal(passportDetail({ passport: { media: "data:image/svg+xml;base64,AAAA" } }).media, null);
   assert.equal(testnetAccountUrl("passport.fe2vi.near"), null);
   assert.equal(passportDetail({}).owner, null);
 });

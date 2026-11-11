@@ -67,7 +67,7 @@ All of these are testnet. `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and 
 
 `GET /v1/market/listings` reads both markets. `/market` shows a price and Buy only when an ask was returned.
 
-Passport art is on the token. `nft_token` `metadata.media` is a `data:image/svg+xml;base64,…` image derived from the token id, and `media_hash` is the base64 sha256 of those bytes. `extra.image` is that same data URI. The site still draws the richer portrait when the chain has not returned one.
+Passport art on the token is a still of that passport's 3D portrait. `nft_token` `metadata.media` is a `data:image/webp;base64,…` image, and `media_hash` is the base64 sha256 of those bytes. `extra.image` is the same data URI. The site draws the live portrait and can fall back to that still.
 
 ## Architecture
 

@@ -1134,9 +1134,10 @@ fn stamp_media(body: &mut serde_json::Value, media: Option<&serde_json::Value>) 
 
 fn onchain_media(value: Option<&serde_json::Value>) -> Option<&str> {
     let media = value.and_then(serde_json::Value::as_str)?;
-    if media.starts_with("data:image/svg+xml;base64,")
-        && media.len() <= 2048
-        && !media.bytes().any(|byte| byte == b' ' || byte == b'<')
+    let raster = media.starts_with("data:image/webp;base64,")
+        || media.starts_with("data:image/jpeg;base64,")
+        || media.starts_with("data:image/png;base64,");
+    if raster && media.len() <= 28 * 1024 && !media.bytes().any(|byte| byte == b' ' || byte == b'<')
     {
         Some(media)
     } else {
@@ -2370,12 +2371,12 @@ mod tests {
             "token_id": "gen_005",
             "owner_id": "fe2virecdb1e91.testnet",
             "metadata": {
-                "media": "data:image/svg+xml;base64,AAAA",
+                "media": "data:image/webp;base64,AAAA",
                 "extra": "{\"tier\":\"Rookie\"}"
             }
         });
         let painted = passport_list_row("passport.fe2virecdb1e91.testnet", &painted, None).unwrap();
-        assert_eq!(painted["media"], "data:image/svg+xml;base64,AAAA");
+        assert_eq!(painted["media"], "data:image/webp;base64,AAAA");
         let filename = serde_json::json!({
             "token_id": "gen_006",
             "owner_id": "fe2virecdb1e91.testnet",
