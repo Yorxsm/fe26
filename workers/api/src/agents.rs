@@ -878,6 +878,7 @@ fn register_proved(
         last_sync_seq: 0,
         career: None,
     });
+    crate::auto_settle::queue_recorder_bind(state, &chain.contract, token_id, &agent_id);
     json(
         201,
         &serde_json::json!({
@@ -2802,11 +2803,28 @@ fn seal_match_pot(near: &HashMap<String, String>, play: &mut PlayMatch) {
     let links = crate::passport::seat_links_from_chain(&play.seats, near, reads.as_ref());
     if let Some(vault) = play.vault.as_mut() {
         vault.seal_vault_result(&match_id, &seats);
+        vault.correct_unsettled_result(&seats);
         if let Some(pot) = vault.pot.as_mut() {
             if pot.seat_links.is_empty() {
                 pot.seat_links = links;
             }
+            label_seat_results(&seats, &mut pot.seat_links);
         }
+    }
+}
+
+fn label_seat_results(
+    seats: &[(String, i64, Option<String>)],
+    links: &mut [crate::vault::SeatTokenLink],
+) {
+    let best = seats.iter().map(|(_, score, _)| *score).max().unwrap_or(0);
+    let leaders = seats.iter().filter(|(_, score, _)| *score == best).count();
+    let tied = leaders != 1;
+    for link in links.iter_mut() {
+        let Some((_, score, _)) = seats.iter().find(|(agent, _, _)| agent == &link.agent_id) else {
+            continue;
+        };
+        link.result = crate::vault::seat_result_label(*score, best, tied).to_string();
     }
 }
 
@@ -5256,6 +5274,7 @@ mod tests {
                 amount: "9".into(),
             }],
             seat_links: links,
+            no_pot: false,
         }
     }
 

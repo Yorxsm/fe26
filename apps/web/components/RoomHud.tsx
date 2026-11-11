@@ -6,6 +6,7 @@ import { useRoomClocks } from "@/lib/clock";
 import { roomNotice } from "@/lib/city";
 import { apiBase } from "@/lib/protocol";
 import { formatCountdown } from "@/lib/schedule";
+import { settlementLine } from "@/lib/settlementLine";
 
 function plainPoints(room: string, book: Record<string, unknown>) {
   const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);
@@ -143,7 +144,7 @@ export type RoomMatch = {
     ended: boolean;
     winner?: string | null;
     scores: Array<{ handle: string; roundWins: number }>;
-    pot?: { outcome?: string; rule?: string; settled?: boolean; pays?: boolean; finality?: string; txHash?: string } | null;
+    pot?: { outcome?: string; rule?: string; settled?: boolean; pays?: boolean; finality?: string; txHash?: string; noPot?: boolean; reason?: string } | null;
   } | null;
 };
 
@@ -231,10 +232,8 @@ function roomActivity(matches: RoomMatch[] | null, claims: WarClaimRow[], slug: 
   const pot = vault?.pot;
   const settlement = !vault?.ended
     ? ""
-    : pot?.settled && pot.finality === "FINAL" && pot.txHash
-      ? `Settled ${pot.rule || pot.outcome || "receipt"}.`
       : pot
-        ? `Not settled${pot.outcome ? ` (${pot.outcome})` : ""}.`
+        ? settlementLine(pot, false)
         : "No settlement row.";
   const summary = live
     ? vault

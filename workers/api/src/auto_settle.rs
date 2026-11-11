@@ -21,7 +21,135 @@ pub struct ChainJob {
     pub args: serde_json::Value,
 }
 
+pub fn queue_recorder_bind(state: &mut ArenaState, contract: &str, token_id: &str, agent_id: &str) {
+    let contract = contract.trim();
+    let token_id = token_id.trim();
+    let agent_id = agent_id.trim();
+    if contract.is_empty()
+        || token_id.is_empty()
+        || agent_id.is_empty()
+        || contract.contains("fe2vidisp")
+        || contract.ends_with(".fe2vi.testnet")
+    {
+        return;
+    }
+    enqueue(
+        &mut state.chain_jobs,
+        &format!("bind:{token_id}"),
+        "",
+        "bind",
+        token_id,
+        serde_json::json!({
+            "token_id": token_id,
+            "agent_id": agent_id,
+            "contract": contract,
+        }),
+    );
+}
+
+fn correct_open_results(state: &mut ArenaState) {
+    let near: std::collections::HashMap<String, String> = state
+        .book
+        .players
+        .iter()
+        .filter_map(|player| {
+            let account = player.wallets.near_account.as_ref()?.trim();
+            if account.is_empty() {
+                None
+            } else {
+                Some((player.agent_id.clone(), account.to_string()))
+            }
+        })
+        .collect();
+    type SeatScore = (String, i64, Option<String>);
+    let plans: Vec<(usize, Vec<SeatScore>)> = state
+        .book
+        .matches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, play)| {
+            if play.arena_id != "vault" {
+                return None;
+            }
+            let vault = play.vault.as_ref()?;
+            if !vault.ended {
+                return None;
+            }
+            let seats = play
+                .seats
+                .iter()
+                .map(|seat| {
+                    (
+                        seat.clone(),
+                        i64::from(vault.score(seat)),
+                        near.get(seat).cloned(),
+                    )
+                })
+                .collect();
+            Some((index, seats))
+        })
+        .collect();
+    for (index, seats) in plans {
+        let Some(vault) = state.book.matches[index].vault.as_mut() else {
+            continue;
+        };
+        vault.correct_unsettled_result(&seats);
+        let Some(pot) = vault.pot.as_mut() else {
+            continue;
+        };
+        if pot.settled || pot.pays || pot.finality == "FINAL" {
+            continue;
+        }
+        let best = seats.iter().map(|(_, score, _)| *score).max().unwrap_or(0);
+        let leaders = seats.iter().filter(|(_, score, _)| *score == best).count();
+        let tied = leaders != 1;
+        for link in pot.seat_links.iter_mut() {
+            let Some((_, score, _)) = seats.iter().find(|(agent, _, _)| agent == &link.agent_id)
+            else {
+                continue;
+            };
+            link.result = crate::vault::seat_result_label(*score, best, tied).to_string();
+        }
+    }
+}
+
+/// Queue `bind` for an active book passport whose match-end link is still empty.
+/// The book is not the snapshot. Career credit still waits for `agent_token`.
+pub fn queue_unbound_book_binds(state: &mut ArenaState, contract: &str) {
+    let tokens: std::collections::HashMap<String, String> = state
+        .book
+        .passports
+        .iter()
+        .filter(|passport| passport.status == "active")
+        .filter_map(|passport| {
+            let token = passport.token_id.as_deref()?.trim();
+            if token.is_empty() {
+                None
+            } else {
+                Some((passport.agent_id.clone(), token.to_string()))
+            }
+        })
+        .collect();
+    let agents: Vec<String> = state
+        .book
+        .matches
+        .iter()
+        .filter(|play| play.arena_id == "vault")
+        .filter_map(|play| play.vault.as_ref()?.pot.as_ref())
+        .filter(|pot| !pot.settled && !pot.pays)
+        .flat_map(|pot| pot.seat_links.iter())
+        .filter(|link| link.source != "seat-at-match-end" || link.token_id.is_empty())
+        .map(|link| link.agent_id.clone())
+        .collect();
+    for agent in agents {
+        if let Some(token) = tokens.get(&agent) {
+            queue_recorder_bind(state, contract, token, &agent);
+        }
+    }
+}
+
 pub fn sync_vault_jobs(state: &mut ArenaState) {
+    correct_open_results(state);
     let snaps: Vec<Snap> = state
         .book
         .matches
@@ -33,7 +161,7 @@ pub fn sync_vault_jobs(state: &mut ArenaState) {
         if !snap.ended || !snap.ready {
             continue;
         }
-        if !snap.settled {
+        if !snap.settled && !snap.no_pot {
             enqueue(
                 &mut state.chain_jobs,
                 &format!("settle:{}", snap.match_id),
@@ -48,7 +176,7 @@ pub fn sync_vault_jobs(state: &mut ArenaState) {
             );
             continue;
         }
-        for (token, seat) in &snap.tokens {
+        for (token, seat, result) in &snap.tokens {
             enqueue(
                 &mut state.chain_jobs,
                 &format!("career:{}:{token}", snap.match_id),
@@ -60,6 +188,7 @@ pub fn sync_vault_jobs(state: &mut ArenaState) {
                     "outcome": snap.outcome,
                     "winner": snap.winner,
                     "seatAccount": seat,
+                    "seatResult": result,
                 }),
             );
             if let Some(hash) = snap.hashes.get(token) {
@@ -85,9 +214,10 @@ struct Snap {
     ended: bool,
     ready: bool,
     settled: bool,
+    no_pot: bool,
     outcome: String,
     winner: String,
-    tokens: Vec<(String, String)>,
+    tokens: Vec<(String, String, String)>,
     hashes: std::collections::BTreeMap<String, (u64, String)>,
 }
 
@@ -103,6 +233,7 @@ fn snap_of(play: &PlayMatch) -> Snap {
     let settled = pot.is_some_and(|pot| {
         pot.settled && pot.pays && pot.finality == "FINAL" && !pot.tx_hash.trim().is_empty()
     });
+    let no_pot = pot.is_some_and(|pot| pot.no_pot);
     let tokens = pot
         .map(|pot| {
             pot.seat_links
@@ -112,7 +243,13 @@ fn snap_of(play: &PlayMatch) -> Snap {
                         && !link.token_id.is_empty()
                         && !link.near_account.trim().is_empty()
                 })
-                .map(|link| (link.token_id.clone(), link.near_account.trim().to_string()))
+                .map(|link| {
+                    (
+                        link.token_id.clone(),
+                        link.near_account.trim().to_string(),
+                        link.result.clone(),
+                    )
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -121,6 +258,7 @@ fn snap_of(play: &PlayMatch) -> Snap {
         ended,
         ready,
         settled,
+        no_pot,
         outcome,
         winner: pot.map(|pot| pot.winner.clone()).unwrap_or_default(),
         tokens,
@@ -228,7 +366,7 @@ pub fn claim_ready(
         }
         match job.kind.as_str() {
             "settle" => settler_ready,
-            "career" | "playbook" => recorder_ready,
+            "career" | "playbook" | "bind" => recorder_ready,
             _ => false,
         }
     })?;
@@ -293,8 +431,10 @@ pub fn career_sync_args(
     outcome: &str,
     winner_account: &str,
     seat_account: &str,
+    seat_result: &str,
 ) -> Option<serde_json::Value> {
     let seat = seat_account.trim();
+    let seat_result = seat_result.trim();
     if token_id.is_empty() || seat.is_empty() {
         return None;
     }
@@ -303,11 +443,16 @@ pub fn career_sync_args(
         .get("last_sync_seq")
         .and_then(serde_json::Value::as_u64)?
         + 1;
-    let (wins_add, losses_add, draws_add, xp_add) = match outcome {
-        "win" if seat == winner_account.trim() => (1_u64, 0, 0, 3),
-        "win" => (0, 1, 0, 0),
+    let (wins_add, losses_add, draws_add, xp_add) = match seat_result {
+        "win" => (1_u64, 0, 0, 3),
+        "loss" => (0, 1, 0, 0),
         "draw" => (0, 0, 1, 1),
-        _ => return None,
+        _ => match outcome {
+            "win" if seat == winner_account.trim() => (1_u64, 0, 0, 3),
+            "win" => (0, 1, 0, 0),
+            "draw" => (0, 0, 1, 1),
+            _ => return None,
+        },
     };
     Some(serde_json::json!({
         "token_id": token_id,
@@ -359,6 +504,10 @@ pub fn freeze_career_update(job: &mut ChainJob, view: &serde_json::Value) -> boo
             .get("seatAccount")
             .and_then(serde_json::Value::as_str)
             .unwrap_or(""),
+        job.args
+            .get("seatResult")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(""),
     );
     let Some(body) = body else {
         return false;
@@ -385,8 +534,9 @@ fn field_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::PlayMatch;
+    use crate::agents::{Passport, PlayMatch, Player, Wallets};
     use crate::logic::ArenaState;
+    use crate::vault::{SeatTokenLink, VaultMatch};
 
     fn play(settled: bool) -> PlayMatch {
         serde_json::from_value(serde_json::json!({
@@ -528,6 +678,7 @@ mod tests {
             "win",
             "fe2virecdb1e91.testnet",
             "fe2virecdb1e91.testnet",
+            "",
         )
         .unwrap();
         assert_eq!(win["update"]["seq"], 5);
@@ -541,12 +692,25 @@ mod tests {
             "win",
             "fe2virecdb1e91.testnet",
             "other.testnet",
+            "",
         )
         .unwrap();
         assert_eq!(loss["update"]["losses"], 1);
         assert_eq!(loss["update"]["xp"], 30);
         let draw =
-            career_sync_args(&view, "rec_001", "draw", "", "fe2virecdb1e91.testnet").unwrap();
+            career_sync_args(&view, "rec_001", "draw", "", "fe2virecdb1e91.testnet", "").unwrap();
+        let shared = career_sync_args(
+            &view,
+            "gen_008",
+            "win",
+            "fe2virecdb1e91.testnet",
+            "fe2virecdb1e91.testnet",
+            "loss",
+        )
+        .unwrap();
+        assert_eq!(shared["update"]["losses"], 1);
+        assert_eq!(shared["update"]["wins"], 1);
+        assert_eq!(shared["update"]["xp"], 30);
         assert_eq!(draw["update"]["draws"], 1);
         assert_eq!(draw["update"]["xp"], 31);
         let mut job = ChainJob {
@@ -619,5 +783,208 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn a_shared_wallet_draw_is_repaired_and_a_missing_pot_still_syncs_both_careers() {
+        let account = "fe2virecdb1e91.testnet";
+        let mut draw = VaultMatch::start(&["juno".into(), "rook".into()]);
+        draw.ended = true;
+        draw.seal_vault_result(
+            "mt_797",
+            &[
+                ("juno".into(), 0, Some(account.into())),
+                ("rook".into(), 0, Some(account.into())),
+            ],
+        );
+        {
+            let pot = draw.pot.as_mut().unwrap();
+            pot.outcome = "win".into();
+            pot.winner = account.into();
+            pot.seat_links = vec![
+                link("juno", "", "unbound-at-match-end"),
+                link("rook", "", "unbound-at-match-end"),
+            ];
+        }
+        let mut win = VaultMatch::start(&["juno".into(), "rook".into()]);
+        win.ended = true;
+        for seat in &mut win.seats {
+            seat.points = if seat.agent_id == "juno" { 5 } else { 3 };
+        }
+        win.seal_vault_result(
+            "mt_2b2d",
+            &[
+                ("juno".into(), 5, Some(account.into())),
+                ("rook".into(), 3, Some(account.into())),
+            ],
+        );
+        {
+            let pot = win.pot.as_mut().unwrap();
+            pot.no_pot = true;
+            pot.seat_links = vec![
+                link("juno", "gen_007", "seat-at-match-end"),
+                link("rook", "gen_008", "seat-at-match-end"),
+            ];
+        }
+        let mut state = ArenaState::default();
+        state.book.players = vec![player("juno", account), player("rook", account)];
+        state.book.passports = vec![passport("gen_007", "juno"), passport("gen_008", "rook")];
+        state.book.matches = vec![finished("mt_797", draw), finished("mt_2b2d", win)];
+        queue_unbound_book_binds(&mut state, "passport.fe2vidisp7a3c.testnet");
+        assert!(state.chain_jobs.is_empty());
+        queue_unbound_book_binds(&mut state, "passport.fe2vi.testnet");
+        assert!(state.chain_jobs.is_empty());
+        queue_unbound_book_binds(&mut state, "passport.fe2virecdb1e91.testnet");
+        sync_vault_jobs(&mut state);
+        let draw_pot = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap();
+        assert_eq!(draw_pot.outcome, "draw");
+        assert!(draw_pot.winner.is_empty());
+        assert_eq!(draw_pot.rule, "equal-split");
+        assert!(draw_pot.seat_links.iter().all(|row| row.result == "draw"));
+        let settle = state
+            .chain_jobs
+            .iter()
+            .find(|job| job.kind == "settle")
+            .unwrap();
+        assert_eq!(settle.args["outcome"], "draw");
+        assert!(settle.args["winner"].is_null());
+        assert_eq!(
+            state
+                .chain_jobs
+                .iter()
+                .filter(|job| job.kind == "bind")
+                .count(),
+            2
+        );
+        let win_jobs: Vec<_> = state
+            .chain_jobs
+            .iter()
+            .filter(|job| job.kind == "career" && job.match_id == "mt_2b2d")
+            .collect();
+        assert_eq!(win_jobs.len(), 2);
+        let juno = win_jobs
+            .iter()
+            .find(|job| job.token_id == "gen_007")
+            .unwrap();
+        let rook = win_jobs
+            .iter()
+            .find(|job| job.token_id == "gen_008")
+            .unwrap();
+        assert_eq!(juno.args["seatResult"], "win");
+        assert_eq!(rook.args["seatResult"], "loss");
+        state.book.matches[0]
+            .vault
+            .as_mut()
+            .unwrap()
+            .pot
+            .as_mut()
+            .unwrap()
+            .no_pot = true;
+        for row in state.book.matches[0]
+            .vault
+            .as_mut()
+            .unwrap()
+            .pot
+            .as_mut()
+            .unwrap()
+            .seat_links
+            .iter_mut()
+        {
+            row.token_id = if row.agent_id == "juno" {
+                "gen_007"
+            } else {
+                "gen_008"
+            }
+            .into();
+            row.source = "seat-at-match-end".into();
+        }
+        sync_vault_jobs(&mut state);
+        assert_eq!(
+            state
+                .chain_jobs
+                .iter()
+                .filter(|job| job.kind == "settle")
+                .count(),
+            1
+        );
+        assert_eq!(
+            state
+                .chain_jobs
+                .iter()
+                .filter(|job| job.kind == "career" && job.match_id == "mt_797")
+                .count(),
+            2
+        );
+        assert!(state
+            .chain_jobs
+            .iter()
+            .filter(|job| job.kind == "career" && job.match_id == "mt_797")
+            .all(|job| job.args["seatResult"] == "draw"));
+    }
+
+    fn link(agent: &str, token: &str, source: &str) -> SeatTokenLink {
+        SeatTokenLink {
+            agent_id: agent.into(),
+            near_account: "fe2virecdb1e91.testnet".into(),
+            token_id: token.into(),
+            source: source.into(),
+            result: String::new(),
+        }
+    }
+
+    fn player(agent: &str, account: &str) -> Player {
+        Player {
+            agent_id: agent.into(),
+            handle: agent.into(),
+            name: agent.into(),
+            description: String::new(),
+            owner_contact: None,
+            token_hash: String::new(),
+            token_prefix: String::new(),
+            status: "active".into(),
+            created_unix: 0,
+            wallets: Wallets {
+                near_account: Some(account.into()),
+                ..Wallets::default()
+            },
+            capabilities: Vec::new(),
+            skin_id: "ingot".into(),
+            war_hits: Vec::new(),
+        }
+    }
+
+    fn passport(token: &str, agent: &str) -> Passport {
+        Passport {
+            passport_id: token.into(),
+            token_id: Some(token.into()),
+            agent_id: agent.into(),
+            owner_near: "fe2virecdb1e91.testnet".into(),
+            creator_near: "fe2virecdb1e91.testnet".into(),
+            status: "active".into(),
+            created_unix: 0,
+            updated_unix: 0,
+            last_sync_seq: 0,
+            career: None,
+        }
+    }
+
+    fn finished(match_id: &str, vault: VaultMatch) -> PlayMatch {
+        PlayMatch {
+            match_id: match_id.into(),
+            arena_id: "vault".into(),
+            status: "over".into(),
+            turn: 1,
+            deadline_unix: 0,
+            seats: vec!["juno".into(), "rook".into()],
+            actions: Vec::new(),
+            created_unix: 0,
+            vault: Some(vault),
+        }
     }
 }

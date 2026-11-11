@@ -87,6 +87,7 @@ export type VaultPublic = {
     finality?: string;
     txHash?: string;
     reason?: string;
+    noPot?: boolean;
     payouts?: Array<{ account?: string; amount?: string }>;
   } | null;
 };
