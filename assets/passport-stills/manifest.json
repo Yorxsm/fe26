@@ -1,12 +1,10 @@
 {
   "widthNote": "WebP width is chosen per token so the file lands near 8-15 KB.",
   "storageByteCostYocto": "10000000000000000000",
-  "totalStorageBytes": 905114,
-  "totalNear": "9.05114",
+  "totalStorageBytes": 923545,
+  "totalNear": "9.23545",
   "sideBySide": [
-    "gen_001",
-    "gen_002",
-    "gen_003"
+    "rec_001"
   ],
   "tokens": [
     {
@@ -467,6 +465,15 @@
       "mediaBytes": 15971,
       "storageBytes": 16028,
       "near": "0.16028"
+    },
+    {
+      "tokenId": "rec_001",
+      "fileBytes": 13764,
+      "width": 300,
+      "quality": 100,
+      "mediaBytes": 18375,
+      "storageBytes": 18431,
+      "near": "0.18431"
     }
   ]
 }

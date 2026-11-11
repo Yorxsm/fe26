@@ -15,7 +15,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const web = path.join(root, "apps/web");
 const outDir = path.join(root, "assets/passport-stills");
 const bundlePath = "/tmp/fe2vi-portrait-bundle.js";
-const ids = [...Array(50)].map((_, index) => `gen_${String(index + 1).padStart(3, "0")}`).concat(["disp_001"]);
+const defaultIds = [...Array(50)].map((_, index) => `gen_${String(index + 1).padStart(3, "0")}`).concat(["disp_001"]);
+const ids = process.argv.slice(2).length ? process.argv.slice(2) : defaultIds;
 
 function fnv(tokenId) {
   let acc = 2166136261;
@@ -239,16 +240,29 @@ async function main() {
       create: { width: pairWidth, height: pairHeight * composites.length, channels: 3, background: "#0a0a0b" },
     }).composite(composites.map((input, index) => ({ input, top: index * pairHeight, left: 0 }))).png().toBuffer();
     writeFileSync("/tmp/passport-side-by-side.png", side);
-    const totalBytes = rows.reduce((sum, row) => sum + row.storageBytes, 0);
+    const manifestPath = path.join(outDir, "manifest.json");
+    let tokens = rows;
+    if (ids.length !== defaultIds.length) {
+      let prior = [];
+      try {
+        prior = JSON.parse(readFileSync(manifestPath, "utf8")).tokens ?? [];
+      } catch {
+        prior = [];
+      }
+      const byId = new Map(prior.map((row) => [row.tokenId, row]));
+      for (const row of rows) byId.set(row.tokenId, row);
+      tokens = [...byId.values()];
+    }
+    const totalBytes = tokens.reduce((sum, row) => sum + row.storageBytes, 0);
     const manifest = {
       widthNote: "WebP width is chosen per token so the file lands near 8-15 KB.",
       storageByteCostYocto: "10000000000000000000",
       totalStorageBytes: totalBytes,
       totalNear: (totalBytes / 100000).toFixed(5),
       sideBySide: distinct,
-      tokens: rows,
+      tokens,
     };
-    writeFileSync(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     console.log(`storage bytes ${totalBytes} NEAR ${(totalBytes / 100000).toFixed(5)}`);
     console.log(`side by side /tmp/passport-side-by-side.png (${distinct.join(", ")})`);
   } finally {
