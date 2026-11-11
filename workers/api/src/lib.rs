@@ -1646,6 +1646,10 @@ mod edge {
             confirm_chain_job(feed, arena, index).await;
             return;
         }
+        if let Some(index) = crate::auto_settle::settle_hash_to_confirm(arena) {
+            confirm_chain_job(feed, arena, index).await;
+            return;
+        }
         let settler_secret = worker_secret(env, "FE2VI_SETTLER_SECRET_KEY");
         let recorder_secret = worker_secret(env, "FE2VI_RECORDER_SECRET_KEY");
         let Some(index) = crate::auto_settle::claim_ready(
@@ -1840,17 +1844,33 @@ mod edge {
         if text.contains("does not exist") || status == 404 {
             return;
         }
-        if text.contains("Failure") {
-            crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
-            return;
-        }
-        if !text.contains("SuccessValue") {
-            return;
-        }
         if kind == "settle" {
             let Ok(result) = crate::vault::read_tx_response(status, &text) else {
                 return;
             };
+            match crate::auto_settle::classify_tx_settlement(&result) {
+                crate::auto_settle::TxSettlement::Pending => return,
+                crate::auto_settle::TxSettlement::FailedPaid => {
+                    crate::auto_settle::keep_failed_hash(&mut arena.chain_jobs[index]);
+                    return;
+                }
+                crate::auto_settle::TxSettlement::FailedUnpaid => {
+                    match heist_game_present(env, &match_id).await {
+                        Ok(false) => {
+                            let hash = arena.chain_jobs[index].tx_hash.clone();
+                            crate::auto_settle::close_unpaid_failed_settle(arena, &match_id, &hash);
+                        }
+                        Ok(true) => {
+                            crate::auto_settle::release_failed_settle_once(
+                                &mut arena.chain_jobs[index],
+                            );
+                        }
+                        Err(()) => {}
+                    }
+                    return;
+                }
+                crate::auto_settle::TxSettlement::Success => {}
+            }
             let Some(play_index) = arena
                 .book
                 .matches
@@ -1897,8 +1917,15 @@ mod edge {
                     crate::auto_settle::attach_playbook_hashes(arena);
                 }
                 Err("transaction is not final success") => {}
-                Err(_) => crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]),
+                Err(_) => crate::auto_settle::keep_failed_hash(&mut arena.chain_jobs[index]),
             }
+            return;
+        }
+        if text.contains("Failure") {
+            crate::auto_settle::park_rejected(&mut arena.chain_jobs[index]);
+            return;
+        }
+        if !text.contains("SuccessValue") {
             return;
         }
         crate::auto_settle::mark_done(&mut arena.chain_jobs[index]);

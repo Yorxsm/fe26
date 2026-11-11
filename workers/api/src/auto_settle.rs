@@ -212,6 +212,192 @@ pub fn record_missing_pot(state: &mut ArenaState, match_id: &str) {
     }
 }
 
+/// What a FINAL tx-status body means for a settle job that already stored a hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TxSettlement {
+    /// Not FINAL yet, or the body has neither success nor failure.
+    Pending,
+    /// The transaction succeeded. The hash must stay.
+    Success,
+    /// FINAL failure, and no receipt paid another account.
+    FailedUnpaid,
+    /// FINAL failure that still transferred to someone other than the signer.
+    FailedPaid,
+}
+
+/// A gas refund from `system` back to the signer is not a pot payout.
+pub fn classify_tx_settlement(tx: &serde_json::Value) -> TxSettlement {
+    if tx
+        .get("final_execution_status")
+        .and_then(|value| value.as_str())
+        != Some("FINAL")
+    {
+        return TxSettlement::Pending;
+    }
+    let status = tx.get("status");
+    let success = status.is_some_and(|item| {
+        item.get("SuccessValue").is_some() || item.get("successValue").is_some()
+    });
+    if success {
+        return TxSettlement::Success;
+    }
+    let failure =
+        status.is_some_and(|item| item.get("Failure").is_some() || item.get("failure").is_some());
+    if !failure {
+        return TxSettlement::Pending;
+    }
+    if successful_payout_receipt(tx) {
+        TxSettlement::FailedPaid
+    } else {
+        TxSettlement::FailedUnpaid
+    }
+}
+
+fn successful_payout_receipt(tx: &serde_json::Value) -> bool {
+    let signer = tx
+        .pointer("/transaction/signer_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let Some(outcomes) = tx
+        .get("receipts_outcome")
+        .and_then(|value| value.as_array())
+    else {
+        return false;
+    };
+    let receipts = tx.get("receipts").and_then(|value| value.as_array());
+    for (index, outcome) in outcomes.iter().enumerate() {
+        let status = outcome.pointer("/outcome/status");
+        let ok = status.is_some_and(|item| {
+            item.get("SuccessValue").is_some()
+                || item.get("successValue").is_some()
+                || item.get("SuccessReceiptId").is_some()
+                || item.get("successReceiptId").is_some()
+        });
+        if !ok {
+            continue;
+        }
+        if is_signer_refund(receipts.and_then(|rows| rows.get(index)), signer) {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn is_signer_refund(receipt: Option<&serde_json::Value>, signer: &str) -> bool {
+    let Some(receipt) = receipt else {
+        return false;
+    };
+    if signer.is_empty() {
+        return false;
+    }
+    let predecessor = receipt
+        .get("predecessor_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let receiver = receipt
+        .get("receiver_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if predecessor != "system" || receiver != signer {
+        return false;
+    }
+    let Some(actions) = receipt
+        .pointer("/receipt/Action/actions")
+        .and_then(|value| value.as_array())
+    else {
+        return false;
+    };
+    !actions.is_empty()
+        && actions
+            .iter()
+            .all(|action| action.get("Transfer").is_some())
+}
+
+/// A settle hash that is not a recorded FINAL payment. Done rows are skipped.
+pub fn settle_hash_to_confirm(state: &ArenaState) -> Option<usize> {
+    state.chain_jobs.iter().position(|job| {
+        if job.kind != "settle" || job.tx_hash.trim().is_empty() || job.status == "done" {
+            return false;
+        }
+        let paid = state
+            .book
+            .matches
+            .iter()
+            .find(|play| play.match_id == job.match_id)
+            .and_then(|play| play.vault.as_ref())
+            .and_then(|vault| vault.pot.as_ref())
+            .is_some_and(|pot| {
+                pot.settled || pot.pays || pot.finality == "FINAL" || !pot.tx_hash.trim().is_empty()
+            });
+        !paid
+    })
+}
+
+/// Keep the failed hash, mark the job done, and do not send another transaction.
+pub fn keep_failed_hash(job: &mut ChainJob) {
+    if !job.tx_hash.trim().is_empty() {
+        job.status = "done".into();
+    }
+}
+
+/// One new `settle_vault` after a failed hash, and only when a heist game exists.
+/// A second failure keeps the new hash and closes the job.
+pub fn release_failed_settle_once(job: &mut ChainJob) {
+    let used = job
+        .args
+        .get("settleRetry")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if used >= 1 {
+        keep_failed_hash(job);
+        return;
+    }
+    let hash = job.tx_hash.clone();
+    job.args["settleRetry"] = serde_json::json!(1);
+    if !hash.trim().is_empty() {
+        job.args["failedHash"] = serde_json::Value::String(hash);
+    }
+    job.tx_hash.clear();
+    job.status = "pending".into();
+    job.attempts = 0;
+}
+
+/// `get_heist` is null and the stored hash is a FINAL failure that paid nobody.
+/// The hash stays on the job. Careers queue once.
+pub fn close_unpaid_failed_settle(state: &mut ArenaState, match_id: &str, failed_hash: &str) {
+    let failed_hash = failed_hash.trim();
+    if failed_hash.is_empty() {
+        return;
+    }
+    let mut paid = false;
+    if let Some(pot) = state
+        .book
+        .matches
+        .iter_mut()
+        .find(|play| play.match_id == match_id)
+        .and_then(|play| play.vault.as_mut())
+        .and_then(|vault| vault.pot.as_mut())
+    {
+        paid = pot.settled || pot.pays || pot.finality == "FINAL" || !pot.tx_hash.trim().is_empty();
+        if !paid {
+            pot.no_pot = true;
+            pot.reason = "No on-chain pot was opened for this match, so settle_vault was not sent and nothing was paid.".to_string();
+        }
+    }
+    if let Some(job) = state.chain_jobs.iter_mut().find(|job| {
+        job.kind == "settle"
+            && job.match_id == match_id
+            && (job.tx_hash.trim().is_empty() || job.tx_hash == failed_hash)
+    }) {
+        job.tx_hash = failed_hash.to_string();
+        job.status = "done".into();
+    }
+    if !paid {
+        sync_vault_jobs(state);
+    }
+}
+
 pub fn sync_vault_jobs(state: &mut ArenaState) {
     reopen_unpaid_settle_jobs(state);
     correct_open_results(state);
@@ -1169,6 +1355,136 @@ mod tests {
             &already,
             view["last_sync_seq"].as_u64().unwrap() + 1
         ));
+    }
+
+    #[test]
+    fn a_final_failed_hash_with_no_pot_closes_once_and_a_success_stays_closed() {
+        let account = "fe2virecdb1e91.testnet";
+        let hash = "2WgmMQApKkQxtxrjtyvG27Et5LkvtyeFCkZozFZVVSC5";
+        let failed = failed_settle_body(account);
+        assert_eq!(classify_tx_settlement(&failed), TxSettlement::FailedUnpaid);
+        let mut paid = failed.clone();
+        paid["receipts"][1]["predecessor_id"] = serde_json::json!("factory.fe2vidisp7a3c.testnet");
+        paid["receipts"][1]["receiver_id"] = serde_json::json!("ann.testnet");
+        assert_eq!(classify_tx_settlement(&paid), TxSettlement::FailedPaid);
+        let mut pending = failed.clone();
+        pending["final_execution_status"] = serde_json::json!("EXECUTED");
+        assert_eq!(classify_tx_settlement(&pending), TxSettlement::Pending);
+        let mut success = failed.clone();
+        success["status"] = serde_json::json!({"SuccessValue": ""});
+        assert_eq!(classify_tx_settlement(&success), TxSettlement::Success);
+
+        let mut win = VaultMatch::start(&["juno".into(), "rook".into()]);
+        win.ended = true;
+        for seat in &mut win.seats {
+            seat.points = if seat.agent_id == "juno" { 5 } else { 3 };
+        }
+        win.seal_vault_result(
+            "mt_2b2d",
+            &[
+                ("juno".into(), 5, Some(account.into())),
+                ("rook".into(), 3, Some(account.into())),
+            ],
+        );
+        {
+            let pot = win.pot.as_mut().unwrap();
+            pot.seat_links = vec![
+                link("juno", "gen_007", "seat-at-match-end"),
+                link("rook", "gen_008", "seat-at-match-end"),
+            ];
+        }
+        let mut state = ArenaState::default();
+        state.book.players = vec![player("juno", account), player("rook", account)];
+        state.book.matches = vec![finished("mt_2b2d", win)];
+        state.chain_jobs = vec![settle_job("mt_2b2d", "failed", 5, hash)];
+        assert_eq!(settle_hash_to_confirm(&state), Some(0));
+        sync_vault_jobs(&mut state);
+        assert_eq!(state.chain_jobs[0].tx_hash, hash);
+        assert_eq!(state.chain_jobs[0].status, "failed");
+        close_unpaid_failed_settle(&mut state, "mt_2b2d", hash);
+        close_unpaid_failed_settle(&mut state, "mt_2b2d", hash);
+        let pot = state.book.matches[0]
+            .vault
+            .as_ref()
+            .unwrap()
+            .pot
+            .as_ref()
+            .unwrap();
+        assert!(pot.no_pot);
+        assert!(!pot.settled && !pot.pays);
+        assert!(pot.tx_hash.is_empty());
+        assert_eq!(state.chain_jobs[0].status, "done");
+        assert_eq!(state.chain_jobs[0].tx_hash, hash);
+        assert!(settle_hash_to_confirm(&state).is_none());
+        let careers: Vec<_> = state
+            .chain_jobs
+            .iter()
+            .filter(|job| job.kind == "career")
+            .collect();
+        assert_eq!(careers.len(), 2);
+        assert_eq!(
+            careers
+                .iter()
+                .find(|job| job.token_id == "gen_007")
+                .unwrap()
+                .args["seatResult"],
+            "win"
+        );
+        assert_eq!(
+            careers
+                .iter()
+                .find(|job| job.token_id == "gen_008")
+                .unwrap()
+                .args["seatResult"],
+            "loss"
+        );
+        let view = serde_json::json!({
+            "last_sync_seq": 1,
+            "career": {"xp": 3, "wins": 1, "losses": 0, "draws": 0, "matches": 1, "heists": 0, "seasons": 0, "season_titles": 0, "best_rank": 0, "rank": 0, "rank_epoch": 0}
+        });
+        assert!(career_already_applied(&view, 1));
+
+        let mut again = state.chain_jobs[0].clone();
+        again.status = "failed".into();
+        again.tx_hash = hash.into();
+        release_failed_settle_once(&mut again);
+        assert!(again.tx_hash.is_empty());
+        assert_eq!(again.status, "pending");
+        assert_eq!(again.args["settleRetry"], 1);
+        assert_eq!(again.args["failedHash"], hash);
+        again.tx_hash = "NextHashNextHashNextHashNextHashNext".into();
+        release_failed_settle_once(&mut again);
+        assert_eq!(again.status, "done");
+        assert_eq!(again.tx_hash, "NextHashNextHashNextHashNextHashNext");
+
+        let mut kept = settle_job("mt_2b2d", "failed", 1, hash);
+        keep_failed_hash(&mut kept);
+        assert_eq!(kept.status, "done");
+        assert_eq!(kept.tx_hash, hash);
+    }
+
+    fn failed_settle_body(signer: &str) -> serde_json::Value {
+        serde_json::json!({
+            "final_execution_status": "FINAL",
+            "status": {"Failure": {"ActionError": {}}},
+            "transaction": {"signer_id": signer, "receiver_id": "factory.fe2vidisp7a3c.testnet"},
+            "receipts": [
+                {
+                    "predecessor_id": signer,
+                    "receiver_id": "factory.fe2vidisp7a3c.testnet",
+                    "receipt": {"Action": {"actions": [{"FunctionCall": {"method_name": "settle_vault"}}]}}
+                },
+                {
+                    "predecessor_id": "system",
+                    "receiver_id": signer,
+                    "receipt": {"Action": {"actions": [{"Transfer": {"deposit": "1"}}]}}
+                }
+            ],
+            "receipts_outcome": [
+                {"outcome": {"status": {"Failure": {}}}},
+                {"outcome": {"status": {"SuccessValue": ""}}}
+            ]
+        })
     }
 
     fn settle_job(match_id: &str, status: &str, attempts: u32, tx_hash: &str) -> ChainJob {
