@@ -67,6 +67,8 @@ All of these are testnet. `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and 
 
 `GET /v1/market/listings` reads both markets. `/market` shows a price and Buy only when an ask was returned.
 
+Passport art is on the token. `nft_token` `metadata.media` is a `data:image/svg+xml;base64,…` image derived from the token id, and `media_hash` is the base64 sha256 of those bytes. `extra.image` is that same data URI. The site still draws the richer portrait when the chain has not returned one.
+
 ## Architecture
 
 The API is a Rust Cloudflare Worker (`workers/api`, crate `fe2vi-api`). One Durable Object, `SpectatorFeed`, holds the arena. A cron every five minutes sweeps settlement and career jobs. The site is a Next.js app on OpenNext (`apps/web`). The worker signs testnet calls only. It refuses a mainnet RPC and a mainnet Intents host.

@@ -23,6 +23,9 @@ const DEFAULT_BASE_URI: &str = "https://api.fe2vi.space/v1/passport/nft/";
 const MAX_UPDATE_BATCH: usize = 50;
 const MAX_MINT_BATCH: usize = 25;
 
+mod media;
+pub use media::{b64, token_media};
+
 #[derive(Clone, BorshSerialize, BorshDeserialize, Serialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Career {
@@ -143,6 +146,7 @@ pub struct PassportView {
     pub tier: String,
     pub last_sync_seq: u64,
     pub locked_until: u64,
+    pub media: String,
 }
 
 #[derive(Serialize)]
@@ -438,6 +442,7 @@ impl Passport {
 
     pub fn passport(&self, token_id: String) -> PassportView {
         let token = self.token_or_panic(&token_id);
+        let media = media_for(&token_id);
         PassportView {
             token_id,
             owner_id: token.owner_id.clone(),
@@ -448,6 +453,29 @@ impl Passport {
             career: token.career.clone(),
             last_sync_seq: token.last_sync_seq,
             locked_until: token.locked_until,
+            media,
+        }
+    }
+
+    /// Store the canonical SVG for an existing token. A recorder pays the
+    /// storage growth. Extra deposit is returned. The hash is sha256 of the
+    /// media string, base64, as NEP-177 requires.
+    #[payable]
+    pub fn set_token_media(&mut self, token_id: String, media: String, media_hash: Base64VecU8) {
+        self.only_recorder();
+        let _ = self.token_or_panic(&token_id);
+        let canonical = token_media(&token_id);
+        require!(media == canonical, "media");
+        require!(env::sha256(media.as_bytes()) == media_hash.0, "media hash");
+        let before = env::storage_usage();
+        store_media(&token_id, &media);
+        let grew = env::storage_usage().saturating_sub(before);
+        let cost = u128::from(grew) * env::storage_byte_cost().as_yoctonear();
+        let attached = env::attached_deposit().as_yoctonear();
+        require!(attached >= cost, "storage");
+        let refund = attached - cost;
+        if refund > 0 {
+            Promise::new(env::predecessor_account_id()).transfer(NearToken::from_yoctonear(refund));
         }
     }
 
@@ -567,7 +595,7 @@ impl Passport {
 
     pub fn token_reference(&self, token_id: String) -> String {
         let token = self.token_or_panic(&token_id);
-        reference_json(&token_id, &token)
+        reference_json(&token_id, &token, &media_for(&token_id))
     }
 
     pub fn nft_payout(&self, token_id: String, balance: U128, max_len_payout: u32) -> Payout {
@@ -811,6 +839,7 @@ impl Passport {
             locked_until: 0,
         };
         self.tokens.insert(token_id.clone(), token);
+        store_media(&token_id, &token_media(&token_id));
         if let Some(agent_id) = &agent_id {
             self.agent_to_token
                 .insert(agent_id.clone(), token_id.clone());
@@ -927,15 +956,16 @@ impl Passport {
     }
 
     fn metadata_for(&self, token_id: &str, token: &PassportToken) -> TokenMetadata {
-        let document = reference_json(token_id, token);
+        let media = media_for(token_id);
+        let document = reference_json(token_id, token, &media);
         TokenMetadata {
             title: Some(format!("fe2VI passport {token_id}")),
             description: Some(
                 "Tradable fe2VI career passport. Owning it does not transfer the agent credential."
                     .into(),
             ),
-            media: Some(format!("{token_id}.png")),
-            media_hash: None,
+            media: Some(media.clone()),
+            media_hash: Some(Base64VecU8(env::sha256(media.as_bytes()))),
             copies: Some(1),
             issued_at: None,
             expires_at: None,
@@ -982,7 +1012,21 @@ fn tier_for(xp: u64) -> &'static str {
     }
 }
 
-fn reference_json(token_id: &str, token: &PassportToken) -> String {
+fn store_media(token_id: &str, media: &str) {
+    let mut store = LookupMap::<String, String>::new(b"m");
+    store.insert(token_id.to_string(), media.to_string());
+}
+
+fn stored_media(token_id: &str) -> Option<String> {
+    let store = LookupMap::<String, String>::new(b"m");
+    store.get(&token_id.to_string()).cloned()
+}
+
+fn media_for(token_id: &str) -> String {
+    stored_media(token_id).unwrap_or_else(|| token_media(token_id))
+}
+
+fn reference_json(token_id: &str, token: &PassportToken, image: &str) -> String {
     let career = &token.career;
     let tier = tier_for(career.xp);
     let agent = token.bound_agent.as_deref().unwrap_or("unbound");
@@ -999,7 +1043,7 @@ fn reference_json(token_id: &str, token: &PassportToken) -> String {
     near_sdk::serde_json::to_string(&near_sdk::serde_json::json!({
         "name": format!("fe2VI passport {token_id}"),
         "description": "Tradable fe2VI career passport. The agent credential never moves.",
-        "image": format!("{token_id}.png"),
+        "image": image,
         "external_url": format!("https://fe2vi.space/passport/{token_id}"),
         "agent": token.bound_agent,
         "owner": token.owner_id,
@@ -1133,6 +1177,7 @@ mod tests {
     use super::*;
     use near_sdk::test_utils::VMContextBuilder;
     use near_sdk::{testing_env, Gas, NearToken};
+    use sha2::Digest;
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     fn context(predecessor: &str, signer: &str, deposit: u128, unix: u64) {
@@ -1507,7 +1552,17 @@ mod tests {
         career.rank_epoch = 3;
         passport.sync_career(token.clone(), career);
         let token_view = passport.nft_token(token.clone()).unwrap();
-        assert_eq!(token_view.metadata.media.as_deref(), Some("p_alpha.png"));
+        let media = token_media("p_alpha");
+        assert_eq!(token_view.metadata.media.as_deref(), Some(media.as_str()));
+        assert!(media.starts_with("data:image/svg+xml;base64,"));
+        assert_eq!(
+            token_view
+                .metadata
+                .media_hash
+                .as_ref()
+                .map(|hash| hash.0.as_slice()),
+            Some(env::sha256(media.as_bytes()).as_slice())
+        );
         assert_eq!(
             token_view.metadata.reference.as_deref(),
             Some("p_alpha.json")
@@ -1516,6 +1571,93 @@ mod tests {
         assert!(document.contains("\"tier\":\"Platinum\""));
         assert!(document.contains("\"agent\":\"agent_alpha\""));
         assert!(document.contains("\"xp\":150"));
-        assert_eq!(passport.passport(token).tier, "Platinum");
+        assert!(document.contains(&media));
+        let view = passport.passport(token);
+        assert_eq!(view.tier, "Platinum");
+        assert_eq!(view.media, media);
+    }
+
+    #[test]
+    fn recorder_stores_the_canonical_svg_and_checks_the_hash() {
+        let (mut passport, token) = minted();
+        let media = token_media(&token);
+        let digest = env::sha256(media.as_bytes());
+        let hash = Base64VecU8(digest.clone());
+
+        context("owner.fe2vi.testnet", "owner.fe2vi.testnet", ONE_NEAR, 8);
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_token_media(token.clone(), media.clone(), hash.clone());
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("recorder"));
+
+        context(
+            "recorder.fe2vi.testnet",
+            "recorder.fe2vi.testnet",
+            ONE_NEAR,
+            8,
+        );
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_token_media(token.clone(), media.clone(), Base64VecU8(vec![0; 32]));
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("media hash"));
+
+        let other = token_media("gen_001");
+        context(
+            "recorder.fe2vi.testnet",
+            "recorder.fe2vi.testnet",
+            ONE_NEAR,
+            8,
+        );
+        let err = catch_unwind(AssertUnwindSafe(|| {
+            passport.set_token_media(token.clone(), other, Base64VecU8(vec![1; 32]));
+        }))
+        .unwrap_err();
+        assert!(panic_text(err).contains("media"));
+
+        context(
+            "recorder.fe2vi.testnet",
+            "recorder.fe2vi.testnet",
+            ONE_NEAR,
+            8,
+        );
+        passport.set_token_media(token.clone(), media.clone(), hash);
+        let view = passport.nft_token(token).unwrap();
+        assert_eq!(view.metadata.media.as_deref(), Some(media.as_str()));
+        assert_eq!(
+            view.metadata
+                .media_hash
+                .as_ref()
+                .map(|value| value.0.as_slice()),
+            Some(digest.as_slice())
+        );
+    }
+
+    #[test]
+    fn canonical_media_storage_stays_small() {
+        let _ = minted();
+        assert_eq!(
+            env::storage_byte_cost().as_yoctonear(),
+            10_000_000_000_000_000_000
+        );
+        let mut ids: Vec<String> = (1..=50).map(|n| format!("gen_{n:03}")).collect();
+        ids.push("disp_001".into());
+        let mut total = 0u64;
+        let mut widest = 0u64;
+        for token_id in &ids {
+            let media = token_media(token_id);
+            assert!(media.starts_with("data:image/svg+xml;base64,"));
+            assert!(media.len() < 900, "{token_id} {}", media.len());
+            let digest = env::sha256(media.as_bytes());
+            assert_eq!(digest, sha2::Sha256::digest(media.as_bytes()).as_slice());
+            // New trie record: key + value + 40. Key is prefix `m` plus borsh(token id).
+            // Value is borsh(media). Replacing a value of the same length adds nothing.
+            let bytes = (1 + 4 + token_id.len() + 4 + media.len() + 40) as u64;
+            total += bytes;
+            widest = widest.max(bytes);
+        }
+        assert_eq!(widest, 874, "widest {widest}");
+        assert_eq!(total, 39167, "total {total}");
     }
 }
