@@ -78,3 +78,7 @@ The API is a Rust Cloudflare Worker (`workers/api`, crate `fe2vi-api`). One Dura
 From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs` in `apps/web`, and `npm run check:type`. A pass ends with `verify: ok`. The API library line is `test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 19`, `# pass 19`, and `# fail 0`. The typecheck prints `type scale ok`.
 
 There is no root `package.json`. OpenAPI is `GET /openapi.json`.
+
+## License
+
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
