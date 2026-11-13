@@ -20,13 +20,19 @@ The worker that answered was build `c1325f43ef6dd20974e7b0088c6d40ffde59b19d` (c
 curl -sS https://api.fe2vi.space/health
 ```
 
-HTTP 200, at 2026-11-13T19:13:58Z:
+HTTP 200. On 2026-11-13T19:13:58Z, before `recorderPassport` and `recorderMarket` were added, the body was:
 
 ```json
 {"arena":"off-chain","build":"c1325f43ef6dd20974e7b0088c6d40ffde59b19d","escrow":"heist.fe2vidisp7a3c.testnet","market":"market.fe2vidisp7a3c.testnet","network":"testnet","ok":true,"passport":"passport.fe2vidisp7a3c.testnet"}
 ```
 
-`network` is `testnet`. This body names the disposable passport, market, and escrow. The recorder passport and its market are the accounts in steps 3 and 4.
+This build adds those two fields from `FE2VI_PASSPORT_RECORDER_ID` and `FE2VI_RECORDER_MARKET_ID`. Existing keys stay. `build` is `FE2VI_GIT_SHA` from the worker build (`unset` when that variable was absent). With the vars in `workers/api/wrangler.toml`, the body is:
+
+```json
+{"arena":"off-chain","build":"<FE2VI_GIT_SHA>","escrow":"heist.fe2vidisp7a3c.testnet","market":"market.fe2vidisp7a3c.testnet","network":"testnet","ok":true,"passport":"passport.fe2vidisp7a3c.testnet","recorderMarket":"market.fe2virecdb1e91.testnet","recorderPassport":"passport.fe2virecdb1e91.testnet"}
+```
+
+`network` is `testnet`. `passport`, `market`, and `escrow` are the disposable accounts. `recorderPassport` and `recorderMarket` are the recorder accounts used by the listings and `nft_token` checks below.
 
 ### 2. Vault window
 
@@ -234,7 +240,7 @@ Run on 2026-11-13. Exit 0. The lines that the target names:
 rustc 1.93.0 (254b59607 2026-01-19)
 cargo 1.93.0 (083ac5135 2025-12-15)
 v22.23.4
-test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s
+test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
 # tests 19
 # pass 19
 # fail 0
@@ -251,7 +257,7 @@ playbook rec_001 1
 verify: ok
 ```
 
-The `104 passed` line is `cargo test -p fe2vi-api --lib`. The `# tests 19` block is `node --test lib/*.test.mjs` in `apps/web`. `playbook rec_001 1` is the recorder view `playbook_latest` for token `rec_001`: the Makefile accepts it only when `version` is 1 and the hash is `d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418`.
+The `105 passed` line is `cargo test -p fe2vi-api --lib` after the health test for `recorderPassport` and `recorderMarket`. The `# tests 19` block is `node --test lib/*.test.mjs` in `apps/web`. `playbook rec_001 1` is the recorder view `playbook_latest` for token `rec_001`: the Makefile accepts it only when `version` is 1 and the hash is `d2b70aca3983de9650b54847497d1c7e28d6149c1d738dc25ab3bf672ab2f418`.
 
 ## Play: run your own agent
 
@@ -526,7 +532,7 @@ All of these are testnet. `passport.fe2vi.testnet`, `market.fe2vi.testnet`, and 
 | `factory.fe2vidisp7a3c.testnet` | Owner-only `open_game` and `settle_vault`. |
 | `heist.fe2vidisp7a3c.testnet` | Pot escrow. |
 
-`GET /health` names the disposable passport, market, and escrow. `GET /v1/market/listings` on 2026-11-13 had top-level `contract` `market.fe2vidisp7a3c.testnet` and 50 rows whose `marketContract` was `market.fe2virecdb1e91.testnet`. `/market` shows a price and Buy only when an ask was returned.
+`GET /health` names the disposable passport, market, and escrow, plus `recorderPassport` and `recorderMarket`. `GET /v1/market/listings` on 2026-11-13 had top-level `contract` `market.fe2vidisp7a3c.testnet` and 50 rows whose `marketContract` was `market.fe2virecdb1e91.testnet`. `/market` shows a price and Buy only when an ask was returned.
 
 Passport art on the token is a still of that passport's 3D portrait. When a recorder has stored one, `nft_token` `metadata.media` is a `data:image/webp;base64,…` image and `media_hash` is the base64 sha256 of the decoded image bytes. `extra.image` is that same data URI. A token with no stored still keeps `metadata.media` as `{token_id}.png` and an empty `media_hash`, resolved through the contract `base_uri`. The site draws the live portrait and can fall back to a stored still.
 
@@ -536,9 +542,9 @@ The API is a Rust Cloudflare Worker (`workers/api`, crate `fe2vi-api`). One Dura
 
 ## Tests
 
-From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs` in `apps/web`, and `npm run check:type`. A pass ends with `verify: ok`. The API library line is `test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 19`, `# pass 19`, and `# fail 0`. The typecheck prints `type scale ok`.
+From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --workspace`, `cargo test -p fe2vi-api --lib`, `node --test lib/*.test.mjs` in `apps/web`, and `npm run check:type`. A pass ends with `verify: ok`. The API library line is `test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`. The web tests print `# tests 19`, `# pass 19`, and `# fail 0`. The typecheck prints `type scale ok`.
 
-The 2026-11-13 run printed `rustc 1.93.0 (254b59607 2026-01-19)`, `cargo 1.93.0 (083ac5135 2025-12-15)`, and node `v22.23.4`. The `fe2vi-api` line finished in 1.16s. The live-ping tail was `health testnet c1325f43ef6dd20974e7b0088c6d40ffde59b19d`, the five disposable contracts, `passport disp_001 seq 0`, `contract passport.fe2virecdb1e91.testnet`, `playbook rec_001 1`, then `verify: ok`.
+The 2026-11-13 run printed `rustc 1.93.0 (254b59607 2026-01-19)`, `cargo 1.93.0 (083ac5135 2025-12-15)`, and node `v22.23.4`. A later `cargo test -p fe2vi-api --lib` finished in 0.68s with 105 passed. The live-ping tail was `health testnet c1325f43ef6dd20974e7b0088c6d40ffde59b19d`, the five disposable contracts, `passport disp_001 seq 0`, `contract passport.fe2virecdb1e91.testnet`, `playbook rec_001 1`, then `verify: ok`.
 
 There is no root `package.json`. OpenAPI is `GET /openapi.json`.
 
