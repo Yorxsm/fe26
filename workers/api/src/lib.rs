@@ -211,6 +211,8 @@ mod edge {
             arena.passport_contract = env_string(&self.env, "FE2VI_PASSPORT_ID");
             arena.market_contract = env_string(&self.env, "FE2VI_PASSPORT_MARKET_ID");
             arena.escrow_contract = env_string(&self.env, "FE2VI_ESCROW_ID");
+            arena.recorder_passport = env_string(&self.env, "FE2VI_PASSPORT_RECORDER_ID");
+            arena.recorder_market = env_string(&self.env, "FE2VI_RECORDER_MARKET_ID");
             let before_book = {
                 let sql = self.state.storage().sql();
                 attach_player_book(&sql, &mut arena)?

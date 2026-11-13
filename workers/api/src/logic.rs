@@ -59,6 +59,12 @@ pub struct ArenaState {
     /// Worker var `FE2VI_ESCROW_ID`.
     #[serde(skip)]
     pub escrow_contract: String,
+    /// Worker var `FE2VI_PASSPORT_RECORDER_ID`.
+    #[serde(skip)]
+    pub recorder_passport: String,
+    /// Worker var `FE2VI_RECORDER_MARKET_ID`.
+    #[serde(skip)]
+    pub recorder_market: String,
     /// Persisted settle, career, and playbook jobs. One row per match step.
     #[serde(default)]
     pub chain_jobs: Vec<crate::auto_settle::ChainJob>,
@@ -87,6 +93,8 @@ impl Default for ArenaState {
             passport_contract: String::new(),
             market_contract: String::new(),
             escrow_contract: String::new(),
+            recorder_passport: String::new(),
+            recorder_market: String::new(),
             chain_jobs: Vec::new(),
             register_nonces: Vec::new(),
         }
@@ -221,6 +229,8 @@ pub fn dispatch(state: &mut ArenaState, incoming: &Incoming<'_>) -> Outcome {
                     "passport": state.passport_contract,
                     "market": state.market_contract,
                     "escrow": state.escrow_contract,
+                    "recorderPassport": state.recorder_passport,
+                    "recorderMarket": state.recorder_market,
                 }),
                 false,
                 None,
@@ -797,6 +807,43 @@ mod tests {
             } => {
                 assert_eq!(status, 308);
                 assert_eq!(location.as_deref(), Some("/v1/games/trading-cup?watch=1"));
+            }
+            Outcome::Websocket { .. } => panic!("expected http"),
+        }
+    }
+
+    #[test]
+    fn health_reports_recorder_contracts_beside_the_disposable_ones() {
+        let mut state = ArenaState {
+            chain_network: "testnet".into(),
+            passport_contract: "passport.fe2vidisp7a3c.testnet".into(),
+            market_contract: "market.fe2vidisp7a3c.testnet".into(),
+            escrow_contract: "heist.fe2vidisp7a3c.testnet".into(),
+            recorder_passport: "passport.fe2virecdb1e91.testnet".into(),
+            recorder_market: "market.fe2virecdb1e91.testnet".into(),
+            ..ArenaState::default()
+        };
+        let incoming = Incoming {
+            method: "GET",
+            path: "/health",
+            body: "",
+            authorization: None,
+            ingest_token: None,
+            policy_check: None,
+        };
+        match dispatch(&mut state, &incoming) {
+            Outcome::Http { status, body, .. } => {
+                assert_eq!(status, 200);
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(json["ok"], true);
+                assert_eq!(json["network"], "testnet");
+                assert_eq!(json["arena"], "off-chain");
+                assert_eq!(json["passport"], "passport.fe2vidisp7a3c.testnet");
+                assert_eq!(json["market"], "market.fe2vidisp7a3c.testnet");
+                assert_eq!(json["escrow"], "heist.fe2vidisp7a3c.testnet");
+                assert_eq!(json["recorderPassport"], "passport.fe2virecdb1e91.testnet");
+                assert_eq!(json["recorderMarket"], "market.fe2virecdb1e91.testnet");
+                assert!(json["build"].is_string());
             }
             Outcome::Websocket { .. } => panic!("expected http"),
         }

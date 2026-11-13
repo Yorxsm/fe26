@@ -9,44 +9,54 @@ const origin = (process.argv[2] ?? "http://127.0.0.1:3210").replace(/\/$/, "");
 const port = 9355;
 const chrome = process.env.CHROME_PATH || "google-chrome";
 
-const browser = spawn(
-  chrome,
-  [
+function chromeArgs(profile) {
+  return [
     "--headless=new",
     "--use-gl=angle",
     "--use-angle=swiftshader",
     "--enable-unsafe-swiftshader",
     `--remote-debugging-port=${port}`,
-    "--user-data-dir=/tmp/fe2vi-room-check",
+    "--remote-allow-origins=*",
+    `--user-data-dir=${profile}`,
     "--no-first-run",
     "--disable-gpu-sandbox",
     "--no-sandbox",
     "about:blank",
-  ],
-  { stdio: "ignore" },
-);
+  ];
+}
+
+async function launchChrome(attemptNo) {
+  const child = spawn(chrome, chromeArgs(`/tmp/fe2vi-room-check-${attemptNo}`), {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+    if (stderr.length > 4000) stderr = stderr.slice(-4000);
+  });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (child.exitCode !== null) break;
+    try {
+      const probe = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (probe.ok) return child;
+    } catch {
+      // chrome is still booting
+    }
+    await delay(300);
+  }
+  child.kill("SIGTERM");
+  console.error(`Chrome did not open a debugging port (try ${attemptNo})`);
+  const tail = stderr.trim();
+  if (tail) console.error(tail.slice(-1500));
+  await delay(500);
+  return null;
+}
+
+const browser = (await launchChrome(1)) ?? (await launchChrome(2));
+if (!browser) process.exit(1);
 
 function stop() {
   browser.kill("SIGTERM");
-}
-
-let up = false;
-for (let attempt = 0; attempt < 100; attempt += 1) {
-  try {
-    const probe = await fetch(`http://127.0.0.1:${port}/json/version`);
-    if (probe.ok) {
-      up = true;
-      break;
-    }
-  } catch {
-    // chrome is still booting
-  }
-  await delay(300);
-}
-if (!up) {
-  stop();
-  console.error("Chrome did not open a debugging port");
-  process.exit(1);
 }
 
 const created = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" });
