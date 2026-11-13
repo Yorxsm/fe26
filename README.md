@@ -79,6 +79,10 @@ From the repo root, `make verify` checks `rustc` 1.93.0, runs `cargo test --work
 
 There is no root `package.json`. OpenAPI is `GET /openapi.json`.
 
+## Also entered at NEAR HACKATHON
+
+The same builder also entered [Uprail](https://uprail.world) ([https://github.com/ij03l/uprail](https://github.com/ij03l/uprail)), an independent project. This disclosure satisfies rule Q-015.
+
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
